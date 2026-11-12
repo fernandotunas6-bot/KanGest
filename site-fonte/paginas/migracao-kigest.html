@@ -1,0 +1,116 @@
+<!--{"titulo": "Migração do KIGEST para o KanGest", "descricao": "Passe os artigos, clientes, stock, documentos, dívidas, tesouraria e salários do KIGEST GC e POS para o KanGest, com conferência dos totais no fim.", "menu": "migracao", "imagem": "assets/ecras/importar.jpg"}-->
+<section class="heroi heroi-pagina com-imagem">
+  <div class="cont">
+    <div>
+      <nav class="migalhas" aria-label="Caminho"><a href="index.html">Início</a><span>/</span><a href="kangest.html">KanGest</a><span>/</span><span>Migração do KIGEST</span></nav>
+      <span class="olho">Migração</span>
+      <h1>Do KIGEST para o KanGest, sem perder nada</h1>
+      <p class="sub">Os artigos com os preços, os clientes, o stock, o histórico de documentos, as dívidas e a tesouraria passam para o KanGest. No fim, comparamos os totais dos dois sistemas.</p>
+      <div class="accoes">
+        <a class="btn btn-laranja" href="contacto.html?assunto=Migração do KIGEST">Pedir a migração</a>
+        <a class="btn btn-vidro" href="baixar.html">Baixar o KanGest</a>
+      </div>
+    </div>
+    <div class="ilustra-heroi"><img src="assets/ecras/importar.jpg" alt="Ecrã de importação de dados do KIGEST no KanGest" width="1440" height="900"></div>
+  </div>
+</section>
+
+<section>
+  <div class="cont">
+    <div class="cabeca">
+      <span class="olho">Como funciona</span>
+      <h2>Quatro passos, do KIGEST ao KanGest</h2>
+      <p class="sub">O KIGEST não é alterado em nenhum momento: a exportação só lê os dados.</p>
+    </div>
+    <ol class="passos horizontal">
+      <li><div><h3>Exportar no computador do KIGEST</h3><p>Com o GC e o POS fechados, corre-se o ExportarKIGEST. Ele lê a ligação do próprio KIGEST e grava um ficheiro <code>.kigest</code> com os dados, sem senhas.</p></div></li>
+      <li><div><h3>Levar o ficheiro</h3><p>O ficheiro vai para o computador do KanGest numa pen, pela rede ou por email. Também é possível ligar directamente ao SQL Server do KIGEST.</p></div></li>
+      <li><div><h3>Analisar e simular</h3><p>Em Sistema → Importar dados do KIGEST, o KanGest mostra o que vai importar e faz uma simulação sem gravar nada.</p></div></li>
+      <li><div><h3>Importar e conferir</h3><p>Os dados entram e o KanGest compara os totais com os do KIGEST: artigos, stock, clientes, documentos, dívidas e saldo de tesouraria.</p></div></li>
+    </ol>
+  </div>
+</section>
+
+<section class="seccao-branca">
+  <div class="cont">
+    <div class="cabeca">
+      <span class="olho">O que passa</span>
+      <h2>Os dados que vêm do KIGEST</h2>
+    </div>
+    <div class="tabela-envolta">
+      <table>
+        <thead><tr><th>Dados</th><th>O que fica no KanGest</th></tr></thead>
+        <tbody>
+          <tr><td>Empresa</td><td>Nome, NIF, morada, contactos, bancos e IBAN, logótipo e o rodapé dos documentos</td></tr>
+          <tr><td>Artigos</td><td>Referência, código de barras, os quatro preços, custo, IVA e isenção, mínimos e promoções</td></tr>
+          <tr><td>Stock</td><td>Existências por armazém, custo médio e datas da última entrada e saída</td></tr>
+          <tr><td>Clientes e fornecedores</td><td>Fichas completas, com os códigos do KIGEST (números ou texto)</td></tr>
+          <tr><td>Documentos</td><td>Histórico com números, datas, linhas, pagamentos e as assinaturas originais</td></tr>
+          <tr><td>Conta corrente</td><td>O que cada cliente deve, factura a factura</td></tr>
+          <tr><td>Tesouraria</td><td>Contas, movimentos, centros de custo e fechos de caixa</td></tr>
+          <tr><td>Utilizadores</td><td>Contas com senha provisória, a mudar no primeiro acesso</td></tr>
+          <tr><td>Recursos humanos</td><td>Funcionários, agregado familiar, salários e férias</td></tr>
+          <tr><td>Outros</td><td>Lotes e validades, oficina (viaturas e ordens de serviço), proformas, moedas e custos de importação</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="cont dividido">
+    <div>
+      <span class="olho">Conferência</span>
+      <h2 style="margin:14px 0">No fim, os números têm de bater</h2>
+      <p class="texto">Depois de importar, o KanGest mostra lado a lado os totais do KIGEST e os que ficaram no KanGest. Se alguma coisa não bater, aparece logo assinalada.</p>
+    </div>
+    <div class="tabela-envolta">
+      <table>
+        <thead><tr><th>Conferência</th><th>KIGEST × KanGest</th></tr></thead>
+        <tbody>
+          <tr><td>Artigos</td><td><span class="ok">Igual</span></td></tr>
+          <tr><td>Quantidade em stock</td><td><span class="ok">Igual</span></td></tr>
+          <tr><td>Clientes</td><td><span class="ok">Igual</span></td></tr>
+          <tr><td>Documentos e linhas</td><td><span class="ok">Igual</span></td></tr>
+          <tr><td>Valores em dívida</td><td><span class="ok">Igual</span></td></tr>
+          <tr><td>Saldo de tesouraria</td><td><span class="ok">Igual</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="seccao-branca">
+  <div class="cont">
+    <div class="cabeca"><span class="olho">Regras</span><h2>Para a migração ser segura</h2></div>
+    <div class="grade-3">
+      <div class="recurso"><div class="ico">{{icone:documento}}</div><h3>O histórico fica intacto</h3><p>Os documentos do KIGEST ficam como histórico, só de leitura, com os números e as assinaturas originais. Os novos documentos usam séries próprias, para não haver números repetidos.</p></div>
+      <div class="recurso"><div class="ico">{{icone:chave}}</div><h3>Sem senhas no ficheiro</h3><p>A exportação não leva as senhas do KIGEST. Cada utilizador recebe uma senha provisória e escolhe a sua no primeiro acesso.</p></div>
+      <div class="recurso"><div class="ico">{{icone:trocar}}</div><h3>Pode repetir</h3><p>Importar outra vez não duplica artigos, clientes nem documentos, e acerta o que tiver mudado no KIGEST entretanto.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="estreito">
+    <div class="cabeca centro"><span class="olho">Perguntas frequentes</span><h2>Sobre a migração</h2></div>
+    <div class="faq">
+      <details><summary>Preciso de parar de vender durante a migração?</summary><p>Só durante a exportação, com o KIGEST GC e POS fechados no computador onde estão os dados. Depois pode continuar a vender no KIGEST até ao dia da mudança e repetir a importação nesse dia.</p></details>
+      <details><summary>O KIGEST fica igual?</summary><p>Sim. A exportação só lê a base de dados do KIGEST; não altera nem apaga nada.</p></details>
+      <details><summary>E as facturas antigas, continuo a poder imprimi-las?</summary><p>Sim. O histórico importado imprime 2.ªs vias com os dados e a assinatura originais e com a referência ao certificado do programa anterior.</p></details>
+      <details><summary>Quem faz a migração?</summary><p>Pode fazê-la sozinho seguindo os passos acima, ou podemos fazê-la consigo, incluindo a conferência e a formação da equipa.</p></details>
+    </div>
+  </div>
+</section>
+
+<section class="seccao-creme">
+  <div class="cont">
+    <div class="faixa">
+      <div>
+        <h2>Vamos passar a sua loja para o KanGest?</h2>
+        <p class="sub">Tratamos da exportação, da importação e da conferência, e deixamos a equipa a facturar no KanGest.</p>
+      </div>
+      <div class="accoes"><a class="btn btn-laranja" href="contacto.html?assunto=Migração do KIGEST">Pedir a migração</a><a class="btn btn-vidro" href="kangest.html">Conhecer o KanGest</a></div>
+    </div>
+  </div>
+</section>

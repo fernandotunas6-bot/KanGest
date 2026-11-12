@@ -1,0 +1,92 @@
+<!--{"titulo": "Baixar o KanGest para Windows e macOS", "descricao": "Baixe o KanGest {{config.versao}} para Windows 10/11 ou macOS (Apple Silicon e Intel), veja como instalar e os primeiros passos.", "menu": "", "imagem": "assets/ecras/painel.jpg"}-->
+<section class="heroi heroi-pagina">
+  <div class="cont">
+    <nav class="migalhas" aria-label="Caminho"><a href="index.html">Início</a><span>/</span><a href="kangest.html">KanGest</a><span>/</span><span>Baixar</span></nav>
+    <span class="olho">KanGest {{config.versao}}</span>
+    <h1>Baixar o KanGest</h1>
+    <p class="sub">Escolha o seu sistema. O instalador tem menos de 5 MB e a instalação leva menos de um minuto.</p>
+  </div>
+</section>
+
+<section>
+  <div class="cont">
+    <div class="downloads">
+      <a class="download" href="{{config.downloads.windows}}" data-download="windows">
+        <span class="so">{{icone:windows}}</span><b>Windows</b><small>Windows 10 e 11 · 64 bits · {{config.downloads.tamanhoWindows}}</small><span class="seta">Baixar o instalador .exe {{icone:baixar}}</span>
+      </a>
+      <a class="download" href="{{config.downloads.macArm}}" data-download="macArm">
+        <span class="so">{{icone:apple}}</span><b>Mac com Apple Silicon</b><small>M1, M2, M3, M4 · macOS 10.15+ · {{config.downloads.tamanhoMacArm}}</small><span class="seta">Baixar o .dmg {{icone:baixar}}</span>
+      </a>
+      <a class="download" href="{{config.downloads.macIntel}}" data-download="macIntel">
+        <span class="so">{{icone:apple}}</span><b>Mac com Intel</b><small>macOS 10.15+ · {{config.downloads.tamanhoMacIntel}}</small><span class="seta">Baixar o .dmg {{icone:baixar}}</span>
+      </a>
+    </div>
+    <p class="nota" style="margin-top:14px">Não sabe que Mac tem? Menu Apple → Acerca deste Mac: «Chip Apple» é Apple Silicon, «Processador Intel» é Intel. <a class="seta" href="{{config.downloads.versoes}}" target="_blank" rel="noopener">Todas as versões</a></p>
+  </div>
+</section>
+
+<section class="seccao-branca">
+  <div class="cont dividido">
+    <div>
+      <span class="olho">Por email</span>
+      <h2 style="margin:14px 0">Prefere receber o link no email?</h2>
+      <p class="texto">Útil para instalar noutro computador, como o da loja. Enviamos os links dos três instaladores.</p>
+      <ul class="lista-ok"><li>Sem compromisso</li><li>Não partilhamos o seu email</li></ul>
+    </div>
+    <form class="formulario" data-form-download novalidate>
+      <div data-pedido>
+        <h3>Receber o link de download</h3>
+        <p class="nota">Indique o seu nome e email.</p>
+        <div class="campos">
+          <div class="campo largo"><label for="dl-nome">Nome</label><input id="dl-nome" name="nome" autocomplete="name" required></div>
+          <div class="campo largo"><label for="dl-email">Email</label><input id="dl-email" name="email" type="email" autocomplete="email" required placeholder="nome@empresa.ao"></div>
+          <div class="campo"><label for="dl-empresa">Empresa</label><input id="dl-empresa" name="empresa" autocomplete="organization"></div>
+          <div class="campo"><label for="dl-telefone">Telefone</label><input id="dl-telefone" name="telefone" type="tel" autocomplete="tel" placeholder="9xx xxx xxx"></div>
+        </div>
+        <button class="btn btn-laranja" type="submit">{{icone:email}}Enviar o link para o meu email</button>
+        <p class="erro-form" data-erro role="alert"></p>
+      </div>
+      <div class="resposta" data-resposta hidden aria-live="polite">
+        <div class="ok">{{icone:ok}}<span data-texto-resposta></span></div>
+        <div class="baixar-lista">
+          <a href="{{config.downloads.windows}}" data-download="windows">{{icone:windows}}<span>KanGest para Windows<small>Instalador .exe · {{config.downloads.tamanhoWindows}}</small></span></a>
+          <a href="{{config.downloads.macArm}}" data-download="macArm">{{icone:apple}}<span>KanGest para Mac (Apple Silicon)<small>.dmg · {{config.downloads.tamanhoMacArm}}</small></span></a>
+          <a href="{{config.downloads.macIntel}}" data-download="macIntel">{{icone:apple}}<span>KanGest para Mac (Intel)<small>.dmg · {{config.downloads.tamanhoMacIntel}}</small></span></a>
+        </div>
+      </div>
+    </form>
+  </div>
+</section>
+
+<section id="instalar">
+  <div class="cont" data-separadores>
+    <div class="cabeca"><span class="olho">Instalação</span><h2>Como instalar</h2></div>
+    <div class="separadores" role="tablist">
+      <button type="button" role="tab" aria-selected="true" data-alvo="windows">Windows</button>
+      <button type="button" role="tab" aria-selected="false" data-alvo="mac">macOS</button>
+    </div>
+    <ol class="passos" data-painel="windows">
+      <li><div><h3>Abrir o instalador</h3><p>Abra o ficheiro <code>KanGest_{{config.versao}}_x64-setup.exe</code> que baixou. Se o Windows mostrar «O Windows protegeu o seu PC», escolha «Mais informações» → «Executar mesmo assim».</p></div></li>
+      <li><div><h3>Seguir o assistente</h3><p>O KanGest instala-se na sua conta do Windows. Se o computador não tiver o WebView2, o instalador trata disso.</p></div></li>
+      <li><div><h3>Abrir o KanGest</h3><p>O atalho fica no menu Iniciar e no ambiente de trabalho.</p></div></li>
+    </ol>
+    <ol class="passos" data-painel="mac" hidden>
+      <li><div><h3>Abrir o .dmg</h3><p>Abra o ficheiro que baixou e arraste o KanGest para a pasta Aplicações.</p></div></li>
+      <li><div><h3>Abrir pela primeira vez</h3><p>Na pasta Aplicações, clique no KanGest com o botão direito → Abrir, e confirme «Abrir». Se o macOS não deixar, vá a Definições do Sistema → Privacidade e segurança e escolha «Abrir mesmo assim». Só é preciso da primeira vez.</p></div></li>
+      <li><div><h3>Fixar na Dock</h3><p>Com o KanGest aberto, botão direito no ícone da Dock → Opções → Manter na Dock.</p></div></li>
+    </ol>
+  </div>
+</section>
+
+<section class="seccao-branca">
+  <div class="cont">
+    <div class="cabeca"><span class="olho">Primeiros passos</span><h2>Do programa instalado à primeira venda</h2></div>
+    <ol class="passos horizontal">
+      <li><div><h3>Criar a empresa</h3><p>Na primeira vez, um assistente pede os dados da empresa e cria o administrador.</p></div></li>
+      <li><div><h3>Trazer os dados</h3><p>Registe os artigos e clientes, ou importe-os do KIGEST em Sistema → Importar dados do KIGEST.</p></div></li>
+      <li><div><h3>Configurar o posto</h3><p>Escolha a impressora, o papel do talão, a gaveta e o visor em Configurações → Postos e impressão.</p></div></li>
+      <li><div><h3>Vender</h3><p>Abra o POS, abra o caixa e comece a facturar.</p></div></li>
+    </ol>
+    <p style="margin-top:24px" class="accoes"><a class="btn btn-linha" href="migracao-kigest.html">Migração do KIGEST</a><a class="btn btn-linha" href="equipamento.html">Equipamento compatível</a></p>
+  </div>
+</section>

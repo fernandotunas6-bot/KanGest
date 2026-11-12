@@ -1,0 +1,71 @@
+<!--{"titulo": "Contacto · KanGest", "descricao": "Peça uma demonstração, um orçamento de equipamento POS, a migração do KIGEST ou um projecto à medida.", "menu": "contacto"}-->
+<section class="heroi heroi-pagina">
+  <div class="cont">
+    <nav class="migalhas" aria-label="Caminho"><a href="index.html">Início</a><span>/</span><span>Contacto</span></nav>
+    <span class="olho">Contacto</span>
+    <h1>Vamos montar o seu sistema?</h1>
+    <p class="sub">Diga-nos o que precisa: o KanGest, equipamento POS, a migração do KIGEST, o SIGA Plus ou um projecto à medida. Respondemos com uma proposta.</p>
+  </div>
+</section>
+
+<section>
+  <div class="cont dividido" style="align-items:start">
+    <div>
+      <h2 style="font-size:30px;margin-bottom:14px">Fale connosco</h2>
+      <div class="texto">
+        <p data-com-contacto hidden>Pode escrever-nos pelo formulário ou directamente pelo WhatsApp ou por email. Indique o assunto para lhe respondermos com o que interessa.</p>
+        <p data-sem-contacto>Estamos a preparar os contactos directos de vendas. Até lá, pode instalar o KanGest e experimentá-lo à vontade.</p>
+      </div>
+      <div class="accoes" style="margin-top:22px" data-com-contacto hidden>
+        <a class="btn btn-verde" data-contacto="whatsapp" href="#" target="_blank" rel="noopener" hidden>{{icone:whatsapp}}WhatsApp</a>
+        <a class="btn btn-linha" data-contacto="email" href="#" hidden>{{icone:email}}Email</a>
+      </div>
+      <div class="recurso" style="margin-top:28px">
+        <h3>Quer experimentar primeiro?</h3>
+        <p>O KanGest pode ser instalado já, sem compromisso. <a class="seta" href="baixar.html">Baixar o KanGest {{icone:seta}}</a></p>
+      </div>
+    </div>
+
+    <div>
+      <form class="formulario" id="formContacto" data-com-contacto hidden novalidate>
+        <h3>Pedido de contacto</h3>
+        <p class="nota">Os campos com * são obrigatórios. Basta um email ou um telefone.</p>
+        <div class="campos">
+          <div class="campo"><label for="ct-nome">Nome *</label><input id="ct-nome" name="nome" autocomplete="name" required></div>
+          <div class="campo"><label for="ct-empresa">Empresa</label><input id="ct-empresa" name="empresa" autocomplete="organization"></div>
+          <div class="campo"><label for="ct-email">Email</label><input id="ct-email" name="email" type="email" autocomplete="email" placeholder="nome@empresa.ao"></div>
+          <div class="campo"><label for="ct-telefone">Telefone</label><input id="ct-telefone" name="telefone" type="tel" autocomplete="tel" placeholder="9xx xxx xxx"></div>
+          <div class="campo largo"><label for="assunto">Assunto</label>
+            <select id="assunto" name="assunto">
+              <option>KanGest</option>
+              <option>Demonstração do KanGest</option>
+              <option>Migração do KIGEST</option>
+              <option>Kit POS completo</option>
+              <option>Kit Balcão</option>
+              <option>Equipamento POS</option>
+              <option>Demonstração do SIGA Plus</option>
+              <option>Projecto à medida</option>
+              <option>Outro assunto</option>
+            </select>
+          </div>
+          <div class="campo largo"><label for="ct-mensagem">Mensagem</label><textarea id="ct-mensagem" name="mensagem" placeholder="Por exemplo: loja com 2 caixas, já temos computadores, queremos impressora térmica e leitor."></textarea></div>
+        </div>
+        <button class="btn btn-laranja" type="submit">Enviar pedido</button>
+        <p class="erro-form" data-erro role="alert"></p>
+      </form>
+      <div class="formulario" id="contactoEnviado" hidden>
+        <div class="resposta"><div class="ok">{{icone:ok}}<span>Recebemos o seu pedido. Vamos responder-lhe em breve.</span></div></div>
+        <a class="btn btn-linha" href="index.html">Voltar ao início</a>
+      </div>
+      <div class="formulario" data-sem-contacto>
+        <h3>Os contactos directos estão a ser configurados</h3>
+        <p class="nota" style="margin-top:8px">Entretanto, pode baixar o KanGest e experimentá-lo, ou conhecer o SIGA Plus e os nossos projectos.</p>
+        <div class="baixar-lista">
+          <a href="baixar.html">{{icone:baixar}}<span>Baixar o KanGest<small>Windows e macOS</small></span></a>
+          <a href="{{config.siga.site}}" target="_blank" rel="noopener">{{icone:chapeu}}<span>SIGA Plus<small>www.portal-siga.com</small></span></a>
+          <a href="projectos.html">{{icone:loja}}<span>Projectos à medida<small>Livraria Adventista e outros</small></span></a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
