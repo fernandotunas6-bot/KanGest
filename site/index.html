@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Produtos KanGest</title>
+<meta name="description" content="KanGest: facturação, POS e stock para Windows e macOS. SIGA Plus: gestão escolar. Equipamento POS compatível e projectos à medida, como a loja online da Livraria Adventista.">
+<meta property="og:title" content="KanGest — Sistemas de gestão">
+<meta property="og:description" content="Facturação, POS, stock, gestão escolar e lojas online. Feito em Angola.">
+<meta property="og:image" content="assets/kangest-painel.jpg">
+<link rel="icon" href="assets/kangest-logo.svg" type="image/svg+xml">
+<style>
+:root {
+  color-scheme: light; /* visual do KanGest: claro, com faixas verde-petróleo */
+  --bg: #f6f4ef; --surface: #ffffff; --sunken: #efece5; --line: #e3dfd6;
+  --ink: #1d2422; --ink-2: #4b5552; --ink-3: #7c8582;
+  --brand: #146b63; --brand-600: #0f5a53; --brand-700: #0c4a44; --brand-900: #072e2a; --brand-50: #e6f2f0;
+  --accent: #e09a2b; --accent-600: #c9851c; --accent-50: #fdf3e2; --creme: #f7f4ee;
+  --siga-a: #2b5cf6; --siga-b: #b42ad9; --siga-c: #f2306f; --siga-d: #f7931e; --siga-ink: #0f1d3d;
+  --raio: 18px; --sombra: 0 1px 2px rgba(12,74,68,.06), 0 12px 32px -12px rgba(12,74,68,.18);
+  --fonte: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--fonte); -webkit-font-smoothing: antialiased; }
+img { max-width: 100%; height: auto; display: block; }
+a { color: inherit; }
+.cont { width: min(1180px, 100% - 40px); margin-inline: auto; }
+.olho { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--brand); }
+.olho::before { content: ""; width: 18px; height: 2px; background: var(--accent); border-radius: 2px; }
+h1, h2, h3 { line-height: 1.12; letter-spacing: -.022em; margin: 0; }
+h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 700; }
+h3 { font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+p { margin: 0; }
+.sub { color: var(--ink-2); font-size: 18px; max-width: 640px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; height: 48px; padding: 0 22px; border-radius: 12px; font-weight: 600; font-size: 15.5px; text-decoration: none; border: 0; cursor: pointer; transition: transform .15s, box-shadow .15s, background .15s; font-family: inherit; }
+.btn:hover { transform: translateY(-1px); }
+.btn svg { width: 18px; height: 18px; flex: none; }
+.btn-laranja { background: var(--accent); color: #2b1a02; box-shadow: 0 8px 22px -10px rgba(224,154,43,.9); }
+.btn-laranja:hover { background: #e8a63c; }
+.btn-verde { background: var(--brand); color: #fff; }
+.btn-verde:hover { background: var(--brand-600); }
+.btn-linha { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--line); }
+.btn-linha:hover { box-shadow: inset 0 0 0 1.5px var(--brand); color: var(--brand); }
+.btn-vidro { background: rgba(255,255,255,.1); color: #fff; box-shadow: inset 0 0 0 1px rgba(255,255,255,.22); }
+.btn-vidro:hover { background: rgba(255,255,255,.16); }
+.etiqueta { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 99px; font-size: 12.5px; font-weight: 600; background: var(--brand-50); color: var(--brand-700); }
+
+/* ---------- topo ---------- */
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 60; background: var(--bg); }
+.topo { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 50; background: rgba(246,244,239,.82); backdrop-filter: saturate(1.4) blur(14px); border-bottom: 1px solid transparent; transition: border-color .2s; }
+.topo.rolou { border-bottom-color: var(--line); }
+.topo .cont { display: flex; align-items: center; gap: 28px; height: 68px; }
+.marca { display: flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 700; font-size: 19px; letter-spacing: -.01em; }
+.marca img { width: 36px; height: 36px; }
+.marca small { display: block; font-size: 11.5px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; margin-top: -3px; }
+.menu { display: flex; gap: 22px; margin-left: auto; }
+.menu a { text-decoration: none; font-size: 14.5px; color: var(--ink-2); font-weight: 500; }
+.menu a:hover { color: var(--brand); }
+.topo .btn { height: 40px; padding: 0 16px; font-size: 14px; }
+.abrir-menu { display: none; margin-left: auto; background: none; border: 0; padding: 8px; cursor: pointer; color: var(--ink); }
+
+/* ---------- herói ---------- */
+.heroi { position: relative; overflow: hidden; background: radial-gradient(1200px 600px at 85% -10%, #1c8c80 0%, transparent 60%), radial-gradient(900px 500px at -10% 110%, rgba(224,154,43,.28) 0%, transparent 55%), var(--brand-700); color: #fff; padding: 84px 0 76px; }
+.heroi::after { content: ""; position: absolute; inset: 0; background-image: radial-gradient(rgba(255,255,255,.07) 1px, transparent 1px); background-size: 26px 26px; mask-image: linear-gradient(to bottom, #000 0%, transparent 75%); pointer-events: none; }
+.heroi .cont { position: relative; z-index: 1; display: grid; grid-template-columns: 1.02fr 1fr; gap: 48px; align-items: center; }
+.heroi .olho { color: #9fe0d6; }
+.heroi h1 { font-size: clamp(38px, 5.4vw, 64px); font-weight: 750; margin: 18px 0 20px; }
+.heroi h1 em { font-style: normal; color: var(--accent); }
+.heroi .sub { color: rgba(255,255,255,.78); }
+.heroi .accoes { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+.confianca { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 34px; color: rgba(255,255,255,.72); font-size: 14px; }
+.confianca span { display: inline-flex; align-items: center; gap: 7px; }
+.confianca svg { width: 16px; height: 16px; color: #7fd3c6; }
+.palco { position: relative; padding-bottom: 40px; }
+.janela { border-radius: 14px; overflow: hidden; background: #fff; box-shadow: 0 40px 80px -30px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08); transform: perspective(2400px) rotateY(-5deg) rotateX(2deg); transform-origin: left center; }
+.janela .barra { display: flex; gap: 6px; padding: 10px 12px; background: #ebe7df; }
+.janela .barra i { width: 10px; height: 10px; border-radius: 50%; background: #d4cec2; }
+.palco .talao { position: absolute; width: 24%; left: -7%; bottom: 0; border-radius: 6px; box-shadow: 0 30px 60px -20px rgba(0,0,0,.55); transform: rotate(-4deg); background: #fff; }
+.palco .pos { position: absolute; width: 46%; right: -5%; bottom: 0; border-radius: 10px; overflow: hidden; box-shadow: 0 30px 60px -20px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.1); }
+
+/* ---------- secções ---------- */
+section { padding: 96px 0; }
+.cabeca { display: grid; gap: 14px; margin-bottom: 48px; }
+.cabeca.centro { justify-items: center; text-align: center; }
+.cabeca.centro .sub { margin-inline: auto; }
+
+/* produtos */
+.produtos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.produto { position: relative; display: flex; flex-direction: column; background: var(--surface); border-radius: 22px; box-shadow: var(--sombra); overflow: hidden; transition: transform .2s, box-shadow .2s; }
+.produto:hover { transform: translateY(-4px); box-shadow: 0 1px 2px rgba(12,74,68,.06), 0 26px 50px -20px rgba(12,74,68,.32); }
+.produto .capa { aspect-ratio: 16 / 10; overflow: hidden; background: var(--sunken); position: relative; }
+.produto .capa img { width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.produto .corpo { padding: 24px 24px 26px; display: flex; flex-direction: column; gap: 12px; flex: 1; }
+.produto .tipo { font-size: 13px; font-weight: 600; color: var(--ink-3); }
+.produto .logo-siga { height: 28px; width: auto; }
+.produto p { color: var(--ink-2); font-size: 15px; }
+.produto .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.produto .accoes { display: flex; gap: 10px; margin-top: auto; padding-top: 8px; }
+.produto .accoes .btn { height: 42px; font-size: 14.5px; padding: 0 16px; }
+.selo { position: absolute; top: 14px; left: 14px; z-index: 1; background: rgba(12,74,68,.9); color: #fff; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 99px; backdrop-filter: blur(6px); }
+.selo.laranja { background: var(--accent); color: #2b1a02; }
+
+/* KanGest */
+.kangest { background: var(--surface); }
+.recursos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.recurso { padding: 24px; border-radius: var(--raio); background: var(--bg); border: 1px solid var(--line); }
+.recurso .ico { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--brand); color: #fff; margin-bottom: 16px; }
+.recurso .ico svg { width: 22px; height: 22px; }
+.recurso h3 { font-size: 17.5px; margin-bottom: 6px; }
+.recurso p { color: var(--ink-2); font-size: 14.5px; }
+.galeria { margin-top: 56px; display: grid; grid-template-columns: 1fr 280px; gap: 22px; align-items: start; }
+.separadores { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--sunken); margin-bottom: 16px; }
+.separadores button { font: 600 14px var(--fonte); border: 0; background: none; color: var(--ink-2); height: 38px; padding: 0 16px; border-radius: 9px; cursor: pointer; }
+.separadores button[aria-selected="true"] { background: var(--surface); color: var(--brand-700); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.ecra { border-radius: 14px; overflow: hidden; box-shadow: var(--sombra); border: 1px solid var(--line); background: #fff; }
+.ecra img { display: none; }
+.ecra img.activa { display: block; }
+.lado { display: grid; gap: 16px; }
+.lado .cartao { padding: 18px; border-radius: var(--raio); background: var(--bg); border: 1px solid var(--line); }
+.lado .cartao img { margin: 0 auto 12px; border-radius: 6px; box-shadow: 0 10px 24px -14px rgba(0,0,0,.4); }
+.lado .cartao p { font-size: 14px; color: var(--ink-2); }
+
+/* download */
+.download { background: radial-gradient(700px 400px at 100% 0%, rgba(224,154,43,.22), transparent 60%), var(--brand-700); color: #fff; border-radius: 28px; padding: 56px; display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+.download h2 { color: #fff; }
+.download .sub { color: rgba(255,255,255,.76); margin-top: 14px; }
+.plataformas { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 26px; }
+.plataforma { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 14px; background: rgba(255,255,255,.07); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+.plataforma svg { width: 26px; height: 26px; }
+.plataforma b { display: block; font-size: 15px; }
+.plataforma small { color: rgba(255,255,255,.66); font-size: 12.5px; }
+.formulario { background: var(--surface); color: var(--ink); border-radius: 20px; padding: 28px; box-shadow: 0 30px 60px -30px rgba(0,0,0,.6); }
+.formulario h3 { margin-bottom: 4px; }
+.formulario .nota { font-size: 13.5px; color: var(--ink-3); margin-bottom: 18px; }
+.campos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.campo { display: grid; gap: 5px; }
+.campo.largo { grid-column: 1 / -1; }
+.campo label { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.campo input, .campo select { height: 46px; border-radius: 11px; border: 1.5px solid var(--line); padding: 0 14px; font: 15px var(--fonte); background: #fff; color: var(--ink); }
+.campo input:focus, .campo select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-50); }
+.formulario .btn { width: 100%; margin-top: 16px; }
+.resposta { display: none; margin-top: 4px; }
+.resposta.visivel { display: block; }
+.resposta .ok { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; background: var(--brand-50); color: var(--brand-700); font-size: 14.5px; margin-bottom: 14px; }
+.baixar { display: grid; gap: 10px; }
+.baixar a { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1.5px solid var(--line); text-decoration: none; font-weight: 600; }
+.baixar a:hover { border-color: var(--brand); color: var(--brand); }
+.baixar a svg { width: 22px; height: 22px; }
+.baixar a small { display: block; font-weight: 500; color: var(--ink-3); font-size: 12.5px; }
+.miuda { font-size: 12.5px; color: var(--ink-3); margin-top: 12px; }
+
+/* equipamento */
+.equipamentos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.equip { background: var(--surface); border-radius: 20px; box-shadow: var(--sombra); padding: 22px; display: flex; flex-direction: column; gap: 10px; }
+.equip .ilustra { height: 150px; border-radius: 14px; background: linear-gradient(160deg, var(--brand-50), #f3efe6); display: grid; place-items: center; margin-bottom: 6px; }
+.equip .ilustra svg { height: 112px; width: auto; }
+.equip p { color: var(--ink-2); font-size: 14.5px; }
+.equip .ex { font-size: 13px; color: var(--ink-3); }
+.equip .pe { display: flex; justify-content: space-between; align-items: center; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13.5px; }
+.equip .pe a { color: var(--brand); font-weight: 600; text-decoration: none; }
+.kit { grid-column: 1 / -1; display: grid; grid-template-columns: 1.1fr 1fr; gap: 32px; align-items: center; background: linear-gradient(135deg, var(--brand-700), var(--brand)); color: #fff; border-radius: 24px; padding: 36px 40px; }
+.kit h3 { font-size: 28px; }
+.kit p { color: rgba(255,255,255,.8); margin: 10px 0 20px; }
+.kit ul { list-style: none; padding: 0; margin: 0 0 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; font-size: 14.5px; }
+.kit li { display: flex; gap: 8px; align-items: center; }
+.kit li svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
+.kit .ilustra-kit svg { width: 100%; height: auto; }
+.aviso-tpa { margin-top: 18px; font-size: 13.5px; color: var(--ink-3); }
+
+/* SIGA */
+.siga { background: var(--siga-ink); color: #fff; position: relative; overflow: hidden; }
+.siga::before { content: ""; position: absolute; width: 900px; height: 900px; right: -300px; top: -380px; background: conic-gradient(from 200deg, var(--siga-a), var(--siga-b), var(--siga-c), var(--siga-d), var(--siga-a)); filter: blur(140px); opacity: .32; }
+.siga .cont { position: relative; display: grid; grid-template-columns: 1fr 1.05fr; gap: 56px; align-items: center; }
+.siga .olho { color: #c9b6ff; }
+.siga .olho::before { background: linear-gradient(90deg, var(--siga-a), var(--siga-d)); }
+.siga .logo { background: #fff; display: block; width: max-content; padding: 12px 18px; border-radius: 14px; margin: 18px 0 22px; }
+.siga .logo img { height: 40px; width: auto; }
+.siga .sub { color: rgba(255,255,255,.76); }
+.siga ul { list-style: none; padding: 0; margin: 26px 0 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; }
+.siga li { display: flex; gap: 9px; align-items: flex-start; font-size: 15px; color: rgba(255,255,255,.88); }
+.siga li svg { width: 18px; height: 18px; margin-top: 3px; flex: none; color: #ff8fb8; }
+.btn-siga { background: linear-gradient(90deg, var(--siga-a), var(--siga-b) 55%, var(--siga-c)); color: #fff; box-shadow: 0 10px 26px -10px rgba(180,42,217,.8); }
+.siga .ecra { border: 0; box-shadow: 0 40px 80px -30px rgba(0,0,0,.7); }
+
+/* projectos */
+.caso { display: grid; grid-template-columns: 1.1fr 1fr; background: var(--surface); border-radius: 26px; overflow: hidden; box-shadow: var(--sombra); }
+.caso .foto { position: relative; min-height: 360px; }
+.caso .foto img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: left center; }
+.caso .texto { padding: 44px; display: flex; flex-direction: column; gap: 14px; }
+.caso .texto p { color: var(--ink-2); }
+.caso ul { margin: 6px 0 10px; padding-left: 0; list-style: none; display: grid; gap: 8px; }
+.caso li { display: flex; gap: 9px; font-size: 15px; color: var(--ink-2); }
+.caso li svg { width: 18px; height: 18px; margin-top: 3px; flex: none; color: var(--brand); }
+.medida { margin-top: 22px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.medida div { padding: 20px; border-radius: 16px; border: 1px dashed var(--line); background: rgba(255,255,255,.5); }
+.medida b { display: block; margin-bottom: 4px; }
+.medida span { color: var(--ink-2); font-size: 14px; }
+
+/* contacto */
+.contacto { text-align: center; background: var(--brand-50); }
+.contacto h2 { margin: 14px 0 12px; }
+.contacto .accoes { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+
+footer { background: var(--brand-900); color: rgba(255,255,255,.7); padding: 48px 0; font-size: 14px; }
+footer .cont { display: flex; flex-wrap: wrap; gap: 24px; justify-content: space-between; align-items: center; }
+footer .marca { color: #fff; }
+footer nav { display: flex; flex-wrap: wrap; gap: 18px; }
+footer nav a { text-decoration: none; }
+footer nav a:hover { color: #fff; }
+
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .janela { transform: none; } .btn, .produto { transition: none; } }
+
+/* ---------- ecrãs pequenos ---------- */
+@media (max-width: 1020px) {
+  .heroi .cont, .download, .siga .cont, .caso, .galeria, .kit { grid-template-columns: 1fr; }
+  .produtos, .recursos, .equipamentos { grid-template-columns: 1fr 1fr; }
+  .medida { grid-template-columns: 1fr 1fr; }
+  .janela { transform: none; }
+  .palco { margin-top: 12px; }
+  .lado { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 760px) {
+  .menu { display: none; position: absolute; top: 68px; left: 0; right: 0; flex-direction: column; gap: 0; background: var(--bg); border-bottom: 1px solid var(--line); padding: 8px 20px 16px; }
+  .menu.aberto { display: flex; }
+  .menu a { padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .abrir-menu { display: block; }
+  .topo .btn { display: none; }
+  section { padding: 68px 0; }
+  .heroi { padding-top: 56px; }
+  .produtos, .recursos, .equipamentos, .lado, .medida, .campos, .siga ul, .kit ul { grid-template-columns: 1fr; }
+  .download { padding: 32px 22px; border-radius: 22px; }
+  .kit { padding: 28px 22px; }
+  .caso .foto { min-height: 220px; }
+  .caso .texto { padding: 28px 22px; }
+  .palco .talao { display: none; }
+  .palco .pos { position: static; width: 100%; margin-top: 14px; }
+}
+</style>
+</head>
+<body>
+
+<header class="topo" id="topo">
+  <div class="cont">
+    <a class="marca" href="#">
+      <img src="assets/kangest-logo.svg" alt="">
+      <span>KanGest<small>Sistemas de gestão</small></span>
+    </a>
+    <nav class="menu" id="menu">
+      <a href="#produtos">Produtos</a>
+      <a href="#kangest">KanGest</a>
+      <a href="#equipamento">Equipamento POS</a>
+      <a href="#siga">SIGA Plus</a>
+      <a href="#projectos">Projectos</a>
+      <a href="#contacto">Contacto</a>
+    </nav>
+    <a class="btn btn-verde" href="#download">Baixar KanGest</a>
+    <button class="abrir-menu" id="abrirMenu" aria-label="Abrir o menu" aria-expanded="false">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+  </div>
+</header>
+
+<main>
+<!-- ================= herói ================= -->
+<section class="heroi">
+  <div class="cont">
+    <div>
+      <span class="olho">Software de gestão feito em Angola</span>
+      <h1>Facture, venda e gira o seu negócio <em>sem complicações.</em></h1>
+      <p class="sub">O KanGest junta facturação, ponto de venda, stock e tesouraria num só programa para Windows e macOS. Para escolas, o SIGA Plus. E, para quem precisa de algo à medida, fazemos o sistema certo.</p>
+      <div class="accoes">
+        <a class="btn btn-laranja" href="#download">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+          Receber o KanGest por email
+        </a>
+        <a class="btn btn-vidro" href="#produtos">Ver todos os produtos</a>
+      </div>
+      <div class="confianca">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Documentos certificáveis pela AGT</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>SAF-T (AO)</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Funciona sem internet</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Windows e macOS</span>
+      </div>
+    </div>
+    <div class="palco">
+      <div class="janela">
+        <div class="barra"><i></i><i></i><i></i></div>
+        <img src="assets/kangest-painel.jpg" alt="Painel do KanGest com vendas do dia, do mês, valores a receber e artigos mais vendidos" width="1440" height="900">
+      </div>
+      <img class="pos" src="assets/kangest-pos.jpg" alt="Ponto de venda do KanGest com uma venda em curso" width="1440" height="900" loading="lazy">
+      <img class="talao" src="assets/kangest-talao.jpg" alt="Talão de 80 mm impresso pelo KanGest" loading="lazy">
+    </div>
+  </div>
+</section>
+
+<!-- ================= produtos ================= -->
+<section id="produtos">
+  <div class="cont">
+    <div class="cabeca centro revelar">
+      <span class="olho">Produtos</span>
+      <h2>Sistemas prontos, a funcionar hoje</h2>
+      <p class="sub">Escolha o que precisa: instale o KanGest no seu computador, entre no SIGA Plus pela internet ou veja a loja online que fizemos para um cliente.</p>
+    </div>
+    <div class="produtos">
+      <article class="produto revelar">
+        <span class="selo laranja">Para baixar</span>
+        <div class="capa"><img src="assets/kangest-painel.jpg" alt="" loading="lazy"></div>
+        <div class="corpo">
+          <span class="tipo">Gestão comercial e POS</span>
+          <h3>KanGest</h3>
+          <p>Facturação, ponto de venda com leitor de códigos e talão, stock, tesouraria, contas correntes e salários. Instala-se no Windows ou no Mac.</p>
+          <div class="tags"><span class="etiqueta">Facturação</span><span class="etiqueta">POS</span><span class="etiqueta">Stock</span><span class="etiqueta">SAF-T</span></div>
+          <div class="accoes">
+            <a class="btn btn-verde" href="#download">Baixar</a>
+            <a class="btn btn-linha" href="#kangest">Saber mais</a>
+          </div>
+        </div>
+      </article>
+      <article class="produto revelar">
+        <span class="selo">Online</span>
+        <div class="capa"><img src="assets/siga-portal.jpg" alt="" loading="lazy"></div>
+        <div class="corpo">
+          <img class="logo-siga" src="assets/siga-plus-logo.png" alt="SIGA Plus">
+          <span class="tipo">Gestão escolar</span>
+          <p>Matrículas, turmas, horários, pautas e boletins, secretaria com documentos assinados e portais para estudantes e encarregados.</p>
+          <div class="tags"><span class="etiqueta">Escolas</span><span class="etiqueta">Secretaria</span><span class="etiqueta">Portais</span></div>
+          <div class="accoes">
+            <a class="btn btn-verde" href="https://portal-siga.com" target="_blank" rel="noopener">Abrir o SIGA Plus</a>
+            <a class="btn btn-linha" href="#siga">Saber mais</a>
+          </div>
+        </div>
+      </article>
+      <article class="produto revelar">
+        <span class="selo">Feito para um cliente</span>
+        <div class="capa"><img src="assets/livraria-adventista.jpg" alt="" loading="lazy"></div>
+        <div class="corpo">
+          <span class="tipo">Loja online · Livraria &amp; Editora Adventista</span>
+          <h3>Livraria Adventista</h3>
+          <p>Loja online com catálogo, carrinho e pagamento, entregas em Angola, painel de gestão e acompanhamento das encomendas.</p>
+          <div class="tags"><span class="etiqueta">E-commerce</span><span class="etiqueta">Entregas</span><span class="etiqueta">Painel</span></div>
+          <div class="accoes">
+            <a class="btn btn-verde" href="https://livrariaadventista.ao" target="_blank" rel="noopener">Visitar o site</a>
+            <a class="btn btn-linha" href="#projectos">Ver o projecto</a>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ================= KanGest ================= -->
+<section class="kangest" id="kangest">
+  <div class="cont">
+    <div class="cabeca revelar">
+      <span class="olho">KanGest</span>
+      <h2>Tudo o que a loja precisa,<br>do balcão à contabilidade</h2>
+      <p class="sub">Feito para o comércio angolano: documentos com os requisitos da AGT, impressão em A4 e talão, e um POS rápido para o dia-a-dia.</p>
+    </div>
+    <div class="recursos">
+      <div class="recurso revelar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg></div>
+        <h3>Facturação completa</h3>
+        <p>Facturas, facturas-recibo, notas de crédito e débito, proformas, orçamentos, guias e recibos, em A4 ou talão.</p>
+      </div>
+      <div class="recurso revelar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+        <h3>Ponto de venda rápido</h3>
+        <p>Leitor de códigos de barras, ecrã táctil, vendas suspensas, vários meios de pagamento, troco e gaveta.</p>
+      </div>
+      <div class="recurso revelar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg></div>
+        <h3>Stock e lotes</h3>
+        <p>Armazéns, entradas e saídas, transferências, inventário, lotes com validade, kits e alertas de stock mínimo.</p>
+      </div>
+      <div class="recurso revelar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h3"/></svg></div>
+        <h3>Tesouraria e clientes</h3>
+        <p>Contas correntes, recibos e pagamentos, fluxo de caixa por conta e centro de custo, aviso de vencimentos.</p>
+      </div>
+      <div class="recurso revelar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+        <h3>Fiscal em dia</h3>
+        <p>Documentos assinados, SAF-T (AO) de facturação e aquisição e ligação à Facturação Electrónica da AGT.</p>
+      </div>
+      <div class="recurso revelar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.6c1.9.7 3.1 2.6 3.5 5.4"/></svg></div>
+        <h3>Salários e RH</h3>
+        <p>Funcionários, processamento salarial com IRT e INSS, férias e faltas, honorários e mapas.</p>
+      </div>
+      <div class="recurso revelar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="8.5" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v2h11v-2M12 12v2"/></svg></div>
+        <h3>Vários postos em rede</h3>
+        <p>Um computador serve de servidor e os caixas ligam-se a ele, com séries e caixa por posto.</p>
+      </div>
+      <div class="recurso revelar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+        <h3>Utilizadores e permissões</h3>
+        <p>Perfis de acesso, PIN de supervisor, bloqueio da sessão e registo de todas as entradas e operações.</p>
+      </div>
+      <div class="recurso revelar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3M20 17H9l3 3"/></svg></div>
+        <h3>Vem do KIGEST? Os dados vêm consigo</h3>
+        <p>Importamos artigos, clientes, stock, histórico de documentos, dívidas e tesouraria, com conferência no fim.</p>
+      </div>
+    </div>
+
+    <div class="galeria revelar">
+      <div>
+        <div class="separadores" role="tablist">
+          <button role="tab" aria-selected="true" data-ecra="0">Painel</button>
+          <button role="tab" aria-selected="false" data-ecra="1">Ponto de venda</button>
+          <button role="tab" aria-selected="false" data-ecra="2">Documentos</button>
+        </div>
+        <div class="ecra" id="ecras">
+          <img class="activa" src="assets/kangest-painel.jpg" alt="Painel do KanGest" loading="lazy" width="1440" height="900">
+          <img src="assets/kangest-pos.jpg" alt="Ponto de venda do KanGest" loading="lazy" width="1440" height="900">
+          <img src="assets/kangest-documentos.jpg" alt="Lista de documentos emitidos no KanGest" loading="lazy" width="1440" height="900">
+        </div>
+      </div>
+      <div class="lado">
+        <div class="cartao">
+          <img src="assets/kangest-talao.jpg" alt="Talão impresso" loading="lazy" style="width:150px">
+          <p><b>Talão de 80 ou 58 mm</b> com todos os elementos fiscais, impresso directamente na térmica.</p>
+        </div>
+        <div class="cartao">
+          <p><b>Dados de exemplo.</b> As imagens mostram o KanGest com uma empresa fictícia.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= download ================= -->
+<section id="download">
+  <div class="cont">
+    <div class="download revelar">
+      <div>
+        <span class="olho" style="color:#9fe0d6">Baixar</span>
+        <h2 style="margin-top:14px">Receba o KanGest no seu email</h2>
+        <p class="sub">Indique o seu email e enviamos o link do instalador. Pode instalar logo e experimentar com os seus próprios artigos.</p>
+        <div class="plataformas">
+          <div class="plataforma">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.4 4.5v7H3zM11.3 4.4 21 3v8.5h-9.7zM3 12.4h7.4v7.1L3 18.5zM11.3 12.4H21V21l-9.7-1.4z"/></svg>
+            <div><b>Windows</b><small>10 e 11 · 64 bits</small></div>
+          </div>
+          <div class="plataforma">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.2 1-4 2.5-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.1-1.2 2.9-2.4.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.4-.9-2.4-3.9zM14 5.5c.7-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1.1.1 2.1-.6 2.8-1.4z"/></svg>
+            <div><b>macOS</b><small>Apple Silicon e Intel</small></div>
+          </div>
+        </div>
+      </div>
+      <form class="formulario" id="formDownload" novalidate>
+        <div id="pedido">
+          <h3>Pedir o link de download</h3>
+          <p class="nota">Enviamos o link para o email que indicar. Não partilhamos os seus dados.</p>
+          <div class="campos">
+            <div class="campo largo"><label for="nome">Nome</label><input id="nome" name="nome" autocomplete="name" required></div>
+            <div class="campo largo"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div>
+            <div class="campo"><label for="empresa">Empresa</label><input id="empresa" name="empresa" autocomplete="organization"></div>
+            <div class="campo"><label for="telefone">Telefone</label><input id="telefone" name="telefone" type="tel" autocomplete="tel" placeholder="9xx xxx xxx"></div>
+            <div class="campo largo"><label for="sistema">Vai usar no</label>
+              <select id="sistema" name="sistema"><option>Windows</option><option>macOS</option><option>Windows e macOS</option></select>
+            </div>
+          </div>
+          <button class="btn btn-laranja" type="submit" id="enviar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>
+            Enviar o link para o meu email
+          </button>
+          <p class="miuda" id="erroForm" role="alert"></p>
+        </div>
+        <div class="resposta" id="resposta" aria-live="polite">
+          <div class="ok"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg><span id="textoResposta"></span></div>
+          <div class="baixar">
+            <a id="linkWindows" href="#"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.4 4.5v7H3zM11.3 4.4 21 3v8.5h-9.7zM3 12.4h7.4v7.1L3 18.5zM11.3 12.4H21V21l-9.7-1.4z"/></svg><span>KanGest para Windows<small>Instalador .exe</small></span></a>
+            <a id="linkMacArm" href="#"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.2 1-4 2.5-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.1-1.2 2.9-2.4.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.4-.9-2.4-3.9zM14 5.5c.7-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1.1.1 2.1-.6 2.8-1.4z"/></svg><span>KanGest para Mac (Apple Silicon)<small>M1, M2, M3, M4 · .dmg</small></span></a>
+            <a id="linkMacIntel" href="#"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.2 1-4 2.5-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.1-1.2 2.9-2.4.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.4-.9-2.4-3.9zM14 5.5c.7-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1.1.1 2.1-.6 2.8-1.4z"/></svg><span>KanGest para Mac (Intel)<small>.dmg</small></span></a>
+          </div>
+          <p class="miuda">No Mac, na primeira vez abra com o botão direito → Abrir. Os seus dados do KIGEST importam-se depois em Sistema → Importar dados do KIGEST.</p>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- ================= equipamento ================= -->
+<section id="equipamento" style="padding-top:24px">
+  <div class="cont">
+    <div class="cabeca revelar">
+      <span class="olho">Equipamento POS</span>
+      <h2>Monte o seu posto de facturação</h2>
+      <p class="sub">Equipamento compatível com o KanGest. Ajudamos a escolher, fornecemos e deixamos tudo configurado: o talão a sair, a gaveta a abrir e o leitor a lançar artigos.</p>
+    </div>
+    <div class="equipamentos">
+      <article class="equip revelar">
+        <div class="ilustra"><svg viewBox="0 0 160 120" fill="none"><rect x="30" y="8" width="100" height="72" rx="8" fill="#0c4a44"/><rect x="38" y="16" width="84" height="56" rx="3" fill="#e6f2f0"/><rect x="44" y="22" width="44" height="7" rx="2" fill="#146b63"/><rect x="44" y="34" width="20" height="14" rx="2" fill="#fff"/><rect x="67" y="34" width="20" height="14" rx="2" fill="#fff"/><rect x="44" y="51" width="20" height="14" rx="2" fill="#fff"/><rect x="67" y="51" width="20" height="14" rx="2" fill="#fff"/><rect x="92" y="22" width="24" height="43" rx="2" fill="#fff"/><rect x="95" y="57" width="18" height="5" rx="1.5" fill="#e09a2b"/><path d="M70 80h20l6 22H64z" fill="#0f5a53"/><rect x="50" y="102" width="60" height="8" rx="4" fill="#0c4a44"/></svg></div>
+        <h3>Terminal POS táctil</h3>
+        <p>Ecrã táctil de 15″ ou maior com Windows. O POS do KanGest tem botões do tamanho de um dedo e teclado no ecrã.</p>
+        <p class="ex">Ex.: terminal all-in-one 15,6″, com segundo ecrã opcional para o cliente.</p>
+        <div class="pe"><span>Preço sob consulta</span><a href="#contacto" data-orcamento="Terminal POS táctil">Pedir orçamento →</a></div>
+      </article>
+      <article class="equip revelar">
+        <div class="ilustra"><svg viewBox="0 0 160 120" fill="none"><path d="M58 6h44v40H58z" fill="#fff" stroke="#cfc9bc" stroke-width="2"/><path d="M64 14h32M64 21h24M64 28h32M64 35h18" stroke="#7c8582" stroke-width="2.5" stroke-linecap="round"/><rect x="30" y="40" width="100" height="58" rx="14" fill="#1d2422"/><rect x="48" y="44" width="64" height="6" rx="3" fill="#0b0f0e"/><circle cx="114" cy="80" r="5" fill="#2f855a"/><rect x="40" y="76" width="40" height="6" rx="3" fill="#3a4441"/><rect x="34" y="98" width="92" height="8" rx="4" fill="#0f1514"/></svg></div>
+        <h3>Impressora térmica 80 mm</h3>
+        <p>Talão com corte automático e o logótipo da empresa, por USB, rede (porta 9100) ou série, em ESC/POS.</p>
+        <p class="ex">Ex.: Epson TM-T20III, Xprinter XP-Q80 e equivalentes ESC/POS.</p>
+        <div class="pe"><span>Preço sob consulta</span><a href="#contacto" data-orcamento="Impressora térmica 80 mm">Pedir orçamento →</a></div>
+      </article>
+      <article class="equip revelar">
+        <div class="ilustra"><svg viewBox="0 0 160 120" fill="none"><path d="M64 12h32v34H64z" fill="#fff" stroke="#cfc9bc" stroke-width="2"/><path d="M69 20h22M69 27h16M69 34h22" stroke="#7c8582" stroke-width="2.5" stroke-linecap="round"/><rect x="46" y="42" width="68" height="58" rx="16" fill="#146b63"/><rect x="58" y="46" width="44" height="6" rx="3" fill="#0c4a44"/><circle cx="98" cy="84" r="5" fill="#e09a2b"/><rect x="54" y="80" width="26" height="6" rx="3" fill="#0f5a53"/></svg></div>
+        <h3>Impressora térmica 58 mm</h3>
+        <p>Talão compacto de 32 colunas para balcões pequenos, com os mesmos elementos fiscais do de 80 mm.</p>
+        <p class="ex">Ex.: Xprinter XP-58 e equivalentes ESC/POS.</p>
+        <div class="pe"><span>Preço sob consulta</span><a href="#contacto" data-orcamento="Impressora térmica 58 mm">Pedir orçamento →</a></div>
+      </article>
+      <article class="equip revelar">
+        <div class="ilustra"><svg viewBox="0 0 160 120" fill="none"><path d="M42 22c0-6 5-10 11-10h50c8 0 13 6 11 14l-6 22c-1 5-6 8-11 8H88l-8 44c-1 5-5 8-10 8h-6c-6 0-10-5-9-11l7-41H53c-6 0-11-5-11-11z" fill="#1d2422"/><rect x="50" y="18" width="52" height="10" rx="5" fill="#e09a2b" opacity=".9"/><path d="M118 8l26-6M118 24l30 0M118 40l26 6" stroke="#c2412d" stroke-width="2.5" stroke-linecap="round" opacity=".75"/><circle cx="70" cy="46" r="4" fill="#2f855a"/></svg></div>
+        <h3>Leitor de código de barras</h3>
+        <p>Qualquer leitor USB em modo teclado, com ou sem fio. Lê para a pesquisa do POS e «3*código» lança 3 unidades.</p>
+        <p class="ex">Ex.: Honeywell Voyager 1250g, Zebra DS2208.</p>
+        <div class="pe"><span>Preço sob consulta</span><a href="#contacto" data-orcamento="Leitor de código de barras">Pedir orçamento →</a></div>
+      </article>
+      <article class="equip revelar">
+        <div class="ilustra"><svg viewBox="0 0 160 120" fill="none"><path d="M22 44h116v52c0 4-3 8-8 8H30c-5 0-8-4-8-8z" fill="#1d2422"/><path d="M30 32h100l8 12H22z" fill="#3a4441"/><rect x="34" y="56" width="92" height="30" rx="4" fill="#2a3331"/><rect x="66" y="64" width="28" height="6" rx="3" fill="#7c8582"/><path d="M40 44v-8M58 44v-8M76 44v-8M94 44v-8M112 44v-8" stroke="#e09a2b" stroke-width="3" stroke-linecap="round"/><path d="M138 70c10 0 14 6 14 14" stroke="#7c8582" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="3 4"/></svg></div>
+        <h3>Gaveta de dinheiro</h3>
+        <p>Liga-se à impressora térmica (RJ11) e abre nas vendas a numerário, ou com Ctrl+G por quem tiver permissão.</p>
+        <p class="ex">Ex.: gaveta 5 notas / 8 moedas, abertura por impressora.</p>
+        <div class="pe"><span>Preço sob consulta</span><a href="#contacto" data-orcamento="Gaveta de dinheiro">Pedir orçamento →</a></div>
+      </article>
+      <article class="equip revelar">
+        <div class="ilustra"><svg viewBox="0 0 160 120" fill="none"><rect x="24" y="16" width="112" height="40" rx="6" fill="#1d2422"/><rect x="30" y="22" width="100" height="28" rx="3" fill="#0b2a26"/><text x="36" y="34" fill="#4ce0c6" font-family="monospace" font-size="9.5">LEITE NIDO 400g</text><text x="36" y="46" fill="#4ce0c6" font-family="monospace" font-size="9.5">TOTAL   5.928,00</text><rect x="74" y="56" width="12" height="40" fill="#3a4441"/><rect x="52" y="96" width="56" height="10" rx="5" fill="#1d2422"/></svg></div>
+        <h3>Visor de cliente</h3>
+        <p>Mostra ao cliente o artigo, o total e o troco. Visor de coluna 2×20 por USB/série ou um segundo monitor.</p>
+        <p class="ex">Ex.: visores VFD compatíveis CD5220 ou Epson.</p>
+        <div class="pe"><span>Preço sob consulta</span><a href="#contacto" data-orcamento="Visor de cliente">Pedir orçamento →</a></div>
+      </article>
+      <article class="kit revelar">
+        <div>
+          <span class="etiqueta" style="background:rgba(255,255,255,.14);color:#fff">Kit completo</span>
+          <h3 style="margin-top:14px">Posto POS pronto a facturar</h3>
+          <p>Entregamos o posto montado, com o KanGest instalado e configurado com os seus artigos, séries e impressoras.</p>
+          <ul>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Terminal táctil</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Impressora térmica</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Leitor de códigos</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Gaveta de dinheiro</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Visor de cliente</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Instalação e formação</li>
+          </ul>
+          <a class="btn btn-laranja" href="#contacto" data-orcamento="Kit POS completo">Pedir orçamento do kit</a>
+        </div>
+        <div class="ilustra-kit"><svg viewBox="0 0 420 240" fill="none"><ellipse cx="210" cy="222" rx="190" ry="14" fill="#072e2a" opacity=".45"/><rect x="18" y="128" width="150" height="80" rx="10" fill="#1d2422"/><rect x="26" y="140" width="134" height="40" rx="5" fill="#2a3331"/><rect x="78" y="152" width="30" height="6" rx="3" fill="#7c8582"/><rect x="128" y="20" width="168" height="118" rx="12" fill="#f7f4ee"/><rect x="138" y="30" width="148" height="98" rx="5" fill="#e6f2f0"/><rect x="146" y="38" width="76" height="10" rx="3" fill="#146b63"/><rect x="146" y="56" width="34" height="26" rx="4" fill="#fff"/><rect x="186" y="56" width="34" height="26" rx="4" fill="#fff"/><rect x="146" y="88" width="34" height="26" rx="4" fill="#fff"/><rect x="186" y="88" width="34" height="26" rx="4" fill="#fff"/><rect x="228" y="38" width="50" height="76" rx="4" fill="#fff"/><rect x="234" y="102" width="38" height="8" rx="3" fill="#e09a2b"/><path d="M196 138h32l10 40h-52z" fill="#0f5a53"/><rect x="172" y="178" width="80" height="12" rx="6" fill="#0c4a44"/><path d="M308 96h40v38h-40z" fill="#fff"/><path d="M314 104h28M314 112h20M314 120h28" stroke="#7c8582" stroke-width="3" stroke-linecap="round"/><rect x="292" y="128" width="104" height="62" rx="14" fill="#1d2422"/><circle cx="378" cy="172" r="5" fill="#2f855a"/><path d="M40 96c0-5 4-9 9-9h40c7 0 11 5 9 12l-5 18c-1 4-5 7-9 7H72l-6 34c-1 4-4 6-8 6h-5c-5 0-8-4-7-9l6-31h-9c-5 0-9-4-9-9z" fill="#0b0f0e" transform="translate(-6 -48) scale(.9)"/></svg></div>
+      </article>
+    </div>
+    <p class="aviso-tpa revelar">Pagamentos por TPA (Multicaixa), transferência ou numerário ficam registados por forma de pagamento em cada venda e no fecho de caixa. O TPA é fornecido pelo seu banco.</p>
+  </div>
+</section>
+
+<!-- ================= SIGA Plus ================= -->
+<section class="siga" id="siga">
+  <div class="cont">
+    <div class="revelar">
+      <span class="olho">Gestão escolar</span>
+      <div class="logo"><img src="assets/siga-plus-logo.png" alt="SIGA Plus"></div>
+      <h2 style="color:#fff">A escola inteira num só portal</h2>
+      <p class="sub" style="margin-top:14px">O SIGA Plus é o sistema integrado de gestão académica para escolas angolanas, da iniciação ao ensino superior, acessível pela internet a partir de qualquer computador ou telemóvel.</p>
+      <ul>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Matrículas, estudantes e docentes</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Turmas, horários e presenças</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Pautas, boletins e conselhos</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Secretaria com documentos assinados</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Propinas e relatórios</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Portais do estudante e do encarregado</li>
+      </ul>
+      <div style="display:flex;flex-wrap:wrap;gap:12px">
+        <a class="btn btn-siga" href="https://portal-siga.com" target="_blank" rel="noopener">Abrir portal-siga.com</a>
+        <a class="btn btn-vidro" href="#contacto" data-orcamento="Demonstração do SIGA Plus">Pedir uma demonstração</a>
+      </div>
+    </div>
+    <div class="ecra revelar"><img class="activa" src="assets/siga-portal.jpg" alt="Página de entrada do SIGA Plus" loading="lazy" width="1200" height="750"></div>
+  </div>
+</section>
+
+<!-- ================= projectos ================= -->
+<section id="projectos">
+  <div class="cont">
+    <div class="cabeca revelar">
+      <span class="olho">Projectos para clientes</span>
+      <h2>Também fazemos à medida</h2>
+      <p class="sub">Quando um produto pronto não chega, desenhamos e construímos o sistema do cliente, do site ao painel de gestão.</p>
+    </div>
+    <article class="caso revelar">
+      <div class="foto"><img src="assets/livraria-adventista.jpg" alt="Página inicial da loja online da Livraria Adventista" loading="lazy"></div>
+      <div class="texto">
+        <span class="etiqueta" style="width:max-content">Cliente · Livraria &amp; Editora Adventista</span>
+        <h3 style="font-size:28px">Livraria Adventista</h3>
+        <p>Loja online para leitores, famílias e igrejas comprarem literatura em Angola, com uma experiência de compra moderna do catálogo à entrega.</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Catálogo com pesquisa e destaques</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Carrinho, pagamento e recibo</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Entregas em Angola e acompanhamento da encomenda</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Painel para gerir livros, encomendas e clientes</li>
+        </ul>
+        <div><a class="btn btn-verde" href="https://livrariaadventista.ao" target="_blank" rel="noopener">Visitar livrariaadventista.ao</a></div>
+      </div>
+    </article>
+    <div class="medida revelar">
+      <div><b>Sites e lojas online</b><span>Catálogo, pagamentos e entregas.</span></div>
+      <div><b>Sistemas de gestão</b><span>Para comércio, serviços e instituições.</span></div>
+      <div><b>Migração de dados</b><span>Do sistema antigo para o novo, com conferência.</span></div>
+      <div><b>Instalação e formação</b><span>No local, com o equipamento a funcionar.</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= contacto ================= -->
+<section class="contacto" id="contacto">
+  <div class="cont revelar">
+    <span class="olho">Contacto</span>
+    <h2>Vamos montar o seu sistema?</h2>
+    <p class="sub" style="margin:0 auto">Diga-nos o que precisa (KanGest, SIGA Plus, equipamento POS ou um projecto à medida) e respondemos com uma proposta.</p>
+    <p class="sub" id="assuntoEscolhido" style="margin:12px auto 0;font-weight:600;color:var(--brand-700)"></p>
+    <div class="accoes">
+      <a class="btn btn-verde" id="contactoWhatsapp" href="#" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.2-.4.2-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.8 11.9 11.9 0 0 0 4.6 4c1.7.7 2.4.8 3.2.7a2.8 2.8 0 0 0 1.8-1.3 2.3 2.3 0 0 0 .2-1.3c-.1-.1-.3-.2-.5-.3z"/></svg>
+        Falar por WhatsApp
+      </a>
+      <a class="btn btn-linha" id="contactoEmail" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>
+        Enviar email
+      </a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="cont">
+    <a class="marca" href="#"><img src="assets/kangest-logo.svg" alt=""><span>KanGest</span></a>
+    <nav>
+      <a href="#kangest">KanGest</a>
+      <a href="#equipamento">Equipamento POS</a>
+      <a href="https://portal-siga.com" target="_blank" rel="noopener">SIGA Plus</a>
+      <a href="https://livrariaadventista.ao" target="_blank" rel="noopener">Livraria Adventista</a>
+      <a href="#download">Baixar</a>
+    </nav>
+    <span>© <span id="ano">2026</span> KanGest. Feito em Angola.</span>
+  </div>
+</footer>
+
+<script>
+/* ================= configuração =================
+ * email / whatsapp: contactos de vendas (whatsapp só com algarismos, com o indicativo: 244…).
+ * Com o email preenchido, o formulário de download envia o pedido para esse email (FormSubmit) e a
+ * pessoa recebe uma resposta automática com os links. Sem email, os links aparecem logo na página.
+ * O FormSubmit pede uma confirmação no primeiro envio: abra o email que ele manda e confirme.
+ */
+const CONFIG = {
+  email: "",
+  whatsapp: "",
+  downloads: {
+    pagina: "https://github.com/fernandotunas6-bot/KanGest/releases/latest",
+    windows: "https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_x64-setup.exe",
+    macArm: "https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_aarch64.dmg",
+    macIntel: "https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_x64.dmg",
+  },
+};
+
+document.getElementById("ano").textContent = new Date().getFullYear();
+
+// links de download
+document.getElementById("linkWindows").href = CONFIG.downloads.windows;
+document.getElementById("linkMacArm").href = CONFIG.downloads.macArm;
+document.getElementById("linkMacIntel").href = CONFIG.downloads.macIntel;
+
+// topo: linha ao rolar e menu no telemóvel
+const topo = document.getElementById("topo");
+addEventListener("scroll", () => topo.classList.toggle("rolou", scrollY > 8), { passive: true });
+const menu = document.getElementById("menu"), abrir = document.getElementById("abrirMenu");
+abrir.addEventListener("click", () => {
+  const aberto = menu.classList.toggle("aberto");
+  abrir.setAttribute("aria-expanded", aberto);
+});
+menu.querySelectorAll("a").forEach((a) => a.addEventListener("click", () => { menu.classList.remove("aberto"); abrir.setAttribute("aria-expanded", "false"); }));
+
+// galeria do KanGest
+const botoes = document.querySelectorAll("[data-ecra]"), imagens = document.querySelectorAll("#ecras img");
+botoes.forEach((b) => b.addEventListener("click", () => {
+  botoes.forEach((x) => x.setAttribute("aria-selected", x === b));
+  imagens.forEach((img, i) => img.classList.toggle("activa", String(i) === b.dataset.ecra));
+}));
+
+// contacto (WhatsApp / email), com o assunto do botão «Pedir orçamento» que trouxe a pessoa até aqui
+let assunto = "";
+const zap = document.getElementById("contactoWhatsapp"), mail = document.getElementById("contactoEmail");
+function actualizarContacto() {
+  const texto = assunto ? `Olá! Gostaria de um orçamento: ${assunto}.` : "Olá! Gostaria de saber mais sobre os vossos sistemas.";
+  document.getElementById("assuntoEscolhido").textContent = assunto ? `Assunto: ${assunto}` : "";
+  zap.style.display = CONFIG.whatsapp ? "" : "none";
+  mail.style.display = CONFIG.email ? "" : "none";
+  zap.href = `https://wa.me/${CONFIG.whatsapp}?text=${encodeURIComponent(texto)}`;
+  mail.href = `mailto:${CONFIG.email}?subject=${encodeURIComponent(assunto || "Pedido de informação")}&body=${encodeURIComponent(texto)}`;
+  // sem contactos configurados: o botão leva ao pedido do KanGest por email
+  if (!CONFIG.whatsapp && !CONFIG.email) {
+    mail.style.display = "";
+    mail.href = "#download";
+    mail.lastChild.textContent = " Pedir o KanGest por email";
+  }
+}
+document.querySelectorAll("[data-orcamento]").forEach((a) => a.addEventListener("click", () => { assunto = a.dataset.orcamento; actualizarContacto(); }));
+actualizarContacto();
+
+// formulário de download
+const form = document.getElementById("formDownload"), erro = document.getElementById("erroForm"), enviar = document.getElementById("enviar");
+function mostrarLinks(mensagem) {
+  document.getElementById("pedido").style.display = "none";
+  document.getElementById("textoResposta").textContent = mensagem;
+  document.getElementById("resposta").classList.add("visivel");
+}
+form.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  erro.textContent = "";
+  const dados = Object.fromEntries(new FormData(form));
+  if (!dados.nome.trim()) return (erro.textContent = "Indique o seu nome.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dados.email)) return (erro.textContent = "Indique um email válido.");
+  if (!CONFIG.email) {
+    return mostrarLinks(`Obrigado, ${dados.nome.split(" ")[0]}! Pode baixar o KanGest já aqui:`);
+  }
+  enviar.disabled = true;
+  enviar.textContent = "A enviar…";
+  const links = `Windows: ${CONFIG.downloads.windows}\nMac (Apple Silicon): ${CONFIG.downloads.macArm}\nMac (Intel): ${CONFIG.downloads.macIntel}`;
+  try {
+    const r = await fetch(`https://formsubmit.co/ajax/${CONFIG.email}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        ...dados,
+        _subject: `Pedido de download do KanGest — ${dados.nome}`,
+        _template: "table",
+        _captcha: "false",
+        _autoresponse: `Olá ${dados.nome}, obrigado pelo interesse no KanGest!\n\nPode baixar o instalador aqui:\n${links}\n\nNo Mac, na primeira vez abra com o botão direito → Abrir.\nQualquer dúvida, responda a este email.`,
+      }),
+    });
+    if (!r.ok) throw new Error();
+    mostrarLinks(`Enviámos o link para ${dados.email}. Se preferir, pode baixar já aqui:`);
+  } catch {
+    mostrarLinks("Não foi possível enviar o email agora, mas pode baixar já aqui:");
+  }
+});
+</script>
+</body>
+</html>

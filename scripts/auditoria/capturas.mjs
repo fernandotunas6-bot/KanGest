@@ -75,7 +75,7 @@ for (const p of pedidos) {
       });
     } else if (tipo === "campo") {
       await cmd("Runtime.evaluate", {
-        expression: `(() => { const l = [...document.querySelectorAll('label')].find(e => e.textContent.trim().toLowerCase().startsWith(${JSON.stringify(texto.toLowerCase())})); const el = l?.querySelector('input,textarea,select'); if (el) { el.focus(); return true } return false })()`,
+        expression: `(() => { const l = [...document.querySelectorAll('label')].find(e => e.textContent.trim().toLowerCase().startsWith(${JSON.stringify(texto.toLowerCase())})); const el = l?.querySelector('input,textarea,select') ?? (l?.htmlFor ? document.getElementById(l.htmlFor) : null); if (el) { el.focus(); return true } return false })()`,
       });
     } else if (tipo === "escrever") {
       await cmd("Input.insertText", { text: texto });
