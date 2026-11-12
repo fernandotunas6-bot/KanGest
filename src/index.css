@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+/* Paleta KanGest: verde-petróleo, creme quente, âmbar. */
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+
+  --color-bg: #f6f4ef;
+  --color-surface: #ffffff;
+  --color-sunken: #efece5;
+  --color-line: #e3dfd6;
+  --color-line-strong: #cfc9bc;
+  --color-ink: #1d2422;
+  --color-ink-2: #4b5552;
+  --color-ink-3: #7c8582;
+
+  --color-brand: #146b63;
+  --color-brand-600: #0f5a53;
+  --color-brand-700: #0c4a44;
+  --color-brand-50: #e6f2f0;
+  --color-brand-100: #cce5e1;
+
+  --color-chart: #00897b; /* validado: banda de luminosidade, croma e contraste vs superfície */
+  --color-grid: #ebe8e1;
+
+  --color-accent: #e09a2b;
+  --color-accent-50: #fdf3e2;
+
+  --color-danger: #c2412d;
+  --color-danger-50: #fbeae6;
+  --color-ok: #2f855a;
+  --color-ok-50: #e7f4ec;
+
+  --radius-xl: 14px;
+  --shadow-card: 0 1px 2px rgb(29 36 34 / 0.05), 0 1px 1px rgb(29 36 34 / 0.03);
+  --shadow-pop: 0 18px 50px -12px rgb(29 36 34 / 0.35);
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+input, textarea, select, [data-selectable] { user-select: text; -webkit-user-select: text; }
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Tabelas densas (linhas dos documentos, salários, stock): margens laterais menores para caberem em ecrãs de 1280 px. */
+.tabela-compacta th, .tabela-compacta td { padding-left: 0.5rem; padding-right: 0.5rem; }
+.tabela-compacta th:first-child, .tabela-compacta td:first-child { padding-left: 1rem; }
+.tabela-compacta th:last-child, .tabela-compacta td:last-child { padding-right: 0.75rem; }
+/* Caixas de escolha: seta própria (igual no macOS e no Windows) em vez da nativa, que ocupava espaço a dobrar. */
+.select-kg {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237b8189' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
+  background-size: 14px 14px;
+  text-overflow: ellipsis;
+}
+:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--color-line-strong); border-radius: 10px; border: 2px solid var(--color-bg); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- Impressão: só a área #print-area ---------- */
+@media screen {
+  #print-area { display: none; }
+}
+@media print {
+  body * { visibility: hidden !important; }
+  #print-area, #print-area * { visibility: visible !important; }
+  #print-area { position: absolute; inset: 0 auto auto 0; width: 100%; background: white; }
+  @page { margin: 10mm; }
+  .print-ticket { width: 72mm !important; }
+  .print-ticket.talao-58 { width: 48mm !important; }
+}

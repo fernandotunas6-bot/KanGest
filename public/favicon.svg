@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="100 100 824 824">
+  <defs>
+    <linearGradient id="fundo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1c8c80"/>
+      <stop offset="1" stop-color="#0b433e"/>
+    </linearGradient>
+    <linearGradient id="brilho" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="sombra" x="-12%" y="-10%" width="124%" height="128%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#06231f" flood-opacity="0.32"/>
+    </filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="188" fill="url(#fundo)"/>
+  <rect x="100" y="100" width="824" height="824" rx="188" fill="url(#brilho)"/>
+  <g fill="none" stroke-linecap="round" stroke-width="112" transform="translate(-6 0)">
+    <line x1="374" y1="318" x2="374" y2="706" stroke="#f7f4ee"/>
+    <line x1="500" y1="473" x2="668" y2="706" stroke="#f0a531"/>
+    <line x1="382" y1="590" x2="662" y2="318" stroke="#f7f4ee"/>
+  </g>
+</svg>

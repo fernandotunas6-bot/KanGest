@@ -1,0 +1,65 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "KanGest",
+  "version": "1.0.0",
+  "identifier": "ao.kigest.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "KanGest",
+        "width": 1366,
+        "height": 820,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "app",
+      "dmg"
+    ],
+    "category": "Business",
+    "shortDescription": "Gestão Comercial e Ponto de Venda",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "KanGest",
+    "copyright": "© 2026 KanGest",
+    "longDescription": "Gestão comercial e ponto de venda para Angola: facturação certificada AGT, POS, stock com lotes, tesouraria, recursos humanos, oficina, SAF-T e facturação electrónica.",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "languages": [
+          "Portuguese"
+        ],
+        "displayLanguageSelector": false,
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/nsis-cabecalho.bmp",
+        "sidebarImage": "icons/nsis-lateral.bmp"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  }
+}

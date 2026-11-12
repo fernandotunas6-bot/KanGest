@@ -1,0 +1,26 @@
+﻿KanGest — Exportar dados do KIGEST
+=================================
+
+Para que serve
+  Copia todos os dados do KIGEST (base KigestGC no SQL Server) para um ficheiro
+  «.kigest», que o KanGest novo importa noutro computador ou no mesmo.
+  Só lê a base do KIGEST: não altera nada. As senhas não são exportadas.
+
+Como usar
+  1. Copie esta pasta para o computador onde está o KIGEST
+     (o que tem o SQL Server; normalmente o servidor da loja).
+  2. Feche o KIGEST GC e o POS em todos os postos (para os dados ficarem completos).
+  3. Faça duplo clique em ExportarKIGEST.bat.
+     O programa encontra o Conexao.ini do KIGEST, liga-se à base e grava o ficheiro
+     KIGEST-exportacao-AAAAMMDD-HHMM.kigest no Ambiente de Trabalho.
+  4. Leve o ficheiro para o computador do KanGest (pen, rede ou email) e abra:
+     Sistema → Importar dados do KIGEST → Ficheiro exportado → Simular → Importar dados.
+
+Se não ligar
+  - Corra o programa no computador do SQL Server (veja «Source» no Conexao.ini).
+  - Se o Conexao.ini não for encontrado, o programa pede para o escolher.
+  - Pode indicar o servidor à mão quando o programa pedir (ex.: SERVIDOR\SQLEXPRESS).
+
+Segurança
+  O ficheiro tem os dados da empresa (clientes, vendas, salários).
+  Guarde-o em local seguro e apague-o depois da importação.

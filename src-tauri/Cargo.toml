@@ -1,0 +1,53 @@
+[package]
+name = "kigest"
+version = "1.0.0"
+description = "KanGest — Gestão Comercial e POS"
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "kigest_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate", "chrono"] }
+tokio = { version = "1", features = ["sync", "macros", "rt-multi-thread", "net"] }
+# Importação do KIGEST: cliente SQL Server (TDS) em Rust puro + TLS nativo do sistema.
+tiberius = { version = "0.12", default-features = false, features = ["tds73", "native-tls", "sql-browser-tokio", "chrono"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+argon2 = "0.5"
+rsa = { version = "0.9", features = ["sha1", "pem"] }
+sha1 = { version = "0.10", features = ["oid"] }
+base64 = "0.22"
+rand = "0.8"
+# Cliente HTTPS (actualizações e Facturação Electrónica da AGT) com o TLS do sistema; RS256 e SHA-256.
+native-tls = "0.2"
+sha2 = { version = "0.10", features = ["oid"] }
+minisign-verify = "0.2"
+# Ficheiros exportados do KIGEST (.kigest = JSON por linhas em gzip).
+flate2 = "1"
+
+# Crypto e hashing ficam muito lentos sem optimizações em debug.
+[profile.dev.package.rsa]
+opt-level = 3
+[profile.dev.package.num-bigint-dig]
+opt-level = 3
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
