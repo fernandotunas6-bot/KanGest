@@ -3,6 +3,18 @@
 Sistema de facturação, stock, caixa e ponto de venda para Windows e macOS, inspirado no KIGEST GC/POS (Delphi/SQL Server).
 A análise do sistema antigo e o roteiro estão em [docs/ANALISE-KIGEST.md](docs/ANALISE-KIGEST.md).
 
+## Baixar
+
+- **Página do produto:** https://fernandotunas6-bot.github.io/KanGest/
+- **Windows 10/11 (64 bits):** [KanGest_1.0.0_x64-setup.exe](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_x64-setup.exe)
+- **macOS Apple Silicon (M1–M4):** [KanGest_1.0.0_aarch64.dmg](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_aarch64.dmg)
+- **macOS Intel:** [KanGest_1.0.0_x64.dmg](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_x64.dmg)
+- **Todas as versões:** https://github.com/fernandotunas6-bot/KanGest/releases
+
+Outros produtos na mesma página: [SIGA Plus](https://portal-siga.com) (gestão escolar) e o projecto da
+[Livraria Adventista](https://livrariaadventista.ao). A página está em [site/](site/) e publica-se no GitHub Pages
+(ramo `gh-pages`) ou no Cloudflare Pages com `scripts/publicar-site-cloudflare.py`.
+
 ## Requisitos
 
 - Node.js 22 e npm
