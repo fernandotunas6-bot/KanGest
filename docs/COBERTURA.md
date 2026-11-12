@@ -28,6 +28,7 @@ Legenda: ✅ feito · 🟡 parcial · ❌ falta
 | Promoção do artigo (desconto entre datas) | ✅ | Aplicada automaticamente no POS e nos documentos; até esse valor não pede PIN |
 | Equipamento POS: terminal táctil (1024 × 768, teclado no ecrã, ecrã inteiro), leitor de código de barras com o foco em qualquer sítio (Enter ou Tab), visor de cliente de coluna (VFD série, CD5220/Epson) ou segundo ecrã | ✅ | Ver [EQUIPAMENTO-POS.md](EQUIPAMENTO-POS.md) |
 | Talão térmico com logótipo, fonte B nas 48 colunas, documento de origem, motivo e vencimento | ✅ | Os mesmos elementos fiscais do A4 |
+| Desenho dos impressos igual ao KIGEST (Fatura.fr3, FaturaVia2, FaturaProformaTk, FechoCaixa no POS; FaturaVenda, FaturaRecibo, FaturaProforma, NotaCredito, ReciboClienteNew no GC) | ✅ | Talão HTML e ESC/POS: empresa ao centro, n.º/título, data e hora, linhas em duas filas, totais, modo de pagamento, resumo de imposto, certificação, operador e «OBRIGADO VOLTE SEMPRE». A4: logótipo e empresa à esquerda, «Exmo(s) Senhor(es)» à direita, faixa de dados, tabela e rodapé com resumo de imposto, retenções, coordenadas bancárias e TOTAL DO DOCUMENTO |
 | Nota de entrega (NotaEntregaTk) | ✅ | Em qualquer documento de venda: artigos e quantidades sem preços, em talão ou A4, com assinaturas |
 | Abertura e fecho de caixa (valor físico vs sistema, diferença, reimprimir) | ✅ | Inclui a lista de fechos anteriores |
 | Autenticação de supervisor por código (PIN) | ✅ | |

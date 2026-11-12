@@ -208,6 +208,12 @@ impl Talao {
             self.nl();
         }
     }
+    /// Linha já alinhada em colunas: escreve-se tal como está (sem juntar os espaços), cortada à largura.
+    fn fixa(&mut self, s: &str) {
+        let s: String = s.chars().take(self.cols).collect();
+        self.b.extend_from_slice(&codificar(&s, self.acentos));
+        self.nl();
+    }
     /// Etiqueta à esquerda, valor à direita, na mesma linha.
     fn par(&mut self, k: &str, v: &str) {
         let v: String = v.chars().take(self.cols).collect();
@@ -313,7 +319,7 @@ fn pct(x: f64) -> String {
 /// "2026-11-10" → "10-11-2026"
 fn data_curta(s: &str) -> String {
     match s.get(..10).map(|d| d.split('-').collect::<Vec<_>>()).as_deref() {
-        Some([a, m, dia]) => format!("{dia}-{m}-{a}"),
+        Some([a, m, dia]) => format!("{dia}/{m}/{a}"),
         _ => s.to_string(),
     }
 }
@@ -323,7 +329,7 @@ fn data_hora(s: &str) -> String {
     let s = s.replace('T', " ");
     let (d, h) = s.split_once(' ').unwrap_or((s.as_str(), ""));
     let data = match d.split('-').collect::<Vec<_>>()[..] {
-        [a, m, dia] => format!("{dia}-{m}-{a}"),
+        [a, m, dia] => format!("{dia}/{m}/{a}"),
         _ => d.to_string(),
     };
     let hora: String = h.chars().take(5).collect();
@@ -370,41 +376,83 @@ fn rodape_agt(d: &Value) -> Option<String> {
     })
 }
 
-/// Talão de um documento, igual ao talão em HTML de 80 mm.
+/// Larguras das colunas Qtd · Un · P. Unit · Desc.% · Taxa% · Valor para `cols` caracteres
+/// (48 no talão de 80 mm com a fonte B, 32 no de 58 mm); o valor fica com o que sobra.
+fn larguras(cols: usize) -> [usize; 6] {
+    let [q, u, p, d, t] = if cols >= 42 { [5, 4, 11, 6, 6] } else { [4, 3, 8, 4, 4] };
+    [q, u, p, d, t, cols.saturating_sub(q + u + p + d + t).max(6)]
+}
+
+/// Uma fila de colunas: a primeira e a segunda alinhadas à esquerda, as outras à direita.
+fn colunas_linha(cols: usize, campos: [&str; 6]) -> String {
+    let w = larguras(cols);
+    let mut s = String::new();
+    for (k, (c, l)) in campos.iter().zip(w).enumerate() {
+        let c: String = c.chars().take(l.saturating_sub(if k == 5 { 0 } else { 1 })).collect();
+        let n = c.chars().count();
+        if k < 2 {
+            s.push_str(&c);
+            s.push_str(&" ".repeat(l - n));
+        } else {
+            s.push_str(&" ".repeat(l - n));
+            s.push_str(&c);
+        }
+    }
+    s
+}
+
+/// Talão de um documento com o desenho do Fatura.fr3 do KIGEST POS (igual ao talão em HTML): empresa ao centro,
+/// título e n.º, data e hora, cliente, linhas em duas filas, totais, modo de pagamento, resumo de imposto,
+/// código de certificação, operador e «OBRIGADO VOLTE SEMPRE».
 fn render(cfg: &Config, d: &Value, via: &str) -> Vec<u8> {
     let doc = &d["documento"];
     let e = &d["empresa"];
     let mut t = Talao::novo(cfg);
+    let classe = txt(doc, "classe");
+    let recibo = classe == "RECIBO" || classe == "PAGAMENTO";
 
     if let Some(logo) = &cfg.logo {
         t.imagem(logo);
     }
     t.centrar(true);
     t.negrito(true);
-    let comercial = txt(e, "designacao_comercial");
     let nome = txt(e, "nome");
-    t.linha(if comercial.is_empty() { &nome } else { &comercial });
+    t.linha(&nome);
     t.negrito(false);
-    if !comercial.is_empty() {
-        t.linha(&nome);
+    let comercial = txt(e, "designacao_comercial");
+    if !comercial.is_empty() && comercial != nome {
+        t.linha(&comercial);
+    }
+    let endereco = txt(e, "endereco");
+    if !endereco.is_empty() {
+        t.linha(&endereco);
+    }
+    let tel = txt(e, "telefone");
+    if !tel.is_empty() {
+        t.linha(&format!("Tel.: {tel}"));
     }
     t.linha(&format!("NIF: {}", txt(e, "nif")));
-    for campo in ["endereco", "telefone"] {
-        let v = txt(e, campo);
-        if !v.is_empty() {
-            t.linha(&if campo == "telefone" { format!("Tel: {v}") } else { v });
-        }
+    let local = [txt(e, "localidade"), txt(e, "provincia")].into_iter().find(|x| !x.is_empty()).unwrap_or_else(|| "Luanda".into());
+    t.linha(&format!("{local} - Angola"));
+    if via.starts_with("2.") {
+        t.nl();
+        t.negrito(true);
+        t.linha("2.ª via em conformidade com o original");
+        t.negrito(false);
     }
-    t.separador();
-    t.negrito(true);
-    t.linha(&format!("{} {}", txt(doc, "tipo_desc"), txt(doc, "numero_doc")));
-    t.negrito(false);
-    t.linha(via);
     t.centrar(false);
-    t.linha(&format!("Data: {}", data_hora(&txt(doc, "data_hora"))));
-    t.linha(&format!("Cliente: {}", txt(doc, "entidade_nome")));
+    t.nl();
+    t.negrito(true);
+    t.par(&txt(doc, "numero_doc"), &txt(doc, "tipo_desc"));
+    t.negrito(false);
+    if !via.starts_with("2.") && via != "Original" {
+        t.par("", via);
+    }
+    let dh = txt(doc, "data_hora");
+    t.par(&format!("Data: {}", data_curta(&txt(doc, "data_emissao"))), &format!("Hora: {}", dh.get(11..16).unwrap_or("")));
+    t.linha(&format!("Cliente : {}", txt(doc, "entidade_nome")));
     let nif = txt(doc, "entidade_nif");
-    t.linha(&format!("NIF: {}", if nif == "999999999" { "Consumidor Final".into() } else { nif }));
+    t.linha(&format!("NIF : {}", if nif == "999999999" { "Consumidor Final".into() } else { nif }));
     // nota de crédito/débito: documento de origem e motivo; factura a crédito: vencimento (como no A4)
     let origem = txt(doc, "doc_origem");
     if !origem.is_empty() {
@@ -415,9 +463,13 @@ fn render(cfg: &Config, d: &Value, via: &str) -> Vec<u8> {
         t.linha(&format!("Motivo: {motivo}"));
     }
     let venc = txt(doc, "data_vencimento");
-    let classe = txt(doc, "classe");
-    if !venc.is_empty() && venc.get(..10) != txt(doc, "data_emissao").get(..10) && classe != "RECIBO" {
+    if !venc.is_empty() && venc.get(..10) != txt(doc, "data_emissao").get(..10) && !recibo {
         t.linha(&format!("{}: {}", if classe == "PROFORMA" { "Válido até" } else { "Vencimento" }, data_curta(&venc)));
+    }
+    if classe == "PROFORMA" || recibo || classe == "TRANSPORTE" {
+        t.centrar(true);
+        t.linha("Este documento não serve de factura");
+        t.centrar(false);
     }
     if txt(doc, "estado") == "A" {
         t.centrar(true);
@@ -426,75 +478,102 @@ fn render(cfg: &Config, d: &Value, via: &str) -> Vec<u8> {
         t.negrito(false);
         t.centrar(false);
     }
-    t.separador();
 
-    for l in lista(d, "linhas") {
-        t.linha(&txt(l, "descricao"));
-        let desc = real(l, "desconto_pct");
-        let motivo = txt(l, "motivo_isencao");
-        let esq = format!(
-            "{} x {}{} ({}{})",
-            qtd(real(l, "quantidade")),
-            kz(num(l, "preco_unitario")),
-            if desc > 0.0 { format!(" -{}", pct(desc)) } else { String::new() },
-            pct(real(l, "taxa_iva_pct")),
-            if motivo.is_empty() { String::new() } else { format!(" {motivo}") },
-        );
-        t.par(&esq, &kz(num(l, "total")));
+    let cols = t.cols;
+    if recibo {
+        t.separador();
+        t.negrito(true);
+        t.par("Documento", "Valor");
+        t.negrito(false);
+        for l in lista(d, "liquidacoes") {
+            t.par(&format!("{} {}", txt(l, "numero_doc"), data_curta(&txt(l, "data_emissao"))), &kz(num(l, "valor")));
+        }
+    } else {
+        t.nl();
+        t.negrito(true);
+        t.linha("Descrição");
+        t.fixa(&colunas_linha(cols, ["Qtd", "Un", "P. Unit", "Desc%", "Taxa%", "Valor"]));
+        t.negrito(false);
+        t.separador();
+        for l in lista(d, "linhas") {
+            t.linha(&txt(l, "descricao"));
+            let un = txt(l, "unidade");
+            let desc = real(l, "desconto_pct");
+            t.fixa(&colunas_linha(
+                cols,
+                [
+                    &qtd(real(l, "quantidade")),
+                    if un.is_empty() { "un" } else { &un },
+                    &kz(num(l, "preco_unitario")),
+                    &if desc > 0.0 { pct(desc) } else { "0".into() },
+                    &pct(real(l, "taxa_iva_pct")),
+                    &kz(num(l, "total")),
+                ],
+            ));
+            let motivo = txt(l, "motivo_isencao");
+            if !motivo.is_empty() {
+                let texto = MOTIVOS.iter().find(|(c, _)| *c == motivo).map(|(_, d)| *d).unwrap_or("Isento");
+                t.linha(&format!("{motivo} {texto}"));
+            }
+        }
     }
     t.separador();
 
-    t.par("Total Ilíquido", &kz(num(doc, "total_bruto")));
-    let descontos = num(doc, "total_desconto");
-    if descontos > 0 {
-        t.par("Descontos", &format!("-{}", kz(descontos)));
+    if !recibo {
+        t.par("Total sem Imposto", &kz(num(doc, "total_bruto")));
+        t.par("Descontos", &kz(num(doc, "total_desconto")));
+        t.par("Total Imposto", &kz(num(doc, "total_iva")));
     }
-    t.par("Total IVA", &kz(num(doc, "total_iva")));
     t.negrito(true);
     t.grande(true);
     // em corpo duplo cabem metade das colunas
-    let cols = t.cols;
     t.cols = cols / 2;
-    t.par("TOTAL", &kz(num(doc, "total")));
+    let moeda = Some(txt(doc, "moeda")).filter(|m| !m.is_empty()).unwrap_or_else(|| "AOA".into());
+    t.par(&format!("Total ({moeda})"), &kz(num(doc, "total")));
     t.cols = cols;
     t.grande(false);
     t.negrito(false);
-
+    let entregue = num(doc, "valor_entregue");
+    if entregue > 0 {
+        t.par("Valor Entregue", &kz(entregue));
+    }
     let troco = num(doc, "troco");
+    if troco > 0 {
+        t.par("Troco", &kz(troco));
+    }
+
     let pagamentos = lista(d, "pagamentos");
     if !pagamentos.is_empty() {
+        t.separador();
+        t.centrar(true);
+        t.linha("Modo de Pagamento");
+        t.centrar(false);
+        t.separador();
         for p in pagamentos {
             let extra = if txt(p, "modo_codigo") == "NU" { troco } else { 0 };
             t.par(&txt(p, "descricao"), &kz(num(p, "valor") + extra));
         }
-        if troco > 0 {
-            t.par("Troco", &kz(troco));
-        }
     }
-    t.separador();
-
-    for r in lista(d, "resumo_iva") {
-        let motivo = txt(r, "motivo_isencao");
-        t.par(
-            &format!("IVA {}{}", pct(real(r, "taxa")), if motivo.is_empty() { String::new() } else { format!(" ({motivo})") }),
-            &format!("Base {} · IVA {}", kz(num(r, "base")), kz(num(r, "iva"))),
-        );
-    }
-    for r in lista(d, "resumo_iva") {
-        let motivo = txt(r, "motivo_isencao");
-        if !motivo.is_empty() {
-            let desc = MOTIVOS.iter().find(|(c, _)| *c == motivo).map(|(_, d)| *d).unwrap_or("Isento");
-            t.linha(&format!("{motivo}: {desc}"));
+    let resumo = lista(d, "resumo_iva");
+    if !recibo && !resumo.is_empty() {
+        t.separador();
+        t.centrar(true);
+        t.linha("Resumo de Imposto");
+        t.centrar(false);
+        t.separador();
+        let w = cols / 3;
+        let tres = |a: &str, b: &str, c: &str| format!("{a:<w$}{b:^w$}{c:>r$}", r = cols - 2 * w);
+        t.fixa(&tres("Taxa", "Incidência", "Total Imposto"));
+        for r in resumo {
+            let motivo = txt(r, "motivo_isencao");
+            t.fixa(&tres(&format!("{}{}", pct(real(r, "taxa")), if motivo.is_empty() { String::new() } else { format!(" {motivo}") }), &kz(num(r, "base")), &kz(num(r, "iva"))));
         }
     }
 
+    t.nl();
     t.centrar(true);
-    t.linha("Os bens e/ou serviços foram colocados à disposição do adquirente na data e local do documento.");
-    t.linha(&format!("Operador: {}", txt(doc, "utilizador")));
-    if let Some(r) = rodape_agt(d) {
-        t.negrito(true);
-        t.linha(&r);
-        t.negrito(false);
+    if classe == "VENDA" {
+        t.linha("Os bens e/ou serviços foram colocados à disposição do adquirente na data e local do documento.");
     }
     // Facturação electrónica: QR code da AGT (consulta do documento no Quiosque AGT)
     if let Some(fe) = d.get("fe").filter(|f| f.is_object()) {
@@ -503,11 +582,26 @@ fn render(cfg: &Config, d: &Value, via: &str) -> Vec<u8> {
         t.nl();
         t.linha(if txt(fe, "estado") == "VALIDO" { "Documento validado pela AGT" } else { "Documento comunicado à AGT" });
     }
+    if let Some(r) = rodape_agt(d) {
+        t.linha(&r);
+    }
+    t.centrar(false);
+    t.linha(&format!("Operador: {}", txt(doc, "utilizador")));
+    t.centrar(true);
+    if classe == "PROFORMA" {
+        for b in lista(e, "bancos") {
+            t.linha(&format!("{}: {}", txt(b, "banco"), txt(b, "iban")));
+        }
+    }
+    let texto_rodape = txt(doc, "texto_rodape");
+    if !texto_rodape.is_empty() {
+        t.linha(&texto_rodape);
+    }
     let rodape = txt(e, "rodape");
     if !rodape.is_empty() {
         t.linha(&rodape);
     }
-    t.linha("Obrigado pela preferência!");
+    t.linha("* OBRIGADO VOLTE SEMPRE *");
     t.fim(cfg.cortar);
     t.b
 }
@@ -1007,9 +1101,9 @@ mod testes_equipamento {
         assert!(t.contains("Motivo: Devolucao de livro com"), "{t}");
         assert!(!t.contains("Vencimento"));
         let ft = vazio(json!({ "data_emissao": "2026-11-12", "data_vencimento": "2026-12-12", "classe": "VENDA" }));
-        assert!(texto(&cfg(42), &ft).contains("Vencimento: 12-12-2026"));
+        assert!(texto(&cfg(42), &ft).contains("Vencimento: 12/12/2026"));
         let pp = vazio(json!({ "data_emissao": "2026-11-12", "data_vencimento": "2026-11-27", "classe": "PROFORMA" }));
-        assert!(texto(&cfg(42), &pp).contains("Valido ate: 27-11-2026"));
+        assert!(texto(&cfg(42), &pp).contains("Valido ate: 27/11/2026"));
     }
 
     #[test]

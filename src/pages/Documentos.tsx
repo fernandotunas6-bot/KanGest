@@ -36,7 +36,15 @@ export default function Documentos() {
     queryKey: ["documentos", grupo, f.tipo, f.de, f.ate, dq],
     queryFn: () => call<DocResumo[]>("documentos.listar", { ...f, q: dq, grupo: grupo || null }),
   });
-  const total = lista.data?.filter((d) => d.estado !== "A").reduce((s, d) => s + (["NC", "VNC"].includes(d.tipo_codigo) ? -d.total : d.total), 0) ?? 0;
+  // O total só soma o que se pode somar: com um tipo escolhido, esse tipo; senão as vendas (ou as compras),
+  // sem proformas, guias nem movimentos de stock. As notas de crédito subtraem.
+  const classeTotal = f.tipo ? null : grupo === "COMPRAS" ? "COMPRA" : grupo === "STOCK" ? "STOCK" : "VENDA";
+  const total =
+    lista.data
+      ?.filter((d) => d.estado !== "A" && (!classeTotal || d.classe === classeTotal))
+      .reduce((s, d) => s + (["NC", "VNC"].includes(d.tipo_codigo) ? -d.total : d.total), 0) ?? 0;
+  const rotuloTotal = f.tipo ? `Total de ${f.tipo} no período` : classeTotal === "COMPRA" ? "Total de compras no período" : classeTotal === "STOCK" ? "Total movimentado no período" : "Total facturado no período";
+  const hoje = hojeISO();
 
   // "Novo documento": os mesmos itens do menu do grupo (como na barra do KIGEST GC)
   const novos = MENU.filter((m) => !grupo || GRUPOS.find((g) => g.id === grupo)?.menu === m.id)
@@ -137,7 +145,13 @@ export default function Documentos() {
                     {d.estado === "A" ? (
                       <Badge tone="danger">Anulado</Badge>
                     ) : d.estado === "F" ? (
-                      <Badge tone="brand">Facturado</Badge>
+                      <Badge tone="brand">{d.classe === "PROFORMA" ? "Facturada" : "Facturado"}</Badge>
+                    ) : d.classe === "PROFORMA" ? (
+                      d.data_vencimento && d.data_vencimento.slice(0, 10) < hoje ? (
+                        <Badge>Expirada {data(d.data_vencimento)}</Badge>
+                      ) : (
+                        <Badge tone="accent">Válida até {data(d.data_vencimento ?? d.data_emissao)}</Badge>
+                      )
                     ) : d.valor_pendente > 0 ? (
                       <Badge tone="accent">Em dívida {kz(d.valor_pendente)}</Badge>
                     ) : (
@@ -156,7 +170,7 @@ export default function Documentos() {
         <div className="flex justify-between border-t border-line px-5 py-3 text-[13px] text-ink-2">
           <span>{lista.data?.length ?? 0} documentos</span>
           <span>
-            Total do período: <b className="num text-ink">{kz(total)}</b>
+            {rotuloTotal}: <b className="num text-ink">{kz(total)}</b>
           </span>
         </div>
       </Card>

@@ -95,7 +95,7 @@ pub async fn sessoes(st: &AppState) -> AppResult<Value> {
                 c.valor_contado, c.estado,
                 (SELECT COALESCE(SUM(total), 0) FROM documentos d WHERE d.caixa_sessao_id = c.id AND d.estado = 'N' AND d.tipo_codigo IN ('FR','RC')) AS total_vendido
          FROM caixa_sessoes c JOIN utilizadores u ON u.id = c.utilizador_id LEFT JOIN postos ps ON ps.id = c.posto_id
-         ORDER BY c.id DESC LIMIT 200",
+         ORDER BY c.aberta_em DESC, c.id DESC LIMIT 200",
     )
     .fetch_all(&st.pool)
     .await?;

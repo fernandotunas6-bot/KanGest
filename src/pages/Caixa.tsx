@@ -11,6 +11,7 @@ import type { CaixaResumo } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Stat, Table, Td, Th, cn } from "@/components/ui";
 import { PrintPortal } from "@/components/DocumentoPrint";
+import { useEmpresa } from "@/components/PrintCabecalho";
 
 interface SessaoLista {
   id: number;
@@ -294,40 +295,67 @@ function Historico({ onClose, onAbrir }: { onClose: () => void; onAbrir: (id: nu
 function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void }) {
   const dif = (r.sessao.valor_contado ?? 0) - r.numerario_esperado;
   const t58 = useTalao58();
+  const e = useEmpresa();
+  const tabelas = useTabelas();
+  const armazem = tabelas.data?.armazens.find((a) => a.id === tabelas.data?.armazem_id);
+  const linha = (k: string, v: string, forte = false) => (
+    <div className={cn("flex justify-between gap-2", forte && "font-bold")}>
+      <span>{k}</span>
+      <span>{v}</span>
+    </div>
+  );
+  // desenho do FechoCaixa.fr3 do KIGEST POS: empresa, n.º do fecho, datas, armazém, posto e vendedor,
+  // valores por forma de pagamento, total, valor físico e diferença
   const conteudo = (
-    <div className={cn("print-ticket mx-auto bg-white font-mono text-black", t58 ? "talao-58 w-[220px] p-2 text-[10px] leading-[1.35]" : "w-[300px] p-3 text-[11px] leading-[1.4]")}>
-      <div className="text-center font-bold">FECHO DE CAIXA</div>
-      <div className="mt-1">Posto: {r.sessao.posto ?? "—"}</div>
-      <div>Operador: {r.sessao.utilizador}</div>
-      <div>Abertura: {dataHora(r.sessao.aberta_em)}</div>
-      <div>Fecho: {r.sessao.fechada_em ? dataHora(r.sessao.fechada_em) : "(em aberto)"}</div>
-      <div className="my-2 border-t border-dashed border-black" />
-      {r.por_modo.map((m) => (
-        <div key={m.codigo} className="flex justify-between">
-          <span>{m.descricao}</span>
-          <span>{kz(m.total)}</span>
+    <div
+      className={cn("print-ticket mx-auto bg-white text-black", t58 ? "talao-58 w-[220px] p-2 text-[9.5px] leading-[1.3]" : "w-[300px] p-3 text-[11px] leading-[1.35]")}
+      style={{ fontFamily: "Arial, Helvetica, sans-serif" }}
+    >
+      {e && (
+        <div className="text-center">
+          <div className="text-[13px] font-bold">{e.nome}</div>
+          {e.designacao_comercial && e.designacao_comercial !== e.nome && <div>{e.designacao_comercial}</div>}
+          {e.endereco && <div>{e.endereco}</div>}
+          {e.telefone && <div>Telf.: {e.telefone}</div>}
+          <div>{e.localidade || e.provincia || "Luanda"} - Angola</div>
         </div>
+      )}
+      <div className="mt-2 text-[12.5px] font-bold">FECHO DE CAIXA Nº - {r.sessao.id}</div>
+      {linha("Data Abertura:", dataHora(r.sessao.aberta_em))}
+      {linha("Data de Fecho:", r.sessao.fechada_em ? dataHora(r.sessao.fechada_em) : "(em aberto)")}
+      {armazem && linha("Armazém:", armazem.nome)}
+      {linha("Posto:", r.sessao.posto ?? "—")}
+      {linha("Vendedor:", r.sessao.utilizador)}
+      <div className="mt-2 flex justify-between border-y border-black py-0.5 font-bold">
+        <span>Descrição Pagamento</span>
+        <span>Valor</span>
+      </div>
+      {r.por_modo.map((m) => (
+        <div key={m.codigo}>{linha(m.descricao, kz(m.total))}</div>
       ))}
-      <div className="my-2 border-t border-dashed border-black" />
-      <div className="flex justify-between"><span>Fundo de maneio</span><span>{kz(r.sessao.valor_inicial)}</span></div>
-      <div className="flex justify-between"><span>Entradas</span><span>{kz(r.entradas)}</span></div>
-      <div className="flex justify-between"><span>Saídas</span><span>{kz(r.saidas)}</span></div>
-      <div className="flex justify-between font-bold"><span>Total do sistema</span><span>{kz(r.numerario_esperado)}</span></div>
-      <div className="flex justify-between font-bold"><span>Valor físico</span><span>{r.sessao.valor_contado === null ? "—" : kz(r.sessao.valor_contado)}</span></div>
-      {r.sessao.valor_contado !== null && <div className="flex justify-between font-bold"><span>Diferença</span><span>{kz(dif)}</span></div>}
-      <div className="mt-2">Documentos: {r.documentos} · Total: {kz(r.total_vendido)}</div>
+      <div className="mt-1 border-t border-black pt-1">
+        {linha(`Total de ${r.documentos} documento(s):`, kz(r.total_vendido), true)}
+        {linha("Fundo de maneio", kz(r.sessao.valor_inicial))}
+        {linha("Entradas", kz(r.entradas))}
+        {linha("Saídas", kz(r.saidas))}
+        {linha("Numerário esperado:", kz(r.numerario_esperado), true)}
+        {linha("Valor Físico:", r.sessao.valor_contado === null ? "—" : kz(r.sessao.valor_contado), true)}
+        {r.sessao.valor_contado !== null && linha(dif < 0 ? "Diferença (falta):" : dif > 0 ? "Diferença (sobra):" : "Diferença:", kz(dif), true)}
+      </div>
       {r.artigos.length > 0 && (
         <>
-          <div className="my-2 border-t border-dashed border-black" />
-          <div className="font-bold">Artigos vendidos</div>
+          <div className="mt-2 border-y border-black py-0.5 text-center">Artigos vendidos</div>
           {r.artigos.map((a) => (
             <div key={a.referencia} className="flex justify-between gap-2">
-              <span className="truncate">{qtd(a.quantidade)} x {a.descricao}</span>
+              <span className="truncate">
+                {qtd(a.quantidade)} x {a.descricao}
+              </span>
               <span>{kz(a.total)}</span>
             </div>
           ))}
         </>
       )}
+      {e?.rodape && <div className="mt-2 text-center">{e.rodape}</div>}
     </div>
   );
   return (

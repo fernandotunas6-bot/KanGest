@@ -11,13 +11,13 @@ A importação é igual nos dois casos (mesmas tabelas, simulação, conferênci
 
 | Conjunto | Tabelas do KIGEST | Notas |
 |---|---|---|
-| Empresa | `tbzconfigCompany` | Nome, NIF, morada, telefones, email, rodapé, bancos/IBAN e logótipo (PNG/JPEG) |
+| Empresa | `tbzconfigCompany` | Nome, NIF, morada, telefones, email, rodapé, bancos/IBAN e logótipo (PNG/JPEG). O n.º do certificado do KIGEST (ex.: 123/AGT/2020, lido do texto «Processado por programa validado nº…») fica como referência para as 2.ªs vias do histórico |
 | Tabelas | `tbzconfigTaxasIva`, `tbzconfigTaxaMotivoIsencao`, `tbArtigosUnidade`, `tbArtigosFamilia`, `tbArtigosSubFamilia`, `tbzconfigArmazem` | Reaproveita o que já existir (mesma taxa, unidade, família ou armazém) |
-| Artigos | `tbArtigos` | Referência, código de barras, 4 preços, custo, IVA e isenção, stock mínimo e máximo, promoção (`Promocao`, `PromoData_ini`, `PromoData_Fim`, `Desconto`/`ValDesconto`). Os serviços são reconhecidos pela família. |
-| Stock | `tbArtigosStock` (ou `tbArtigos.QtdStock`) | Existência por armazém e custo médio. Fica registado o movimento "Saldo inicial importado do KIGEST". |
-| Clientes / Fornecedores | `tbClientes` / `tbFornecedores` (ou as vistas `vsClientes` / `vsFornecedores`) | O "Consumidor Final" é associado ao do sistema novo |
+| Artigos | `tbArtigos` | Referência, código de barras, 4 preços, custo, IVA e isenção, stock mínimo e máximo, promoção (`Promocao`, `PromoData_ini`, `PromoData_Fim`, `Desconto`/`ValDesconto`). Os serviços são reconhecidos pela família. Todos os produtos movimentam stock (no KIGEST as vendas abatem o stock mesmo com `ControloStock = N`); `ControloStock = N` ou `StockZerado = S` passa a «permite vender sem stock» |
+| Stock | `tbArtigosStock` (ou `tbArtigos.QtdStock`) | Existência por armazém, custo médio e as datas de última entrada e saída. Fica registado o movimento "Saldo inicial importado do KIGEST". |
+| Clientes / Fornecedores | `tbClientes` / `tbFornecedores` (ou as vistas `vsClientes` / `vsFornecedores`) | O "Consumidor Final" é associado ao do sistema novo. Os códigos de cliente podem ser números ou texto (ex.: «Filial centro», «000001234») e são usados tal como estão |
 | Utilizadores | `tbUsuario` | **Senhas provisórias** (as do KIGEST não são reaproveitáveis): cada utilizador tem de escolher uma senha nova no primeiro acesso. O PIN é mantido. O perfil fica CAIXA, excepto contas "admin". |
-| Documentos | `tbDocumentosCabessalho`, `tbDocumentosDetalhe`, `tbDocsModoPagamentos`, `tbzconfigTiposDocumentos` | Histórico só de leitura, com os números, as datas, as linhas e as **assinaturas originais** |
+| Documentos | `tbDocumentosCabessalho`, `tbDocumentosDetalhe`, `tbDocsModoPagamentos`, `tbzconfigTiposDocumentos` | Histórico só de leitura, com os números, as datas, as linhas e as **assinaturas originais**. Anulado = `EstadoDocsTotal` ≠ 0 (o critério dos relatórios do KIGEST); o `EstadoDocumento` é ignorado, porque há bases com «A» em todos os documentos. Totais: sem imposto (`ValSemTaxa`), descontos de linha (`ValDescontoLinha`) e global (`ValDesconto`) |
 | Conta corrente | `tbContasCorrente` | Os valores em dívida passam para as facturas importadas: podem emitir-se recibos sobre elas no sistema novo |
 | Recursos humanos | `tbRhFuncionarios`, `tbZconfigRhDepartamento`, `tbZconfigRhFuncao`, `tbZconfigRhCategoria`, `tbRhAgregadoFamiliar`, `tbRhMapaFerias` | Ficha completa, salário base e subsídios fixos, IBAN, descontos INSS/IRT, contrato, admissão e saída; trabalhadores por conta própria marcados como independentes; agregado familiar; férias (um período por funcionário, o mapa mensal do KIGEST não se repete). Confirme a tabela de IRT antes do primeiro processamento. |
 | Lotes | `tbArtigosLotes` | Lote, validade, fabrico, custo e quantidade como **saldo inicial** do lote. O artigo só passa a ser controlado por lote se, em todos os armazéns, a soma dos lotes for igual ao stock (aviso nos restantes). |
@@ -31,7 +31,7 @@ A importação é igual nos dois casos (mesmas tabelas, simulação, conferênci
 | Moedas e prazos | `tbzconfigMoeda`, `tbzconfigTiposPagamento` | Câmbios em vigor e prazos de pagamento |
 | Salários (histórico) | `tbRhProcessamentoCabessalho`, `tbRhProcessamentoRecibo`, `vsRhProcesamentoHonorarios`, `tbRhAlteracoesMensais`, `tbRhAdiantamentoSalario` | Meses processados com os recibos e as linhas (pagos), honorários, e as alterações e parcelas de adiantamento ainda por processar |
 
-A importação pode ser repetida: artigos, entidades, utilizadores e documentos já importados não são duplicados.
+A importação pode ser repetida: artigos, entidades, utilizadores e documentos já importados não são duplicados. Repetir também corrige o que versões anteriores do importador leram mal (estado anulado, descontos, cliente com código em texto, dívida — esta só se o documento ainda não teve recibos no KanGest — e o controlo de stock dos artigos).
 Antes de importar, o programa faz uma cópia de segurança da base actual na pasta Transferências.
 
 ## Certificado AGT e assinaturas

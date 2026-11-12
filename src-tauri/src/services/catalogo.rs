@@ -475,7 +475,7 @@ pub async fn stock_movimentos(st: &AppState, f: MovFiltro) -> AppResult<Value> {
          LEFT JOIN documentos d ON d.id = m.documento_id
          LEFT JOIN armazens ar ON ar.id = m.armazem_id
          WHERE m.artigo_id = ?1 AND (?2 IS NULL OR m.armazem_id = ?2)
-         ORDER BY m.id DESC LIMIT 500",
+         ORDER BY m.data_hora DESC, m.id DESC LIMIT 500",
     )
     .bind(f.artigo_id)
     .bind(f.armazem_id)

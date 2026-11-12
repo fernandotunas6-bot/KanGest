@@ -1377,7 +1377,7 @@ pub async fn listar(st: &AppState, f: Filtro) -> AppResult<Value> {
            AND (?6 IS NULL OR d.entidade_id = ?6)
            AND (?8 IS NULL OR d.estado = ?8)
            AND (?9 IS NULL OR t.grupo = ?9)
-         ORDER BY d.id DESC LIMIT ?7",
+         ORDER BY d.data_hora DESC, d.id DESC LIMIT ?7",
     )
     .bind(f.tipo.filter(|s| !s.is_empty()))
     .bind(f.classe.filter(|s| !s.is_empty()))

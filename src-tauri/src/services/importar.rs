@@ -82,6 +82,11 @@ fn i(r: &Registo, nomes: &[&str]) -> Option<i64> {
 fn b(r: &Registo, nomes: &[&str]) -> Option<bool> {
     campo(r, nomes).and_then(|v| v.bool())
 }
+/// Código de cliente ou fornecedor do KIGEST, tal como está: pode ser número ou texto (há bases com
+/// códigos como «Filial centro», «000001234», «0000000» e «0000000000», que são clientes diferentes).
+fn ent(r: &Registo, nomes: &[&str]) -> Option<String> {
+    campo(r, nomes)?.texto()
+}
 /// Kwanzas (decimal) → cêntimos.
 fn kz(r: &Registo, nomes: &[&str]) -> i64 {
     n(r, nomes).map(|v| (v * 100.0).round() as i64).unwrap_or(0)
@@ -676,6 +681,18 @@ pub async fn executar(st: &AppState, e: ExecutarIn) -> AppResult<Value> {
     importar_dados(st, &mut fonte, &e.opcoes, &origem).await
 }
 
+/// N.º do certificado no texto «Processado por programa validado nº.123/AGT/2020» → «123/AGT/2020».
+fn certificado_no_rodape(rodape: &str) -> Option<String> {
+    let baixo = rodape.to_lowercase();
+    if !baixo.contains("process") {
+        return None;
+    }
+    let inicio = ["n.º", "nº.", "nº", "n°", "no."].iter().filter_map(|m| baixo.find(m).map(|p| p + m.len())).min()?;
+    let resto: String = baixo[inicio..].trim_start_matches(['.', ' ', ':']).chars().take_while(|c| !c.is_whitespace()).collect();
+    let resto = resto.trim_end_matches(['/', '.', ',']).to_uppercase();
+    resto.chars().next().filter(|c| c.is_ascii_digit()).map(|_| resto)
+}
+
 // ------------------------------------------------------------------ importação
 struct Mapas {
     taxas: HashMap<i64, (i64, f64)>, // id KIGEST → (id novo, %)
@@ -685,8 +702,9 @@ struct Mapas {
     armazens: HashMap<i64, i64>,
     artigos: HashMap<i64, i64>,
     artigos_ref: HashMap<String, i64>,
-    clientes: HashMap<i64, i64>,
-    fornecedores: HashMap<i64, i64>,
+    // código KIGEST (número ou texto, ver `ent`) → id novo
+    clientes: HashMap<String, i64>,
+    fornecedores: HashMap<String, i64>,
     utilizadores: HashMap<i64, i64>,
 }
 
@@ -931,7 +949,9 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
         .bind(logo)
         .execute(&mut *tx)
         .await?;
-        if let Some(cert) = t(e, &["NumCertificado", "NumeroCertificado", "Certificado", "CertificadoAGT", "NCertificado", "NumValidacao", "SoftwareValidationNumber"]) {
+        // n.º do certificado: numa coluna própria ou no texto do rodapé («Processado por programa validado nº.123/»)
+        let do_rodape = t(e, &["Rodape"]).and_then(|r| certificado_no_rodape(&r));
+        if let Some(cert) = t(e, &["NumCertificado", "NumeroCertificado", "Certificado", "CertificadoAGT", "NCertificado", "NumValidacao", "SoftwareValidationNumber"]).or(do_rodape) {
             sqlx::query("INSERT INTO config (chave, valor) VALUES ('agt.certificado_anterior', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor")
                 .bind(&cert)
                 .execute(&mut *tx)
@@ -1050,9 +1070,13 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
             i(r, &["IdSubFamilia"]).and_then(|s| mapas.subfamilias.get(&s).copied()),
             i(r, &["IdUnidadeVenda", "IdUnidade"]).and_then(|u| mapas.unidades.get(&u).copied()).or(Some(1)),
         );
+        // No KIGEST as vendas abatem o stock mesmo com ControloStock = «N» (na base real, em 250 de 276 artigos
+        // vendidos o stock é entradas − vendas): esse campo só decide se deixa vender sem stock.
+        let controla = !servico;
+        let negativo = b(r, &["ControloStock", "ControlaStock"]) == Some(false) || b(r, &["StockZerado", "PermiteStockNegativo"]).unwrap_or(false);
         let id = match existente {
             Some(id) => {
-                sqlx::query("UPDATE artigos SET descricao = ?, preco1 = ?, preco2 = ?, preco3 = ?, preco4 = ?, custo = ?, taxa_iva_id = ?, motivo_isencao = ?, id_origem = ? WHERE id = ?")
+                sqlx::query("UPDATE artigos SET descricao = ?, preco1 = ?, preco2 = ?, preco3 = ?, preco4 = ?, custo = ?, taxa_iva_id = ?, motivo_isencao = ?, id_origem = ?, controla_stock = ?, permite_negativo = ? WHERE id = ?")
                     .bind(&descricao)
                     .bind(kz(r, &["Preco1"]))
                     .bind(kz(r, &["Preco2"]))
@@ -1062,6 +1086,8 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
                     .bind(taxa_id)
                     .bind(&motivo)
                     .bind(id_k.map(|x| x.to_string()))
+                    .bind(controla as i64)
+                    .bind(negativo as i64)
                     .bind(id)
                     .execute(&mut *tx)
                     .await?;
@@ -1091,8 +1117,8 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
             .bind(kz(r, &["Preco4"]))
             .bind(n(r, &["QtdMinimo", "StockMinimo"]).unwrap_or(0.0))
             .bind(n(r, &["QtdMaximo", "StockMaximo"]).unwrap_or(0.0))
-            .bind((!servico && b(r, &["ControloStock", "ControlaStock"]).unwrap_or(true)) as i64)
-            .bind(b(r, &["StockZerado", "PermiteStockNegativo"]).unwrap_or(false) as i64)
+            .bind(controla as i64)
+            .bind(negativo as i64)
             .bind(ativo as i64)
             .bind(id_k.map(|x| x.to_string()))
             .execute(&mut *tx)
@@ -1130,7 +1156,8 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
     if op.stock {
         let agora = db::agora();
         let mut n_stk = 0;
-        let mut itens: Vec<(i64, i64, f64, Option<i64>)> = Vec::new();
+        // (artigo, armazém, quantidade, custo médio, última entrada, última saída) — as datas são as do KIGEST
+        let mut itens: Vec<(i64, i64, f64, Option<i64>, Option<String>, Option<String>)> = Vec::new();
         if !stock.is_empty() {
             for r in &stock {
                 let artigo = i(r, &["IdArtigo"])
@@ -1140,17 +1167,19 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
                 let armazem = i(r, &["IdArmazem"]).and_then(|x| mapas.armazens.get(&x).copied()).unwrap_or(1);
                 let qtd = n(r, &["QtdExistente", "Quantidade", "Stock", "Qtd"]).unwrap_or(0.0);
                 let cm = n(r, &["CustoMedio"]).map(|v| (v * 100.0).round() as i64);
-                itens.push((artigo, armazem, qtd, cm));
+                // no KIGEST vêm só com o dia («2026-10-23») ou com dia e hora
+                let quando = |c: &str| data_hora(r, &[c]).or_else(|| data(r, &[c]).map(|d| format!("{d}T00:00:00")));
+                itens.push((artigo, armazem, qtd, cm, quando("UltimaEntrada"), quando("UltimaSaida")));
             }
         } else {
             for r in &artigos {
                 let artigo = i(r, &["IdArtigo", "Id"]).and_then(|x| mapas.artigos.get(&x).copied());
                 if let (Some(artigo), Some(qtd)) = (artigo, n(r, &["QtdStock", "Stock"])) {
-                    itens.push((artigo, 1, qtd, None));
+                    itens.push((artigo, 1, qtd, None, None, None));
                 }
             }
         }
-        for (artigo, armazem, qtd, cm) in itens {
+        for (artigo, armazem, qtd, cm, entrada, saida) in itens {
             let atual: f64 = sqlx::query_scalar("SELECT quantidade FROM stock WHERE artigo_id = ? AND armazem_id = ?")
                 .bind(artigo)
                 .bind(armazem)
@@ -1158,13 +1187,16 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
                 .await?
                 .unwrap_or(0.0);
             sqlx::query(
-                "INSERT INTO stock (artigo_id, armazem_id, quantidade, ultima_entrada) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(artigo_id, armazem_id) DO UPDATE SET quantidade = ?3",
+                "INSERT INTO stock (artigo_id, armazem_id, quantidade, ultima_entrada, ultima_saida) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(artigo_id, armazem_id) DO UPDATE SET quantidade = ?3,
+                    ultima_entrada = COALESCE(?6, ultima_entrada), ultima_saida = COALESCE(?5, ultima_saida)",
             )
             .bind(artigo)
             .bind(armazem)
             .bind(qtd)
-            .bind(&agora)
+            .bind(entrada.clone().unwrap_or_else(|| agora.clone()))
+            .bind(&saida)
+            .bind(&entrada)
             .execute(&mut *tx)
             .await?;
             if let Some(cm) = cm.filter(|c| *c > 0) {
@@ -1193,7 +1225,7 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
     for (tipo, regs, ativo_op) in [("C", &clientes, op.clientes), ("F", &fornecedores, op.fornecedores)] {
         let mut n_ent = 0;
         for r in regs.iter() {
-            let id_k = i(r, &["IdCliente", "IdFornecedor", "IdEntidade", "Id", "Codigo"]);
+            let id_k = ent(r, &["IdCliente", "IdFornecedor", "IdEntidade", "Id", "Codigo"]);
             let Some(nome) = t(r, &["Nome", "NomeCliente", "NomeFornecedor", "Designacao", "EntidadeNome"]) else { continue };
             let nif = t(r, &["NIF", "Contribuinte", "NContribuinte", "NumContribuinte"]).unwrap_or_else(|| "999999999".into());
             let consumidor = nif == "999999999" && nome.to_lowercase().contains("consumidor");
@@ -1228,7 +1260,7 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
                         .bind(t(r, &["Email"]))
                         .bind(n(r, &["Desconto"]).unwrap_or(0.0).clamp(0.0, 100.0))
                         .bind(kz(r, &["LimiteCredito", "Plafond"]))
-                        .bind(id_k.map(|x| format!("{tipo}:{x}")))
+                        .bind(id_k.as_ref().map(|x| format!("{tipo}:{x}")))
                         .execute(&mut *tx)
                         .await?
                         .last_insert_rowid()
@@ -1464,7 +1496,7 @@ async fn n_docs(
 
     let mut ignorados: HashSet<String> = HashSet::new();
     let mut colisoes: Vec<String> = Vec::new();
-    let (mut n_ok, mut n_pend) = (0i64, 0i64);
+    let (mut n_ok, mut n_pend, mut n_corrigidos) = (0i64, 0i64, 0i64);
     for d in docs {
         let Some(rf) = t(d, &["RefDocumento", "NumDocumento"]) else { continue };
         let cod = i(d, &["IdTipoDocumento", "TipoDocumento"])
@@ -1474,16 +1506,8 @@ async fn n_docs(
             ignorados.insert(rf.split_whitespace().next().unwrap_or("?").to_string());
             continue;
         };
-        let existe: Option<i64> = sqlx::query_scalar("SELECT importado FROM documentos WHERE numero_doc = ?").bind(&rf).fetch_optional(&mut **tx).await?;
-        if let Some(importado) = existe {
-            // já importado (repetição da importação) ou número já usado por um documento do KanGest
-            if importado == 0 {
-                colisoes.push(rf.clone());
-            }
-            continue;
-        }
         let (_classe, grupo, conta_corrente) = classes.get(cod).cloned().unwrap_or(("VENDA".into(), "VENDAS".into(), 0));
-        let ent_k = i(d, &["IdEntidade", "IdCliente", "IdFornecedor", "Entidade"]);
+        let ent_k = ent(d, &["IdEntidade", "IdCliente", "IdFornecedor", "Entidade"]);
         let entidade = match grupo.as_str() {
             "COMPRAS" => ent_k.and_then(|k| mapas.fornecedores.get(&k).copied()),
             "STOCK" => None,
@@ -1495,15 +1519,55 @@ async fn n_docs(
         let total = kz(d, &["ValTotal", "Total", "ValTotal_Com_Imposto"]);
         let iva = kz(d, &["ValTaxa", "Imposto", "TotalImposto"]);
         let liquido = n(d, &["ValLiquido"]).map(|v| (v * 100.0).round() as i64).unwrap_or(total - iva);
-        let desconto = kz(d, &["ValDesconto", "TotalDeconto", "TotalDesconto"]);
-        let anulado = campo(d, &["Anulado"]).and_then(|v| v.bool()).unwrap_or(false)
-            || t(d, &["Estado", "Status", "EstadoDocumento", "StatusDocumento"]).map(|s| {
+        // O KIGEST guarda o total sem imposto antes dos descontos (ValSemTaxa), o desconto das linhas
+        // (ValDescontoLinha) e o desconto global (ValDesconto) em separado.
+        let (bruto, desconto) = match n(d, &["ValSemTaxa"]).map(|v| (v * 100.0).round() as i64).filter(|b| *b >= liquido) {
+            Some(b) => (b, b - liquido),
+            None => {
+                let desc = kz(d, &["ValDescontoLinha"]) + kz(d, &["ValDesconto", "TotalDeconto", "TotalDesconto"]);
+                (liquido + desc, desc)
+            }
+        };
+        // No KIGEST o documento anulado tem EstadoDocsTotal ≠ 0 (os relatórios filtram «EstadoDocsTotal=0»).
+        // O EstadoDocumento não serve: há bases em que vale «A» em todos os documentos, anulados ou não.
+        let anulado = match b(d, &["EstadoDocsTotal", "Anulado", "CanceladoStatus"]) {
+            Some(x) => x,
+            None => t(d, &["Estado", "Status", "StatusDocumento"]).map(|s| {
                 let s = s.to_uppercase();
                 s == "A" || s.starts_with("ANUL")
-            }).unwrap_or(false);
+            }).unwrap_or(false),
+        };
         let hash = t(d, &["Hash", "HashDocumento", "Assinatura"]).unwrap_or_default();
         let controlo = t(d, &["AssinaturaCurta", "HashControlo"]).unwrap_or_default();
         let pend = if conta_corrente == 1 && !anulado { pendente.get(&rf).copied().unwrap_or(0).max(0) } else { 0 };
+        let existe: Option<i64> = sqlx::query_scalar("SELECT importado FROM documentos WHERE numero_doc = ?").bind(&rf).fetch_optional(&mut **tx).await?;
+        if let Some(importado) = existe {
+            if importado == 0 {
+                // número já usado por um documento emitido no KanGest
+                colisoes.push(rf.clone());
+            } else {
+                // repetição da importação: acerta o que versões anteriores do importador liam mal (estado anulado,
+                // descontos, cliente com código em texto, valor em dívida). A dívida só se repõe se o documento
+                // ainda não teve recibos no KanGest.
+                let r = sqlx::query(
+                    "UPDATE documentos SET estado = ?1, total_bruto = ?2, total_desconto = ?3, entidade_id = COALESCE(?4, entidade_id),
+                        valor_pendente = CASE WHEN EXISTS (SELECT 1 FROM recibo_documentos r WHERE r.documento_id = documentos.id) THEN valor_pendente ELSE ?5 END
+                     WHERE numero_doc = ?6 AND importado = 1
+                       AND (estado <> ?1 OR total_bruto <> ?2 OR total_desconto <> ?3 OR IFNULL(entidade_id, 0) <> IFNULL(COALESCE(?4, entidade_id), 0)
+                            OR (valor_pendente <> ?5 AND NOT EXISTS (SELECT 1 FROM recibo_documentos r WHERE r.documento_id = documentos.id)))",
+                )
+                .bind(if anulado { "A" } else { "N" })
+                .bind(bruto)
+                .bind(desconto)
+                .bind(entidade)
+                .bind(pend)
+                .bind(&rf)
+                .execute(&mut **tx)
+                .await?;
+                n_corrigidos += r.rows_affected() as i64;
+            }
+            continue;
+        }
         let doc_id = sqlx::query(
             "INSERT INTO documentos (tipo_codigo, serie, numero, numero_doc, data_emissao, data_hora, data_vencimento, entidade_id,
                 entidade_nome, entidade_nif, entidade_endereco, utilizador_id, armazem_id, estado, total_bruto, total_desconto,
@@ -1525,7 +1589,7 @@ async fn n_docs(
         .bind(i(d, &["IdUsuario"]).and_then(|u| mapas.utilizadores.get(&u).copied()).unwrap_or(utilizador_padrao))
         .bind(i(d, &["IdArmazem", "ArmazemOrigem"]).and_then(|a| mapas.armazens.get(&a).copied()))
         .bind(if anulado { "A" } else { "N" })
-        .bind(liquido + desconto)
+        .bind(bruto)
         .bind(desconto)
         .bind(liquido)
         .bind(iva)
@@ -1562,6 +1626,9 @@ async fn n_docs(
         n_ok += 1;
     }
     rel.conta("Documentos (histórico)", n_ok);
+    if n_corrigidos > 0 {
+        rel.conta("Documentos já importados corrigidos", n_corrigidos);
+    }
     if n_pend > 0 {
         rel.conta("Documentos com valor em dívida", n_pend);
     }
@@ -1905,7 +1972,7 @@ async fn n_lotes(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, rel: &mut Relator
     Ok(())
 }
 
-async fn cliente_k(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, mapas: &Mapas, k: Option<i64>) -> AppResult<Option<i64>> {
+async fn cliente_k(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, mapas: &Mapas, k: Option<String>) -> AppResult<Option<i64>> {
     let Some(k) = k else { return Ok(None) };
     if let Some(id) = mapas.clientes.get(&k) {
         return Ok(Some(*id));
@@ -1935,7 +2002,7 @@ async fn n_oficina(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, rel: &mut Relat
     for r in &x.viaturas {
         let Some(origem) = t(r, &["IdViatura", "Id"]) else { continue };
         let marca = t(r, &["Marca"]).unwrap_or_else(|| "—".into());
-        let entidade = cliente_k(tx, mapas, i(r, &["IdCliente"])).await?;
+        let entidade = cliente_k(tx, mapas, ent(r, &["IdCliente"])).await?;
         let existente: Option<i64> = sqlx::query_scalar("SELECT id FROM of_viaturas WHERE id_origem = ?").bind(&origem).fetch_optional(&mut **tx).await?;
         let campos = (t(r, &["Matricula"]), t(r, &["Modelo"]), t(r, &["Cor"]), t(r, &["NumeroChassi", "Chassi"]), t(r, &["NumeroSerie", "Motor"]), t(r, &["DescritivoCombustivel", "Combustivel"]), t(r, &["Tipo", "TipoRegisto"]));
         let km = i(r, &["KilometragenIncial", "Kilometragem", "Km"]).unwrap_or(0);
@@ -1991,7 +2058,7 @@ async fn n_oficina(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, rel: &mut Relat
         .bind(&rf)
         .bind(data(r, &["DataEmissao", "Data"]).unwrap_or_else(db::hoje))
         .bind(viatura)
-        .bind(cliente_k(tx, mapas, i(r, &["IdCliente"])).await?)
+        .bind(cliente_k(tx, mapas, ent(r, &["IdCliente"])).await?)
         .bind(i(r, &["KilometragenIncial", "KmUnidadeInical"]))
         .bind(i(r, &["KilometragenFinal", "KmUnidadeFinal"]))
         .bind(doc_assoc.clone())
@@ -2053,7 +2120,7 @@ async fn inserir_linhas(tx: &mut Transaction<'_, Sqlite>, mapas: &Mapas, doc_id:
         .bind(t(l, &["Unidade"]))
         .bind(kz(l, &["ValorUnit", "PrecoUnitario", "Preco"]))
         .bind(n(l, &["DescontoPercento", "Desconto"]).unwrap_or(0.0))
-        .bind(kz(l, &["ValDesconto"]))
+        .bind(kz(l, &["DescontoTotal", "ValDesconto"]))
         .bind(taxa.map(|x| x.0))
         .bind(pct)
         .bind(t(l, &["CodigoIsencao"]))
@@ -2084,7 +2151,7 @@ fn modo_de_texto(t: &str) -> &'static str {
     }
 }
 
-async fn entidade_k(tx: &mut Transaction<'_, Sqlite>, mapas: &Mapas, fornecedor: bool, k: Option<i64>) -> AppResult<Option<i64>> {
+async fn entidade_k(tx: &mut Transaction<'_, Sqlite>, mapas: &Mapas, fornecedor: bool, k: Option<String>) -> AppResult<Option<i64>> {
     let Some(k) = k else { return Ok(None) };
     let m = if fornecedor { &mapas.fornecedores } else { &mapas.clientes };
     if let Some(id) = m.get(&k) {
@@ -2121,7 +2188,7 @@ async fn n_recibos(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, mapas:
             || prefixo.to_uppercase().starts_with('V')
             || t(r, &["TipoDocumento"]).map(|x| x.to_lowercase().contains("fornec")).unwrap_or(false);
         let tipo = if fornecedor { "VRC" } else { "RC" };
-        let entidade = entidade_k(tx, mapas, fornecedor, i(r, &["EntidadeId", "IdEntidade", "IdCliente", "IdFornecedor"])).await?;
+        let entidade = entidade_k(tx, mapas, fornecedor, ent(r, &["EntidadeId", "IdEntidade", "IdCliente", "IdFornecedor"])).await?;
         let (nome, nif): (String, String) = match entidade {
             Some(e) => sqlx::query_as("SELECT nome, nif FROM entidades WHERE id = ?").bind(e).fetch_one(&mut **tx).await?,
             None => (t(r, &["Nome", "EntidadeNome"]).unwrap_or_else(|| "Consumidor Final".into()), t(r, &["NIF"]).unwrap_or_else(|| "999999999".into())),
@@ -2321,7 +2388,7 @@ async fn n_proformas(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, mapa
         let soma = |nomes: &[&str]| ls.iter().map(|l| kz(l, nomes)).sum::<i64>();
         let total = Some(kz(r, &["ValTotal", "Total", "ValorTotal"])).filter(|v| *v != 0).unwrap_or_else(|| soma(&["ValorTotal"]));
         let iva = Some(kz(r, &["ValTaxa", "ValorTaxa", "TotalImposto"])).filter(|v| *v != 0).unwrap_or_else(|| soma(&["ValorTaxa"]));
-        let entidade = entidade_k(tx, mapas, false, i(r, &["IdEntidade", "IdCliente"])).await?.or(Some(1));
+        let entidade = entidade_k(tx, mapas, false, ent(r, &["IdEntidade", "IdCliente"])).await?.or(Some(1));
         let (nome, nif): (String, String) = sqlx::query_as("SELECT nome, nif FROM entidades WHERE id = ?").bind(entidade).fetch_one(&mut **tx).await?;
         let data_p = data(r, &["DataEmissao", "Data"]).unwrap_or_else(db::hoje);
         let (serie, numero) = serie_numero(&rf);
@@ -2751,4 +2818,17 @@ async fn n_rh_historico(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, x
         rel.avisos.push(format!("{sem_rubrica} alteração(ões) mensal(is) com rubricas que não existem no KanGest não foram importadas; lance-as em Alterações do Mês."));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod testes {
+    use super::certificado_no_rodape;
+
+    #[test]
+    fn certificado_do_rodape() {
+        assert_eq!(certificado_no_rodape("Processado por programa validado nº.123/").as_deref(), Some("123"));
+        assert_eq!(certificado_no_rodape("Processado por programa válido n.º 123/AGT/2020").as_deref(), Some("123/AGT/2020"));
+        assert_eq!(certificado_no_rodape("VOLTE SEMPRE"), None);
+        assert_eq!(certificado_no_rodape("Processado por computador"), None);
+    }
 }

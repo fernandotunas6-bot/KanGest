@@ -62,7 +62,7 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
     let ultimos = sqlx::query(
         "SELECT d.id, d.numero_doc, d.entidade_nome, d.total, d.data_hora, d.estado FROM documentos d
          JOIN tipos_documento t ON t.codigo = d.tipo_codigo WHERE t.classe IN ('VENDA','RECIBO')
-         ORDER BY d.id DESC LIMIT 8",
+         ORDER BY d.data_hora DESC, d.id DESC LIMIT 8",
     )
     .fetch_all(p)
     .await?;

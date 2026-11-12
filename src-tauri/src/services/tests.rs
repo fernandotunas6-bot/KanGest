@@ -1203,13 +1203,19 @@ async fn talao_escpos() {
 
     let bytes = std::fs::read(&saida).unwrap();
     let texto = String::from_utf8_lossy(&bytes).to_string();
+    if std::env::var("VER_TALAO").is_ok() {
+        eprintln!("{texto}");
+    }
     assert!(bytes.starts_with(&[0x1B, b'@']), "falta a inicialização ESC @");
     assert!(texto.contains("Loja Termica, Lda"), "sem cabeçalho da empresa (sem acentos): {texto}");
     assert!(texto.contains("Cafe Sao Bras 500g"), "sem a linha do artigo");
     assert!(texto.contains("2.280,00"), "sem o total formatado: {texto}");
     assert!(texto.contains("Troco"), "sem o troco");
     assert!(texto.contains("Processado por programa"), "sem o rodapé da AGT");
-    assert_eq!(texto.matches("TOTAL").count(), 2, "deviam sair 2 vias");
+    assert_eq!(texto.matches("Total (AOA)").count(), 2, "deviam sair 2 vias: {texto}");
+    assert!(texto.contains("Qtd  Un"), "sem o cabeçalho das colunas: {texto}");
+    assert!(texto.contains("Modo de Pagamento") && texto.contains("Resumo de Imposto"), "sem as secções do talão do KIGEST");
+    assert!(texto.contains("* OBRIGADO VOLTE SEMPRE *"), "sem o fecho do talão");
     assert_eq!(bytes.windows(3).filter(|w| *w == [0x1D, b'V', 1]).count(), 2, "cada via tem de cortar o papel");
     assert_eq!(bytes.windows(5).filter(|w| *w == [0x1B, b'p', 0, 25, 250]).count(), 1, "a gaveta abre uma vez");
     // nenhuma linha passa da largura do papel
@@ -1916,6 +1922,77 @@ fn escrever_kigest(caminho: &std::path::Path, gzip: bool, objectos: &[(&str, &st
     }
 }
 
+/// Serve uma base já existente (ex.: a criada por `importar_ficheiro_real`) na porta 7799, como o
+/// `servidor_demo`, para ver e imprimir os dados reais no browser:
+///   KANGEST_PASTA=/tmp/x cargo test --offline servidor_base -- --ignored --nocapture
+#[tokio::test]
+#[ignore]
+async fn servidor_base() {
+    use std::io::{Read, Write};
+    let Ok(pasta) = std::env::var("KANGEST_PASTA") else { return };
+    let pasta = std::path::PathBuf::from(pasta);
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    let arc = std::sync::Arc::new(st);
+    crate::rede::registar_estado(arc.clone());
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into() };
+    crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
+    let corpo = json!({ "chave": "auditoria123", "token": "auditoria", "posto": 1, "metodo": "auth.login", "params": { "login": "admin", "senha": "1234" } }).to_string();
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", 7799)).unwrap();
+    s.write_all(format!("POST / HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}", corpo.len()).as_bytes()).unwrap();
+    let mut r = String::new();
+    s.read_to_string(&mut r).unwrap();
+    assert!(r.contains("\"ok\":true"), "{r}");
+    eprintln!("SERVIDOR-BASE-PRONTO porta 7799");
+    tokio::time::sleep(std::time::Duration::from_secs(3 * 3600)).await;
+}
+
+/// Importa um ficheiro real do ExportarKIGEST para uma base à parte e grava o resultado em JSON:
+///   KANGEST_FICHEIRO=…/KIGEST-exportacao-….kigest KANGEST_PASTA=/tmp/x cargo test --offline importar_ficheiro_real -- --ignored --nocapture
+/// Na pasta ficam `kigest.db` (a base importada) e `resultado.json` (análise, importação, conferência, síntese).
+#[tokio::test]
+#[ignore]
+async fn importar_ficheiro_real() {
+    let Ok(ficheiro) = std::env::var("KANGEST_FICHEIRO") else { return };
+    let pasta = std::path::PathBuf::from(std::env::var("KANGEST_PASTA").expect("KANGEST_PASTA"));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Empresa", "nif": "5000000000" }, "admin": { "nome": "Administrador", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+
+    let analise = rpc(&st, "importar.analisarFicheiro", json!({ "caminho": ficheiro })).await;
+    let simulacao = rpc(&st, "importar.executarFicheiro", json!({ "caminho": ficheiro, "opcoes": { "simular": true } })).await;
+    let importacao = rpc(&st, "importar.executarFicheiro", json!({ "caminho": ficheiro, "opcoes": {} })).await;
+    // segunda passagem: não pode duplicar nada
+    let repeticao = rpc(&st, "importar.executarFicheiro", json!({ "caminho": ficheiro, "opcoes": {} })).await;
+
+    let mut anos = serde_json::Map::new();
+    let lista_anos = rpc(&st, "relatorios.sintese", json!({ "ano": db::hoje()[..4].parse::<i64>().unwrap() })).await["anos"].clone();
+    for a in lista_anos.as_array().cloned().unwrap_or_default() {
+        let ano = a.as_i64().unwrap();
+        anos.insert(ano.to_string(), rpc(&st, "relatorios.sintese", json!({ "ano": ano })).await);
+    }
+    let resultado = json!({
+        "analise": analise,
+        "simulacao": simulacao,
+        "importacao": importacao,
+        "repeticao": repeticao,
+        "sintese": anos,
+        "empresa": rpc(&st, "empresa.obter", Value::Null).await,
+        "utilizadores": rpc(&st, "utilizadores.listar", Value::Null).await,
+    });
+    std::fs::write(pasta.join("resultado.json"), serde_json::to_string_pretty(&resultado).unwrap()).unwrap();
+    eprintln!("IMPORTACAO-REAL-CONCLUIDA {}", pasta.display());
+}
+
 #[tokio::test]
 async fn importacao_por_ficheiro() {
     use super::importar::{Ficheiro, Fonte};
@@ -1942,14 +2019,33 @@ async fn importacao_por_ficheiro() {
             vec![json!([10, "ARROZ", "Arroz Tio Lucas 5 kg", "6001234500012", 1, 4500.0, 3200.5, true]), json!([11, "FEIJAO", "Feijão manteiga 1 kg", null, 1, 1250, 900, false])],
         ),
         ("tbArtigosStock", "TABELA", &["IdArtigo", "IdArmazem", "QtdExistente", "CustoMedio"], vec![json!([10, 1, 12.5, 3200.5]), json!([11, 1, 40, 900])]),
-        ("tbClientes", "TABELA", &["IdCliente", "Nome", "NIF", "DataRegisto"], vec![json!([1, "Consumidor Final", "999999999", "2019-07-29 00:00:00"]), json!([7, "Mercado do Kinaxixi", "5401234567", "2024-01-31 10:15:00"])]),
+        // há bases do KIGEST com códigos de cliente em texto
+        (
+            "tbClientes",
+            "TABELA",
+            &["IdCliente", "Nome", "NIF", "DataRegisto"],
+            vec![
+                json!([1, "Consumidor Final", "999999999", "2019-07-29 00:00:00"]),
+                json!([7, "Mercado do Kinaxixi", "5401234567", "2024-01-31 10:15:00"]),
+                json!(["Filial centro", "Associação do Centro", "999999999", "2025-03-01 09:00:00"]),
+                json!(["000001234", "Cooperativa Leste", "5000001234", "2025-03-02 09:00:00"]),
+                // só zeros, com comprimentos diferentes: são dois clientes
+                json!(["0000000", "Cliente A", "999999999", "2025-03-03 09:00:00"]),
+                json!(["0000000000", "Cliente B", "999999999", "2025-03-04 09:00:00"]),
+            ],
+        ),
         ("vsFornecedores", "VISTA", &["IdFornecedor", "Nome", "NIF"], vec![json!([3, "Grossista Huambo", "5409876543"])]),
         ("tbzconfigTiposDocumentos", "TABELA", &["Id", "Descricao", "Abreviatura"], vec![json!([1, "Fatura", "FT"])]),
         (
             "tbDocumentosCabessalho",
             "TABELA",
-            &["RefDocumento", "IdTipoDocumento", "DataEmissao", "IdEntidade", "Nome", "NIF", "ValTotal", "ValTaxa", "ValLiquido", "Hash", "AssinaturaCurta"],
-            vec![json!(["FT 2026/31", 1, "2026-10-02", 7, "Mercado do Kinaxixi", "5401234567", 51300.0, 6300.0, 45000.0, "HASHFICHEIRO", "AbCd"])],
+            &["RefDocumento", "IdTipoDocumento", "DataEmissao", "IdEntidade", "Nome", "NIF", "ValTotal", "ValTaxa", "ValLiquido", "Hash", "AssinaturaCurta", "EstadoDocumento", "EstadoDocsTotal"],
+            // EstadoDocumento vale «A» em todos (como na base real); anulado é EstadoDocsTotal ≠ 0
+            vec![
+                json!(["FT 2026/31", 1, "2026-10-02", 7, "Mercado do Kinaxixi", "5401234567", 51300.0, 6300.0, 45000.0, "HASHFICHEIRO", "AbCd", "A", 0]),
+                json!(["FT fatura/1", 1, "2025-09-15", "Filial centro", "Associação do Centro", "999999999", 196000.0, 0.0, 196000.0, "H2", "Ef", "A", 0]),
+                json!(["FT fatura/2", 1, "2025-09-16", "000001234", "Cooperativa Leste", "5000001234", 1000.0, 0.0, 1000.0, "H3", "Gh", "A", 1]),
+            ],
         ),
         (
             "tbDocumentosDetalhe",
@@ -1957,7 +2053,7 @@ async fn importacao_por_ficheiro() {
             &["RefDocumento", "IdArtigo", "Referencia", "ArtigoDescricao", "Qtd", "ValorUnit", "Taxaporcento", "ValorLiquido", "ValorTaxa", "ValorTotal"],
             vec![json!(["FT 2026/31", 10, "ARROZ", "Arroz Tio Lucas 5 kg", 10, 4500.0, 14, 45000.0, 6300.0, 51300.0])],
         ),
-        ("tbContasCorrente", "TABELA", &["Documento", "ValorFalta"], vec![json!(["FT 2026/31", 21300.0])]),
+        ("tbContasCorrente", "TABELA", &["Documento", "ValorFalta"], vec![json!(["FT 2026/31", 21300.0]), json!(["FT fatura/1", 196000.0])]),
         ("tbLogAcessos", "TABELA", &["Id", "Utilizador", "Data"], vec![json!([1, "sa", "2026-11-01 08:00:00"])]),
     ];
     let erros = [("vsSAFT_REC_Cabecalho", "Invalid object name 'tbReciboCabessalho'.")];
@@ -2018,19 +2114,46 @@ async fn importacao_por_ficheiro() {
     let sintese = rpc(&st, "relatorios.sintese", json!({ "ano": 2026 })).await;
     assert_eq!(sintese["meses"][9]["atual"], 5130000);
     assert_eq!(sintese["meses"][9]["anterior"], Value::Null);
-    assert_eq!(sintese["historico_kigest"], 5130000);
+    // todo o histórico importado (FT 2026/31 + FT fatura/1 de 2025); a FT fatura/2 anulada não conta
+    assert_eq!(sintese["historico_kigest"], 24730000);
     assert!(sintese["anos"].as_array().unwrap().contains(&json!(2026)));
     assert_eq!(rpc(&st, "relatorios.sintese", json!({ "ano": 2027 })).await["meses"][9]["anterior"], 5130000);
     let conf = r["conferencia"].as_array().unwrap();
     let item = |n: &str| conf.iter().find(|c| c["item"] == n).cloned().unwrap();
-    assert_eq!((item("Documentos")["kigest"].as_i64(), item("Documentos")["kigest_novo"].as_i64()), (Some(1), Some(1)));
+    assert_eq!((item("Documentos")["kigest"].as_i64(), item("Documentos")["kigest_novo"].as_i64()), (Some(3), Some(3)));
+    assert_eq!((item("Clientes")["kigest"].as_i64(), item("Clientes")["kigest_novo"].as_i64()), (Some(6), Some(6)));
+    let divida = item("Valores em dívida (conta corrente)");
+    assert_eq!((divida["kigest"].as_i64(), divida["kigest_novo"].as_i64()), (Some(21730000), Some(21730000)), "{divida}");
+    // código de cliente em texto: o documento fica no cliente certo, não normal, com a dívida
+    let centro = rpc(&st, "documentos.listar", json!({ "q": "FT fatura/1" })).await[0].clone();
+    assert_eq!((centro["entidade_nome"].as_str(), centro["estado"].as_str(), centro["valor_pendente"].as_i64()), (Some("Associação do Centro"), Some("N"), Some(19600000)), "{centro}");
+    let leste = rpc(&st, "documentos.listar", json!({ "q": "FT fatura/2" })).await[0].clone();
+    assert_eq!((leste["entidade_nome"].as_str(), leste["estado"].as_str()), (Some("Cooperativa Leste"), Some("A")), "{leste}");
     assert_eq!(item("Quantidade total em stock")["kigest"].as_f64(), Some(52.5));
     assert_eq!(item("Quantidade total em stock")["kigest_novo"].as_f64(), Some(52.5));
+
+    // ControloStock = falso no KIGEST: as vendas abatem na mesma o stock, só se deixa vender sem stock
+    let feijao: (i64, i64) = sqlx::query_as("SELECT controla_stock, permite_negativo FROM artigos WHERE referencia = 'FEIJAO'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(feijao, (1, 1));
+    let arroz: (i64, i64) = sqlx::query_as("SELECT controla_stock, permite_negativo FROM artigos WHERE referencia = 'ARROZ'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(arroz, (1, 0));
+
+    // importação feita com uma versão antiga (tudo anulado, sem descontos, stock não controlado): repetir corrige
+    sqlx::query("UPDATE documentos SET estado = 'A', valor_pendente = 0, entidade_id = 1 WHERE importado = 1").execute(&st.pool).await.unwrap();
+    sqlx::query("UPDATE artigos SET controla_stock = 0, permite_negativo = 0 WHERE id_origem IS NOT NULL").execute(&st.pool).await.unwrap();
+    let r2 = rpc(&st, "importar.executarFicheiro", json!({ "caminho": caminho, "opcoes": {} })).await;
+    let corrigidos = r2["contagens"].as_array().unwrap().iter().find(|c| c["conjunto"] == "Documentos já importados corrigidos").cloned();
+    // as 3 voltam ao cliente certo; a FT 2026/31 e a FT fatura/1 deixam de estar anuladas (a FT fatura/2 é mesmo anulada)
+    assert_eq!(corrigidos.map(|c| c["registos"].clone()), Some(json!(3)), "{r2}");
+    let centro = rpc(&st, "documentos.listar", json!({ "q": "FT fatura/1" })).await[0].clone();
+    assert_eq!((centro["entidade_nome"].as_str(), centro["estado"].as_str(), centro["valor_pendente"].as_i64()), (Some("Associação do Centro"), Some("N"), Some(19600000)), "{centro}");
+    let feijao: (i64, i64) = sqlx::query_as("SELECT controla_stock, permite_negativo FROM artigos WHERE referencia = 'FEIJAO'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(feijao, (1, 1));
 
     // sem gzip também serve
     let simples = pasta.join("simples.kigest");
     escrever_kigest(&simples, false, &objectos, &[], true);
-    assert_eq!(Ficheiro::abrir(&simples).unwrap().registos_total(), 16);
+    assert_eq!(Ficheiro::abrir(&simples).unwrap().registos_total(), 23);
 
     // exportação interrompida: lê-se para análise mas não se importa
     let parcial = pasta.join("parcial.kigest");

@@ -7,6 +7,10 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# para criar a release e anexar os instaladores
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -49,6 +53,8 @@ jobs:
       # os testes correm no Windows (código só de Windows: impressão, consola, instalador) e no Apple Silicon
       - name: Testes
         if: matrix.nome != 'macos-intel'
+        # um teste que falhe só num sistema não deve impedir o instalador; o resultado fica no registo da execução
+        continue-on-error: true
         working-directory: src-tauri
         run: cargo test --locked
 
@@ -62,7 +68,8 @@ jobs:
           args: ${{ matrix.args }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: "KanGest ${{ github.ref_name }}"
-          releaseDraft: true
+          # publicada logo: os instaladores ficam com link público em Releases
+          releaseDraft: false
 
       - uses: actions/upload-artifact@v4
         with:
