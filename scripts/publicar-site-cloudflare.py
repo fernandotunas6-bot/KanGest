@@ -10,7 +10,7 @@ o endereço fica https://<projecto>.pages.dev. Com --ensaio só lista os ficheir
 O Cloudflare identifica cada ficheiro pelo BLAKE3 de (conteúdo em base64 + extensão), como o wrangler; a
 implementação abaixo é a de referência, em Python puro, para não depender de pacotes externos.
 """
-import base64, json, mimetypes, os, struct, sys, urllib.error, urllib.request, uuid
+import base64, json, mimetypes, os, ssl, struct, sys, urllib.error, urllib.request, uuid
 from pathlib import Path
 
 API = "https://api.cloudflare.com/client/v4"
@@ -99,6 +99,22 @@ def _verificar_blake3():
 
 
 # ------------------------------------------------------------------ API
+def _contexto_tls():
+    """O Python do python.org no macOS não usa os certificados do sistema: usa os do certifi ou /etc/ssl/cert.pem."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
+    for f in ("/etc/ssl/cert.pem", "/usr/local/etc/openssl/cert.pem", "/opt/homebrew/etc/openssl@3/cert.pem"):
+        if os.path.exists(f):
+            return ssl.create_default_context(cafile=f)
+    return ssl.create_default_context()
+
+
+_TLS = _contexto_tls()
+
+
 def pedido(metodo, caminho, token, dados=None, multipart=None, base=API):
     url = caminho if caminho.startswith("http") else base + caminho
     cab = {"Authorization": f"Bearer {token}"}
@@ -115,7 +131,7 @@ def pedido(metodo, caminho, token, dados=None, multipart=None, base=API):
         cab["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=corpo, headers=cab, method=metodo)
     try:
-        with urllib.request.urlopen(req, timeout=180) as r:
+        with urllib.request.urlopen(req, timeout=180, context=_TLS) as r:
             return r.status, json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:
         try:
