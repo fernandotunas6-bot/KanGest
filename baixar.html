@@ -108,15 +108,16 @@
       <button type="button" role="tab" aria-selected="false" data-alvo="mac">macOS</button>
     </div>
     <ol class="passos" data-painel="windows">
-      <li><div><h3>Abrir o instalador</h3><p>Abra o ficheiro <code>KanGest_1.1.0_x64-setup.exe</code> que baixou. Se o Windows mostrar «O Windows protegeu o seu PC», escolha «Mais informações» → «Executar mesmo assim».</p></div></li>
+      <li><div><h3>Abrir o instalador</h3><p>Abra o ficheiro <code>KanGest_1.1.0_x64-setup.exe</code> que baixou. Se aparecer «O Windows protegeu o seu PC», carregue em <b>«Mais informações»</b> e depois em <b>«Executar mesmo assim»</b>.</p></div></li>
       <li><div><h3>Seguir o assistente</h3><p>O KanGest instala-se na sua conta do Windows. Se o computador não tiver o WebView2, o instalador trata disso.</p></div></li>
       <li><div><h3>Abrir o KanGest</h3><p>O atalho fica no menu Iniciar e no ambiente de trabalho.</p></div></li>
     </ol>
     <ol class="passos" data-painel="mac" hidden>
       <li><div><h3>Abrir o .dmg</h3><p>Abra o ficheiro que baixou e arraste o KanGest para a pasta Aplicações.</p></div></li>
-      <li><div><h3>Abrir pela primeira vez</h3><p>Na pasta Aplicações, clique no KanGest com o botão direito → Abrir, e confirme «Abrir». Se o macOS não deixar, vá a Definições do Sistema → Privacidade e segurança e escolha «Abrir mesmo assim». Só é preciso da primeira vez.</p></div></li>
+      <li><div><h3>Abrir pela primeira vez</h3><p>Abra o KanGest. Se o macOS disser que não pode verificar o programador, carregue em <b>«Concluído»</b> (não em «Mover para o lixo»). Depois vá a <b>Definições do Sistema → Privacidade e segurança</b>, desça até «Segurança», carregue em <b>«Abrir mesmo assim»</b> e confirme com a palavra-passe do Mac. Só é preciso da primeira vez.</p><p class="nota">No macOS 14 ou anterior também pode clicar no KanGest com o botão direito → Abrir. Se aparecer «está danificado», abra o Terminal e escreva <code>xattr -cr /Applications/KanGest.app</code>.</p></div></li>
       <li><div><h3>Fixar na Dock</h3><p>Com o KanGest aberto, botão direito no ícone da Dock → Opções → Manter na Dock.</p></div></li>
     </ol>
+    <p class="nota" style="margin-top:22px"><b>Porque é que o sistema avisa?</b> O Windows e o macOS avisam sempre que um programa ainda não tem o certificado de programador da Microsoft e da Apple. A certificação do KanGest está em curso; até lá, o aviso aparece só na primeira abertura. Baixe o KanGest apenas desta página: os instaladores vêm do repositório oficial do KanGest no GitHub.</p>
   </div>
 </section>
 
