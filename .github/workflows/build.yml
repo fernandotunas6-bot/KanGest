@@ -1,10 +1,18 @@
 # Build do KanGest para Windows (instalador NSIS .exe) e macOS (.dmg).
 # Corre ao publicar uma etiqueta "v*" (ex.: v1.0.0) ou manualmente em Actions → Build → Run workflow.
+# Um push para um ramo «build/…» compila sem publicar (os instaladores ficam nos artefactos da execução).
+#
+# Assinatura de código (docs/ASSINATURA.md): activa-se sozinha quando os segredos existem no repositório.
+#   macOS:   APPLE_CERTIFICATE (.p12 em base64), APPLE_CERTIFICATE_PASSWORD; notarização: APPLE_ID,
+#            APPLE_PASSWORD (palavra-passe de aplicação), APPLE_TEAM_ID. Sem eles: assinatura «ad-hoc».
+#   Windows: WINDOWS_ASSINATURA_CONTA, WINDOWS_ASSINATURA_SEGREDO, WINDOWS_ASSINATURA_CERTIFICADO
+#            (SSL.com eSigner, via jsign); WINDOWS_ASSINATURA_TIPO muda o serviço. Sem eles: não assina.
 name: Build
 
 on:
   push:
     tags: ["v*"]
+    branches: ["build/**"]
   workflow_dispatch:
 
 # para criar a release e anexar os instaladores
@@ -58,6 +66,70 @@ jobs:
         working-directory: src-tauri
         run: cargo test --locked
 
+      - name: Assinatura (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            # sem certificado da Apple: assinatura «ad-hoc» (evita o aviso «danificado» nos Mac Apple Silicon)
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+            echo "Sem certificado da Apple: assinatura ad-hoc."
+            exit 0
+          fi
+          KC="$RUNNER_TEMP/assinatura.keychain-db"
+          KP="$(openssl rand -hex 24)"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificado.p12"
+          security create-keychain -p "$KP" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KP" "$KC"
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          security import "$RUNNER_TEMP/certificado.p12" -k "$KC" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KP" "$KC" > /dev/null
+          rm -f "$RUNNER_TEMP/certificado.p12"
+          ID="$(security find-identity -v -p codesigning "$KC" | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"')"
+          if [ -z "$ID" ]; then
+            echo "::error::O certificado não é «Developer ID Application» (é o necessário para distribuir fora da App Store)."
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$ID" >> "$GITHUB_ENV"
+          echo "A assinar com: $ID"
+          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            { echo "APPLE_ID=$APPLE_ID"; echo "APPLE_PASSWORD=$APPLE_PASSWORD"; echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"; } >> "$GITHUB_ENV"
+            echo "Com notarização."
+          else
+            echo "::warning::Sem APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID: assinado mas não notarizado (o macOS continua a avisar)."
+          fi
+
+      - name: Assinatura (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_ASSINATURA_CONTA: ${{ secrets.WINDOWS_ASSINATURA_CONTA }}
+          WINDOWS_ASSINATURA_SEGREDO: ${{ secrets.WINDOWS_ASSINATURA_SEGREDO }}
+          WINDOWS_ASSINATURA_CERTIFICADO: ${{ secrets.WINDOWS_ASSINATURA_CERTIFICADO }}
+          WINDOWS_ASSINATURA_TIPO: ${{ secrets.WINDOWS_ASSINATURA_TIPO }}
+        run: |
+          if (-not $env:WINDOWS_ASSINATURA_CONTA) { Write-Host "Sem certificado de assinatura do Windows: o instalador sai sem assinatura."; exit 0 }
+          $jar = Join-Path $env:RUNNER_TEMP "jsign.jar"
+          Invoke-WebRequest "https://github.com/ebourg/jsign/releases/download/7.6/jsign-7.6.jar" -OutFile $jar
+          $script = Join-Path $env:GITHUB_WORKSPACE "scripts\assinar-windows.ps1"
+          $conf = Join-Path $env:RUNNER_TEMP "assinatura.json"
+          @{ bundle = @{ windows = @{ signCommand = "pwsh -NoProfile -File $script %1" } } } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 $conf
+          @(
+            "JSIGN_JAR=$jar",
+            "ARGS_ASSINATURA=--config $conf",
+            "WINDOWS_ASSINATURA_CONTA=$env:WINDOWS_ASSINATURA_CONTA",
+            "WINDOWS_ASSINATURA_SEGREDO=$env:WINDOWS_ASSINATURA_SEGREDO",
+            "WINDOWS_ASSINATURA_CERTIFICADO=$env:WINDOWS_ASSINATURA_CERTIFICADO",
+            "WINDOWS_ASSINATURA_TIPO=$env:WINDOWS_ASSINATURA_TIPO"
+          ) | Add-Content -Encoding utf8 $env:GITHUB_ENV
+          Write-Host "A assinar o Windows com o jsign ($(if ($env:WINDOWS_ASSINATURA_TIPO) { $env:WINDOWS_ASSINATURA_TIPO } else { 'ESIGNER' }))."
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -65,11 +137,28 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ env.ARGS_ASSINATURA }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: "KanGest ${{ github.ref_name }}"
           # publicada logo: os instaladores ficam com link público em Releases
           releaseDraft: false
+
+      - name: Confirmar a assinatura (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          for app in src-tauri/target/*/release/bundle/macos/*.app; do
+            codesign --verify --deep --strict --verbose=2 "$app" && codesign -dv "$app" 2>&1 | grep -E "Authority|Signature|TeamIdentifier" || true
+          done
+
+      - name: Confirmar a assinatura (Windows)
+        if: runner.os == 'Windows' && env.ARGS_ASSINATURA != ''
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse src-tauri\target\release\bundle\nsis\*.exe | ForEach-Object {
+            $a = Get-AuthenticodeSignature $_.FullName
+            Write-Host "$($_.Name): $($a.Status) · $($a.SignerCertificate.Subject)"
+            if ($a.Status -ne 'Valid') { throw "O instalador não ficou assinado." }
+          }
 
       - uses: actions/upload-artifact@v4
         with:
