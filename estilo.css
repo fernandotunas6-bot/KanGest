@@ -262,7 +262,7 @@ code { font: 13.5px ui-monospace, "SF Mono", Consolas, monospace; background: va
 
 /* rodapé */
 footer { background: var(--brand-900); color: rgba(255,255,255,.72); padding: 56px 0 32px; font-size: 14.5px; }
-.rodape { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 32px; }
+.rodape { display: grid; grid-template-columns: 1.4fr repeat(4, 1fr); gap: 28px; }
 .rodape .marca { color: #fff; margin-bottom: 12px; }
 .rodape .marca small { color: rgba(255,255,255,.55); }
 .rodape h4 { margin: 0 0 12px; color: #fff; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; }
@@ -305,3 +305,10 @@ footer { background: var(--brand-900); color: rgba(255,255,255,.72); padding: 56
   td:first-child { white-space: normal; }
   th, td { padding: 12px 14px; }
 }
+
+/* telefone em destaque (página de contacto) */
+.telefone-grande { display: inline-flex; align-items: center; gap: 14px; margin-top: 22px; padding: 14px 20px 14px 16px; border-radius: var(--raio); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--sombra); color: var(--ink); text-decoration: none; }
+.telefone-grande svg { width: 26px; height: 26px; padding: 10px; box-sizing: content-box; border-radius: 12px; background: var(--brand-50); color: var(--brand); }
+.telefone-grande span { display: grid; font-size: 24px; font-weight: 700; letter-spacing: .3px; font-variant-numeric: tabular-nums; }
+.telefone-grande small { font-size: 12.5px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
+.telefone-grande:hover { border-color: var(--brand); }
