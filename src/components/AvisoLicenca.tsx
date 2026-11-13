@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { AlertTriangle, Clock, KeyRound } from "lucide-react";
-import { useLicenca } from "@/lib/licenca";
+import { useLicenca, useSincronizarLicenca } from "@/lib/licenca";
 import { cn } from "@/components/ui";
 
 /**
@@ -9,6 +9,7 @@ import { cn } from "@/components/ui";
  */
 export function AvisoLicenca({ compacto = false, className }: { compacto?: boolean; className?: string }) {
   const { data: e } = useLicenca();
+  useSincronizarLicenca();
   if (!e || (e.pode_emitir && !e.aviso)) return null;
   const grave = !e.pode_emitir;
   const Icone = grave ? AlertTriangle : e.modo === "EXPERIENCIA" ? Clock : KeyRound;

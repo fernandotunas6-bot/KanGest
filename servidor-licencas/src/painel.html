@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>KanGest · Licenças</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --surface: #fff; --sunken: #efece5; --line: #e3dfd6; --ink: #1d2422; --ink-2: #4b5552; --ink-3: #6f7875;
+    --brand: #146b63; --brand-700: #0c4a44; --brand-50: #e6f2f0; --accent: #e09a2b; --accent-50: #fdf3e2;
+    --danger: #b3261e; --danger-50: #fbeceb; --ok: #1f7a3d; --ok-50: #e8f4ec;
+    --fonte: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--fonte); }
+  [hidden] { display: none !important; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 24px; background: var(--brand-700); color: #fff; }
+  header b { font-size: 16px; letter-spacing: .2px; }
+  header .esp { flex: 1; }
+  header button { background: transparent; color: #fff; border-color: rgba(255,255,255,.35); }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 60px; }
+  nav { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+  nav button { background: transparent; border-color: transparent; color: var(--ink-2); }
+  nav button[aria-pressed="true"] { background: var(--surface); border-color: var(--line); color: var(--ink); font-weight: 600; }
+  .cartao { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 18px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  h3 { font-size: 14px; margin: 18px 0 8px; }
+  .numeros { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .numeros div { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .numeros b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
+  .numeros span { color: var(--ink-3); font-size: 12.5px; }
+  .tabela { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .4px; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr.clicavel { cursor: pointer; }
+  tr.clicavel:hover td { background: var(--brand-50); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+  .fraco { color: var(--ink-3); font-size: 12.5px; }
+  .vazio { color: var(--ink-3); padding: 18px 10px; text-align: center; }
+  button, .botao { font: inherit; font-size: 13.5px; padding: 7px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+  button.primario { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+  button.perigo { color: var(--danger); }
+  button:disabled { opacity: .55; cursor: default; }
+  input, select, textarea { font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); width: 100%; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand-50); border-color: var(--brand); }
+  label { display: grid; gap: 4px; font-size: 12.5px; color: var(--ink-2); }
+  .grelha { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: end; }
+  .accoes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .selo { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .s-ACTIVA { background: var(--ok-50); color: var(--ok); }
+  .s-EXPERIENCIA { background: var(--brand-50); color: var(--brand); }
+  .s-TOLERANCIA { background: var(--accent-50); color: #8a5a10; }
+  .s-EXPIRADA, .s-BLOQUEADA { background: var(--danger-50); color: var(--danger); }
+  .entrada { max-width: 420px; margin: 12vh auto; }
+  .chave { word-break: break-all; font-family: var(--mono); font-size: 12px; background: var(--sunken); padding: 10px 12px; border-radius: 9px; max-height: 120px; overflow: auto; }
+  .aviso { background: var(--accent-50); border: 1px solid #f0d49f; color: #6b4708; border-radius: 10px; padding: 10px 14px; margin-bottom: 18px; }
+  #mensagem { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 10px; max-width: 90vw; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+  #mensagem.erro { background: var(--danger); }
+  dialog { border: 1px solid var(--line); border-radius: 16px; padding: 0; width: min(880px, 94vw); max-height: 90vh; }
+  dialog::backdrop { background: rgba(7,46,42,.45); }
+  dialog .topo { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); }
+  dialog .topo h2 { margin: 0; flex: 1; }
+  dialog .corpo { padding: 4px 20px 20px; }
+</style>
+</head>
+<body>
+<header>
+  <b>KanGest · Licenças</b><span class="esp"></span>
+  <span id="quem" class="fraco" style="color:#cfe5e1"></span>
+  <button id="sair" hidden>Sair</button>
+</header>
+
+<main>
+  <section id="entrada" class="cartao entrada">
+    <h2>Painel do produtor</h2>
+    <p class="fraco">Escreva a chave de administração (ADMIN_TOKEN). Fica só nesta janela do navegador.</p>
+    <form id="form-entrada">
+      <label>Chave de administração <input id="token" type="password" autocomplete="current-password" required></label>
+      <div class="accoes"><button class="primario">Entrar</button></div>
+    </form>
+  </section>
+
+  <section id="app" hidden>
+    <div id="aviso-email" class="aviso" hidden>O envio de email ainda não está configurado: os códigos de confirmação aparecem em <b>Pedidos de registo</b> para os dar ao cliente por telefone ou WhatsApp.</div>
+    <div class="numeros" id="numeros"></div>
+    <nav id="abas">
+      <button data-aba="clientes" aria-pressed="true">Clientes</button>
+      <button data-aba="pedidos">Pedidos de registo</button>
+      <button data-aba="pagamentos">Pagamentos</button>
+      <button data-aba="planos">Planos e preços</button>
+      <button data-aba="emitir">Emitir licença</button>
+    </nav>
+
+    <div data-painel="clientes" class="cartao">
+      <div class="grelha" style="margin-bottom:12px"><label>Procurar <input id="procura" placeholder="Empresa, NIF, email ou telefone"></label>
+        <label>Estado <select id="filtro"><option value="">Todos</option><option>EXPERIENCIA</option><option>ACTIVA</option><option>TOLERANCIA</option><option>EXPIRADA</option></select></label></div>
+      <div class="tabela"><table><thead><tr><th>Empresa</th><th>NIF</th><th>Contacto</th><th>Estado</th><th>Plano</th><th>Até</th><th class="num">Comp.</th><th>Último contacto</th></tr></thead><tbody id="t-clientes"></tbody></table></div>
+    </div>
+
+    <div data-painel="pedidos" class="cartao" hidden>
+      <h2>Pedidos de registo por confirmar</h2>
+      <div class="tabela"><table><thead><tr><th>Empresa</th><th>NIF</th><th>Computador</th><th>Contacto</th><th>Código</th><th>Expira</th><th></th></tr></thead><tbody id="t-pedidos"></tbody></table></div>
+    </div>
+
+    <div data-painel="pagamentos" class="cartao" hidden>
+      <h2>Últimos pagamentos</h2>
+      <div class="tabela"><table><thead><tr><th>Data</th><th>Empresa</th><th>Plano</th><th class="num">Meses</th><th class="num">Valor</th><th>Método</th><th>Referência</th><th>Pago até</th></tr></thead><tbody id="t-pagamentos"></tbody></table></div>
+    </div>
+
+    <div data-painel="planos" class="cartao" hidden>
+      <h2>Planos e preços (Kz)</h2>
+      <p class="fraco">Postos: 0 = sem limite. Os preços aparecem no site e servem de referência ao registar pagamentos.</p>
+      <div class="tabela"><table><thead><tr><th>Código</th><th>Nome</th><th>Postos</th><th>Preço mensal</th><th>Preço anual</th><th>Activo</th><th></th></tr></thead><tbody id="t-planos"></tbody></table></div>
+    </div>
+
+    <div data-painel="emitir" class="cartao" hidden>
+      <h2>Emitir licença manual</h2>
+      <p class="fraco">Para clientes sem internet: a licença (KG1.…) envia-se por email ou WhatsApp e cola-se em Sistema → Licença e Assinatura. O NIF e o computador vêm do código do pedido (KG-NIF-COMPUTADOR).</p>
+      <form id="form-emitir">
+        <div class="grelha">
+          <label>Código do pedido (opcional) <input name="pedido" placeholder="KG-5417189230-3F9A12BC77D0"></label>
+          <label>NIF <input name="nif" required></label>
+          <label>Empresa <input name="empresa" required></label>
+          <label>Plano <select name="plano" class="sel-planos"></select></label>
+          <label>Postos (vazio = do plano) <input name="postos" type="number" min="0"></label>
+          <label>Início <input name="inicio" type="date"></label>
+          <label>Meses <input name="meses" type="number" min="1" max="36" value="12"></label>
+          <label>Ou até <input name="fim" type="date"></label>
+          <label>Computador (vazio = qualquer) <input name="maquina" placeholder="3F9A-12BC-77D0"></label>
+          <label>Tolerância (dias) <input name="tolerancia" type="number" min="0" value="15"></label>
+        </div>
+        <div class="accoes"><button class="primario">Emitir</button></div>
+      </form>
+      <div id="emitida" hidden><h3>Licença emitida</h3><div class="chave" id="emitida-chave"></div><div class="accoes"><button data-copiar="emitida-chave">Copiar</button></div></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="ficha">
+  <div class="topo"><h2 id="f-titulo"></h2><button id="f-fechar">Fechar</button></div>
+  <div class="corpo" id="f-corpo"></div>
+</dialog>
+
+<div id="mensagem" hidden></div>
+
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const dmy = (d) => d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "—";
+const quando = (d) => d ? new Date(d).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+const kz = (c) => (Number(c || 0) / 100).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " Kz";
+const ROTULOS = { EXPERIENCIA: "Experiência", ACTIVA: "Activa", TOLERANCIA: "Tolerância", EXPIRADA: "Expirada", BLOQUEADA: "Bloqueada" };
+const nomePlano = (c) => (dados?.planos.find((p) => p.codigo === c)?.nome) || (c === "EXPERIENCIA" ? "Experiência" : c || "—");
+const ORIGENS = { EXPERIENCIA: "Experiência", RENOVACAO: "Servidor", PAINEL: "Manual" };
+const selo = (e) => `<span class="selo s-${esc(e)}">${esc(ROTULOS[e] || e)}</span>`;
+let token = "";
+try { token = sessionStorage.getItem("kg-admin") || ""; } catch {}
+let dados = null;
+
+function avisar(texto, erro = false) {
+  const m = $("#mensagem");
+  m.textContent = texto; m.className = erro ? "erro" : ""; m.hidden = false;
+  clearTimeout(avisar.t); avisar.t = setTimeout(() => (m.hidden = true), erro ? 6000 : 3500);
+}
+
+async function api(caminho, corpo) {
+  const r = await fetch("/admin/api/" + caminho, {
+    method: corpo ? "POST" : "GET",
+    headers: { authorization: "Bearer " + token, ...(corpo ? { "content-type": "application/json" } : {}) },
+    body: corpo ? JSON.stringify(corpo) : undefined,
+  });
+  const d = await r.json().catch(() => ({ erro: "Resposta inválida do servidor." }));
+  if (r.status === 401) { sair(); throw new Error("Chave de administração errada."); }
+  if (!r.ok || d.ok === false) throw new Error(d.erro || "Erro " + r.status);
+  return d;
+}
+
+function sair() {
+  token = ""; try { sessionStorage.removeItem("kg-admin"); } catch {}
+  $("#app").hidden = true; $("#entrada").hidden = false; $("#sair").hidden = true;
+}
+
+async function carregar() {
+  dados = await api("resumo");
+  $("#entrada").hidden = true; $("#app").hidden = false; $("#sair").hidden = false;
+  $("#aviso-email").hidden = dados.email_configurado;
+  const c = dados.clientes, conta = (e) => c.filter((x) => x.estado === e).length;
+  const mes = dados.hoje.slice(0, 7);
+  const receita = dados.pagamentos.filter((p) => p.registado_em.slice(0, 7) === mes).reduce((s, p) => s + p.valor, 0);
+  $("#numeros").innerHTML = [
+    [c.length, "clientes"], [conta("ACTIVA") + conta("TOLERANCIA"), "assinaturas activas"], [conta("EXPERIENCIA"), "em experiência"],
+    [dados.codigos.filter((x) => !x.expirado).length, "pedidos por confirmar"], [kz(receita), "recebido este mês"],
+  ].map(([n, t]) => `<div><b>${esc(n)}</b><span>${esc(t)}</span></div>`).join("");
+  $$(".sel-planos").forEach((s) => (s.innerHTML = dados.planos.filter((p) => p.activo).map((p) => `<option value="${esc(p.codigo)}">${esc(p.nome)}</option>`).join("")));
+  desenharClientes(); desenharPedidos(); desenharPagamentos(); desenharPlanos();
+}
+
+function desenharClientes() {
+  const q = $("#procura").value.trim().toLowerCase(), f = $("#filtro").value;
+  const lista = dados.clientes.filter((c) => (!f || c.estado === f) && (!q || [c.empresa, c.nif, c.email, c.telefone].some((v) => String(v || "").toLowerCase().includes(q))));
+  $("#t-clientes").innerHTML = lista.length ? lista.map((c) => `<tr class="clicavel" data-nif="${esc(c.nif)}">
+    <td><b>${esc(c.empresa)}</b></td><td class="mono">${esc(c.nif)}</td>
+    <td>${esc(c.email || "")}<div class="fraco">${esc(c.telefone || "")}</div></td>
+    <td>${selo(c.estado)}</td><td>${esc(c.plano ? nomePlano(c.plano) : "—")}</td><td>${dmy(c.pago_ate || c.experiencia_ate)}</td>
+    <td class="num">${esc(c.maquinas)}</td><td class="fraco">${quando(c.ultimo_contacto)}</td></tr>`).join("")
+    : `<tr><td colspan="8" class="vazio">${dados.clientes.length ? "Nenhum cliente corresponde à procura." : "Ainda não há clientes registados."}</td></tr>`;
+}
+
+function desenharPedidos() {
+  $("#t-pedidos").innerHTML = dados.codigos.length ? dados.codigos.map((p) => `<tr>
+    <td><b>${esc(p.empresa)}</b></td><td class="mono">${esc(p.nif)}</td><td class="mono">${esc(p.maquina)}</td>
+    <td>${esc(p.email || "")}<div class="fraco">${esc(p.telefone || "")}</div></td>
+    <td class="mono"><b>${p.codigo_aberto ? esc(p.codigo_aberto) : '<span class="fraco">enviado por email</span>'}</b></td>
+    <td>${p.expirado ? selo("EXPIRADA") : quando(p.expira_em)}</td>
+    <td><button class="perigo" data-apagar-pedido="${esc(p.nif)}|${esc(p.maquina)}">Apagar</button></td></tr>`).join("")
+    : `<tr><td colspan="7" class="vazio">Não há pedidos por confirmar.</td></tr>`;
+}
+
+function desenharPagamentos() {
+  $("#t-pagamentos").innerHTML = dados.pagamentos.length ? dados.pagamentos.map((p) => `<tr>
+    <td>${quando(p.registado_em)}</td><td>${esc(p.empresa || p.nif)}</td><td>${esc(nomePlano(p.plano))}</td><td class="num">${esc(p.meses)}</td>
+    <td class="num">${kz(p.valor)}</td><td>${esc(p.metodo)}</td><td class="mono">${esc(p.referencia || "")}</td><td>${dmy(p.pago_ate)}</td></tr>`).join("")
+    : `<tr><td colspan="8" class="vazio">Ainda não há pagamentos.</td></tr>`;
+}
+
+function desenharPlanos() {
+  const linha = (p, novo) => `<tr data-plano>
+    <td>${novo ? '<input name="codigo" placeholder="CODIGO">' : `<b class="mono">${esc(p.codigo)}</b><input type="hidden" name="codigo" value="${esc(p.codigo)}">`}</td>
+    <td><input name="nome" value="${esc(p.nome || "")}"></td>
+    <td><input name="postos" type="number" min="0" value="${esc(p.postos ?? 1)}" style="width:80px"></td>
+    <td><input name="preco_mes" type="number" min="0" step="0.01" value="${(p.preco_mes || 0) / 100}"></td>
+    <td><input name="preco_ano" type="number" min="0" step="0.01" value="${(p.preco_ano || 0) / 100}"></td>
+    <td><input name="activo" type="checkbox" ${novo || p.activo ? "checked" : ""} style="width:auto"></td>
+    <td><input type="hidden" name="ordem" value="${esc(p.ordem ?? 9)}"><button data-guardar-plano>${novo ? "Acrescentar" : "Guardar"}</button></td></tr>`;
+  $("#t-planos").innerHTML = dados.planos.map((p) => linha(p, false)).join("") + linha({}, true);
+}
+
+async function abrirFicha(nif) {
+  const d = await api("cliente?nif=" + encodeURIComponent(nif));
+  const c = d.cliente;
+  $("#f-titulo").innerHTML = `${esc(c.empresa)} ${selo(c.estado)}`;
+  $("#f-corpo").innerHTML = `
+    <p class="fraco">NIF <b class="mono">${esc(c.nif)}</b> · registado a ${quando(c.criado_em)} · experiência até ${dmy(c.experiencia_ate)}${c.pago_ate ? ` · pago até <b>${dmy(c.pago_ate)}</b> (${esc(nomePlano(c.plano))})` : ""}</p>
+    <h3>Registar pagamento</h3>
+    <form id="form-pagamento"><div class="grelha">
+      <label>Plano <select name="plano" class="sel-planos">${dados.planos.filter((p) => p.activo).map((p) => `<option value="${esc(p.codigo)}" ${p.codigo === c.plano ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}</select></label>
+      <label>Meses <input name="meses" type="number" min="1" max="36" value="1" required></label>
+      <label>Valor (Kz) <input name="valor" type="number" min="0" step="0.01" required></label>
+      <label>Método <select name="metodo"><option value="TRANSFERENCIA">Transferência</option><option value="MULTICAIXA">Multicaixa</option><option value="NUMERARIO">Numerário</option><option value="OUTRO">Outro</option></select></label>
+      <label>Referência <input name="referencia" placeholder="N.º do comprovativo"></label>
+    </div><div class="accoes"><button class="primario">Registar e renovar</button></div></form>
+    <p class="fraco">A licença nova fica pronta logo; o KanGest do cliente recebe-a sozinho na próxima ligação à internet (ou copie-a abaixo).</p>
+    <h3>Computadores</h3>
+    <div class="tabela"><table><thead><tr><th>Computador</th><th>Versão</th><th>Registado</th><th>Último contacto</th><th></th></tr></thead><tbody>
+    ${d.maquinas.map((m) => `<tr><td class="mono">${esc(m.maquina)} ${m.bloqueada ? selo("BLOQUEADA") : ""}</td><td>${esc(m.versao || "—")}</td><td>${quando(m.primeiro_contacto)}</td><td>${quando(m.ultimo_contacto)}</td>
+      <td><button class="${m.bloqueada ? "" : "perigo"}" data-maquina="${esc(m.maquina)}" data-bloquear="${m.bloqueada ? 0 : 1}">${m.bloqueada ? "Desbloquear" : "Bloquear"}</button></td></tr>`).join("") || '<tr><td colspan="5" class="vazio">Nenhum computador.</td></tr>'}
+    </tbody></table></div>
+    <h3>Licenças emitidas</h3>
+    <div class="tabela"><table><thead><tr><th>Licença</th><th>Plano</th><th class="num">Postos</th><th>Período</th><th>Computador</th><th>Origem</th><th></th></tr></thead><tbody>
+    ${d.licencas.map((l) => `<tr><td class="mono">${esc(l.id)}</td><td>${esc(nomePlano(l.plano))}</td><td class="num">${l.postos || "∞"}</td><td>${dmy(l.inicio)} – ${dmy(l.fim)}</td><td class="mono">${esc(l.maquina || "qualquer")}</td><td class="fraco">${esc(ORIGENS[l.origem] || l.origem)}</td>
+      <td><button data-copiar-texto="${esc(l.chave)}">Copiar</button></td></tr>`).join("") || '<tr><td colspan="7" class="vazio">Nenhuma licença.</td></tr>'}
+    </tbody></table></div>
+    <h3>Dados do cliente</h3>
+    <form id="form-cliente"><div class="grelha">
+      <label>Empresa <input name="empresa" value="${esc(c.empresa)}"></label>
+      <label>Email <input name="email" type="email" value="${esc(c.email || "")}"></label>
+      <label>Telefone <input name="telefone" value="${esc(c.telefone || "")}"></label>
+      <label>Computadores permitidos <input name="maquinas_max" type="number" min="1" value="${esc(c.maquinas_max)}"></label>
+      <label>Postos (vazio = do plano) <input name="postos" type="number" min="0" value="${esc(c.postos ?? "")}"></label>
+      <label>Experiência até <input name="experiencia_ate" type="date" value="${esc(c.experiencia_ate || "")}"></label>
+    </div><label style="margin-top:12px">Notas <textarea name="notas" rows="3">${esc(c.notas || "")}</textarea></label>
+    <div class="accoes"><button>Guardar dados</button></div></form>`;
+  $("#f-corpo").dataset.nif = c.nif;
+  sugerirValor($("#form-pagamento"));
+  if (!$("#ficha").open) $("#ficha").showModal();
+}
+
+/** Valor a partir da tabela de preços: anual quando são 12 meses (e há preço anual), senão mensal × meses. */
+function sugerirValor(f) {
+  const p = dados.planos.find((x) => x.codigo === f.plano.value);
+  const meses = Number(f.meses.value) || 0;
+  if (!p || !meses) return;
+  const c = meses % 12 === 0 && p.preco_ano > 0 ? (p.preco_ano * meses) / 12 : p.preco_mes * meses;
+  if (c > 0) f.valor.value = (c / 100).toFixed(2);
+}
+
+document.addEventListener("input", (e) => {
+  const f = e.target.form;
+  if (f?.id === "form-pagamento" && (e.target.name === "plano" || e.target.name === "meses")) sugerirValor(f);
+});
+
+const formulario = (f) => Object.fromEntries(new FormData(f).entries());
+
+async function copiar(texto) {
+  try { await navigator.clipboard.writeText(texto); avisar("Copiado."); } catch { avisar("Não foi possível copiar: seleccione o texto à mão.", true); }
+}
+
+async function tentar(f) { try { await f(); } catch (e) { avisar(e.message, true); } }
+
+$("#form-entrada").addEventListener("submit", (e) => {
+  e.preventDefault();
+  token = $("#token").value.trim();
+  try { sessionStorage.setItem("kg-admin", token); } catch {}
+  tentar(carregar);
+});
+$("#sair").addEventListener("click", sair);
+$("#abas").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-aba]"); if (!b) return;
+  $$("#abas button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  $$("[data-painel]").forEach((p) => (p.hidden = p.dataset.painel !== b.dataset.aba));
+});
+$("#procura").addEventListener("input", desenharClientes);
+$("#filtro").addEventListener("change", desenharClientes);
+$("#t-clientes").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-nif]"); if (tr) tentar(() => abrirFicha(tr.dataset.nif)); });
+$("#f-fechar").addEventListener("click", () => $("#ficha").close());
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.dataset.copiarTexto) copiar(t.dataset.copiarTexto);
+  if (t.dataset.copiar) copiar($("#" + t.dataset.copiar).textContent);
+  if (t.dataset.apagarPedido) {
+    if (t.dataset.confirmar !== "1") { t.dataset.confirmar = "1"; t.textContent = "Confirmar"; return; }
+    const [nif, maquina] = t.dataset.apagarPedido.split("|");
+    tentar(async () => { avisar((await api("codigo", { nif, maquina })).mensagem); await carregar(); });
+  }
+  if (t.dataset.bloquear !== undefined && t.dataset.maquina) {
+    const nif = $("#f-corpo").dataset.nif;
+    tentar(async () => { avisar((await api("maquina", { nif, maquina: t.dataset.maquina, bloqueada: t.dataset.bloquear === "1" })).mensagem); await abrirFicha(nif); await carregar(); });
+  }
+  if (t.hasAttribute("data-guardar-plano")) {
+    const tr = t.closest("tr"), v = (n) => $(`[name=${n}]`, tr);
+    tentar(async () => {
+      avisar((await api("plano", { codigo: v("codigo").value, nome: v("nome").value, postos: v("postos").value, preco_mes: v("preco_mes").value, preco_ano: v("preco_ano").value, activo: v("activo").checked, ordem: v("ordem").value })).mensagem);
+      await carregar();
+    });
+  }
+});
+
+document.addEventListener("submit", (e) => {
+  const f = e.target;
+  if (f.id === "form-pagamento") {
+    e.preventDefault();
+    const nif = $("#f-corpo").dataset.nif;
+    tentar(async () => { const r = await api("pagamento", { nif, ...formulario(f) }); avisar(r.mensagem); await abrirFicha(nif); await carregar(); });
+  }
+  if (f.id === "form-cliente") {
+    e.preventDefault();
+    const nif = $("#f-corpo").dataset.nif, d = formulario(f);
+    tentar(async () => { avisar((await api("cliente", { nif, ...d, experiencia_ate: d.experiencia_ate || null })).mensagem); await abrirFicha(nif); await carregar(); });
+  }
+  if (f.id === "form-emitir") {
+    e.preventDefault();
+    const d = formulario(f);
+    for (const k of ["postos", "inicio", "fim", "maquina"]) if (!d[k]) delete d[k];
+    if (d.fim) delete d.meses;
+    tentar(async () => {
+      const r = await api("emitir", d);
+      $("#emitida-chave").textContent = r.chave; $("#emitida").hidden = false; avisar(r.mensagem); await carregar();
+    });
+  }
+});
+
+// o código do pedido (KG-NIF-COMPUTADOR) preenche o NIF e o computador
+$("[name=pedido]").addEventListener("input", (e) => {
+  const m = e.target.value.trim().toUpperCase().match(/^KG-([0-9A-Z]+)-([0-9A-F]{12})$/);
+  if (!m) return;
+  const f = $("#form-emitir");
+  f.nif.value = m[1];
+  f.maquina.value = m[2].replace(/(.{4})(.{4})(.{4})/, "$1-$2-$3");
+  const c = dados?.clientes.find((x) => x.nif === m[1]);
+  if (c && !f.empresa.value) f.empresa.value = c.empresa;
+});
+
+if (token) tentar(carregar);
+</script>
+</body>
+</html>

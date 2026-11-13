@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": { "construir": "node construir.mjs", "testar": "node teste/testar.mjs" }
+}

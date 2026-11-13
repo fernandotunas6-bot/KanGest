@@ -1,0 +1,12 @@
+# Servidor de licenças do KanGest. Publica-se com scripts/publicar-licencas.py (ou com o wrangler).
+# Segredos (CHAVE_PRIVADA, ADMIN_TOKEN, e opcionais RESEND_API_KEY e EMAIL_REMETENTE) definem-se com
+# «wrangler secret put …» ou pelo script; nunca neste ficheiro.
+name = "kangest-licencas"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "kangest-licencas"
+database_id = "737a973c-e08b-400b-bfaa-264e6f617b43"

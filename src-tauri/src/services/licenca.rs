@@ -5,6 +5,9 @@
 //! e confirmada aqui com a chave pública. Sem licença, o KanGest funciona DIAS_EXPERIENCIA dias desde a instalação.
 //! Quando a licença (ou a experiência) termina, passa a modo de consulta: lê-se, imprime-se e exporta-se o SAF-T,
 //! mas não se emitem documentos novos.
+//!
+//! Com internet, o KanGest regista-se no servidor de licenças (servidor-licencas/, Cloudflare Workers): o cliente confirma
+//! o email com um código, recebe a experiência presa ao NIF e, depois de pagar, a licença nova chega sozinha.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration, NaiveDate, NaiveDateTime};
 use ring::signature::{UnparsedPublicKey, ED25519};
@@ -16,10 +19,16 @@ use std::sync::OnceLock;
 
 use crate::db;
 use crate::error::{AppError, AppResult};
+use crate::http;
 use crate::state::AppState;
 
-/// Chaves públicas do produtor (base64url de 32 bytes). Uma lista para poder trocar de chave sem invalidar as antigas.
-const CHAVES_PUBLICAS: &[&str] = &["2_760imzJ6c3wizg0oU01eSyp9vavAiFzZNIX-iBysI"];
+/// Chaves públicas (base64url de 32 bytes). Uma lista para poder trocar de chave sem invalidar as antigas.
+/// A primeira é a do produtor (licenças emitidas à mão); a segunda, a do servidor de licenças.
+const CHAVES_PUBLICAS: &[&str] = &["2_760imzJ6c3wizg0oU01eSyp9vavAiFzZNIX-iBysI", "l1SGSr48WtdwbArzzBWxKEFC0sAVlVDq-8ylTT6QHzg"];
+/// Servidor de licenças. A variável KANGEST_LICENCAS_URL muda-o (testes).
+const SERVIDOR: &str = "https://kangest-licencas.valentinocanguele.workers.dev";
+/// Verificar no servidor, no máximo, a cada tantas horas.
+pub const HORAS_SINCRONIZAR: i64 = 12;
 /// Período de experiência sem licença. Não vem da configuração (que o cliente pode alterar).
 pub const DIAS_EXPERIENCIA: i64 = 30;
 /// Quanto o relógio pode estar atrás da última data vista antes de se suspeitar de batota.
@@ -124,6 +133,17 @@ async fn cfg_gravar(p: &SqlitePool, chave: &str, valor: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Nome do plano para as mensagens.
+pub fn nome_plano(codigo: &str) -> &str {
+    match codigo {
+        "EXPERIENCIA" => "Experiência",
+        "ESSENCIAL" => "Essencial",
+        "COMERCIO" => "Comércio",
+        "EMPRESA" => "Empresa",
+        outro => outro,
+    }
+}
+
 fn so_algarismos(s: &str) -> String {
     s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_uppercase()
 }
@@ -146,6 +166,12 @@ pub struct Estado {
     pub maquina: String,
     /// Texto que o cliente envia ao produtor para pedir a licença (NIF + computador).
     pub pedido: String,
+    /// Registado no servidor de licenças (renova sozinho quando há internet).
+    pub registada: bool,
+    /// Última vez que falou com o servidor.
+    pub sincronizada_em: Option<String>,
+    /// Email usado no registo.
+    pub email_registo: Option<String>,
 }
 
 /// Data de instalação (o início do período de experiência). Nas bases antigas, conta a partir de hoje.
@@ -206,6 +232,9 @@ pub async fn calcular(st: &AppState) -> AppResult<Estado> {
         nif: nif_empresa.clone(),
         maquina,
         pedido,
+        registada: cfg_ler(p, "licenca.registada").await?.as_deref() == Some("1"),
+        sincronizada_em: cfg_ler(p, "licenca.sincronizada_em").await?,
+        email_registo: cfg_ler(p, "licenca.registo_email").await?,
     };
 
     if let Some(visto) = relogio_atrasado(p).await? {
@@ -238,16 +267,25 @@ pub async fn calcular(st: &AppState) -> AppResult<Estado> {
                         e.modo = "INVALIDA";
                         e.pode_emitir = false;
                         e.mensagem = format!("A licença só começa a {}.", dmy(inicio));
+                    } else if hoje <= fim && lic.plano == "EXPERIENCIA" {
+                        e.modo = "EXPERIENCIA";
+                        e.dias = (fim - hoje).num_days() + 1;
+                        e.aviso = e.dias <= DIAS_AVISO;
+                        e.mensagem = format!("Período de experiência: faltam {} {} (até {}).", e.dias, if e.dias == 1 { "dia" } else { "dias" }, dmy(fim));
                     } else if hoje <= fim {
                         e.modo = "ACTIVA";
                         e.dias = (fim - hoje).num_days() + 1;
                         e.aviso = e.dias <= DIAS_AVISO;
-                        e.mensagem = format!("Licença {} válida até {}.", lic.plano, dmy(fim));
+                        e.mensagem = format!("Licença {} válida até {}.", nome_plano(&lic.plano), dmy(fim));
                     } else if hoje <= limite {
                         e.modo = "TOLERANCIA";
                         e.dias = (limite - hoje).num_days() + 1;
                         e.aviso = true;
                         e.mensagem = format!("A assinatura terminou a {}. Pode continuar a facturar até {}: renove para não parar.", dmy(fim), dmy(limite));
+                    } else if lic.plano == "EXPERIENCIA" {
+                        e.modo = "EXPIRADA";
+                        e.pode_emitir = false;
+                        e.mensagem = format!("O período de experiência terminou a {}. Pode consultar e imprimir, mas não emitir documentos novos. Escolha um plano em Sistema → Licença e Assinatura.", dmy(fim));
                     } else {
                         e.modo = "EXPIRADA";
                         e.pode_emitir = false;
@@ -309,9 +347,8 @@ pub struct ActivarIn {
     chave: String,
 }
 
-pub async fn activar(st: &AppState, i: ActivarIn) -> AppResult<Value> {
-    let s = st.exigir_perm("sistema.configuracoes")?;
-    let lic = ler(&i.chave).map_err(AppError::msg)?;
+/// Confirma que a licença serve para esta empresa e este computador e ainda não passou a tolerância.
+async fn validar(st: &AppState, lic: &Licenca) -> AppResult<()> {
     let nif: String = sqlx::query_scalar("SELECT nif FROM empresa WHERE id = 1").fetch_one(&st.pool).await?;
     if so_algarismos(&nif) != so_algarismos(&lic.nif) {
         return Err(AppError::msg(format!("Esta licença é da empresa com o NIF {} ({}). A empresa configurada tem o NIF {nif}.", lic.nif, lic.empresa)));
@@ -326,14 +363,161 @@ pub async fn activar(st: &AppState, i: ActivarIn) -> AppResult<Value> {
     if hoje > fim + Duration::days(lic.tolerancia.max(0)) {
         return Err(AppError::msg(format!("Esta licença terminou a {}. Peça a renovação.", dmy(fim))));
     }
-    let texto: String = i.chave.chars().filter(|c| !c.is_whitespace()).collect();
+    Ok(())
+}
+
+async fn guardar(st: &AppState, texto: &str, lic: &Licenca, utilizador: Option<i64>, origem: &str) -> AppResult<()> {
+    let texto: String = texto.chars().filter(|c| !c.is_whitespace()).collect();
     cfg_gravar(&st.pool, "licenca.chave", &texto).await?;
     sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'LICENCA', ?)")
-        .bind(s.id)
-        .bind(format!("Licença {} activada: {} até {}, {} postos", lic.id, lic.plano, lic.fim, lic.postos))
+        .bind(utilizador)
+        .bind(format!("Licença {} {origem}: {} até {}, {} postos", lic.id, lic.plano, lic.fim, lic.postos))
         .execute(&st.pool)
         .await?;
+    Ok(())
+}
+
+pub async fn activar(st: &AppState, i: ActivarIn) -> AppResult<Value> {
+    let s = st.exigir_perm("sistema.configuracoes")?;
+    let lic = ler(&i.chave).map_err(AppError::msg)?;
+    validar(st, &lic).await?;
+    guardar(st, &i.chave, &lic, Some(s.id), "activada").await?;
     Ok(json!({ "licenca": lic, "estado": calcular(st).await? }))
+}
+
+// ------------------------------------------------------------------ servidor de licenças
+
+fn servidor() -> String {
+    std::env::var("KANGEST_LICENCAS_URL").ok().filter(|u| !u.trim().is_empty()).unwrap_or_else(|| SERVIDOR.into()).trim_end_matches('/').to_string()
+}
+
+/// POST ao servidor de licenças. Os erros que o servidor explica passam ao utilizador tal como vêm.
+async fn chamar_servidor(caminho: &str, corpo: Value) -> AppResult<Value> {
+    let url = format!("{}{caminho}", servidor());
+    let dados = serde_json::to_vec(&corpo)?;
+    let r = tokio::task::spawn_blocking(move || {
+        http::pedido(
+            "POST",
+            &url,
+            &[("Content-Type", "application/json".into()), ("Accept", "application/json".into())],
+            Some(&dados),
+            std::time::Duration::from_secs(30),
+        )
+    })
+    .await
+    .map_err(|e| AppError::msg(e.to_string()))?
+    .map_err(|_| AppError::msg("Sem ligação ao servidor de licenças. Verifique a internet e tente de novo, ou peça a licença pelo site e cole-a em «Activar a licença»."))?;
+    let v: Value = serde_json::from_slice(&r.corpo).map_err(|_| AppError::msg(format!("O servidor de licenças deu uma resposta inesperada ({}). Tente mais tarde.", r.estado)))?;
+    if r.estado >= 400 || v.get("ok") == Some(&Value::Bool(false)) {
+        return Err(AppError::msg(v.get("erro").and_then(Value::as_str).unwrap_or("O servidor de licenças recusou o pedido.").to_string()));
+    }
+    Ok(v)
+}
+
+async fn dados_empresa(st: &AppState) -> AppResult<(String, String)> {
+    let (nome, nif): (String, String) = sqlx::query_as("SELECT nome, nif FROM empresa WHERE id = 1").fetch_one(&st.pool).await?;
+    if so_algarismos(&nif).len() < 9 {
+        return Err(AppError::msg("Configure primeiro o NIF da empresa (Sistema → Empresa): a licença fica associada a ele."));
+    }
+    Ok((nome, so_algarismos(&nif)))
+}
+
+/// Aplica a licença que o servidor mandou, se for melhor do que a que está activada. Devolve se mudou.
+async fn aplicar(st: &AppState, resposta: &Value, utilizador: Option<i64>) -> AppResult<bool> {
+    let Some(texto) = resposta.get("licenca").and_then(Value::as_str) else {
+        return Ok(false);
+    };
+    let nova = ler(texto).map_err(AppError::msg)?;
+    validar(st, &nova).await?;
+    if let Some(actual) = cfg_ler(&st.pool, "licenca.chave").await?.and_then(|t| ler(&t).ok()) {
+        if actual.id == nova.id {
+            return Ok(false);
+        }
+        // nunca troca uma licença que dura mais (ex.: emitida à mão) por uma mais curta
+        let mesma_empresa = so_algarismos(&actual.nif) == so_algarismos(&nova.nif);
+        if mesma_empresa && validar(st, &actual).await.is_ok() && data(&actual.fim) > data(&nova.fim) {
+            return Ok(false);
+        }
+    }
+    guardar(st, texto, &nova, utilizador, "recebida do servidor").await?;
+    Ok(true)
+}
+
+#[derive(Deserialize)]
+pub struct RegistarIn {
+    email: String,
+    #[serde(default)]
+    telefone: String,
+}
+
+/// Pede ao servidor o código de confirmação (enviado para o email).
+pub async fn registar(st: &AppState, i: RegistarIn) -> AppResult<Value> {
+    st.exigir_perm("sistema.configuracoes")?;
+    let (empresa, nif) = dados_empresa(st).await?;
+    let email = i.email.trim().to_lowercase();
+    if !email.contains('@') || !email.contains('.') {
+        return Err(AppError::msg("Indique um email válido: é para lá que vai o código de confirmação."));
+    }
+    let v = chamar_servidor(
+        "/v1/registo",
+        json!({ "nif": nif, "empresa": empresa, "email": email, "telefone": i.telefone.trim(), "maquina": id_maquina(), "versao": env!("CARGO_PKG_VERSION") }),
+    )
+    .await?;
+    cfg_gravar(&st.pool, "licenca.registo_email", &email).await?;
+    Ok(v)
+}
+
+#[derive(Deserialize)]
+pub struct ConfirmarIn {
+    codigo: String,
+}
+
+/// Confirma o código: o computador fica registado e recebe a licença (experiência ou assinatura).
+pub async fn confirmar(st: &AppState, i: ConfirmarIn) -> AppResult<Value> {
+    let s = st.exigir_perm("sistema.configuracoes")?;
+    let (_, nif) = dados_empresa(st).await?;
+    let v = chamar_servidor("/v1/confirmar", json!({ "nif": nif, "maquina": id_maquina(), "codigo": i.codigo.trim() })).await?;
+    cfg_gravar(&st.pool, "licenca.registada", "1").await?;
+    cfg_gravar(&st.pool, "licenca.sincronizada_em", &db::agora()).await?;
+    aplicar(st, &v, Some(s.id)).await?;
+    sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'LICENCA', ?)")
+        .bind(s.id)
+        .bind(format!("KanGest registado no servidor de licenças (NIF {nif}, computador {})", id_maquina()))
+        .execute(&st.pool)
+        .await?;
+    Ok(json!({ "mensagem": v.get("mensagem"), "estado": calcular(st).await? }))
+}
+
+#[derive(Deserialize, Default)]
+pub struct SincronizarIn {
+    /// Verifica mesmo que a última verificação seja recente (botão «Verificar agora»).
+    #[serde(default)]
+    forcar: bool,
+}
+
+/// Pede ao servidor a licença mais recente (por exemplo, depois de um pagamento). Só para KanGest registados.
+pub async fn sincronizar(st: &AppState, i: SincronizarIn) -> AppResult<Value> {
+    let s = st.sessao()?;
+    let antes = calcular(st).await?;
+    if !antes.registada {
+        return Ok(json!({ "mudou": false, "estado": antes }));
+    }
+    if !i.forcar {
+        let recente = antes
+            .sincronizada_em
+            .as_deref()
+            .and_then(|t| NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S").ok())
+            .zip(NaiveDateTime::parse_from_str(&db::agora(), "%Y-%m-%dT%H:%M:%S").ok())
+            .is_some_and(|(t, agora)| agora - t < Duration::hours(HORAS_SINCRONIZAR) && agora >= t);
+        if recente {
+            return Ok(json!({ "mudou": false, "estado": antes }));
+        }
+    }
+    let (_, nif) = dados_empresa(st).await?;
+    let v = chamar_servidor("/v1/renovar", json!({ "nif": nif, "maquina": id_maquina(), "versao": env!("CARGO_PKG_VERSION") })).await?;
+    cfg_gravar(&st.pool, "licenca.sincronizada_em", &db::agora()).await?;
+    let mudou = aplicar(st, &v, Some(s.id)).await?;
+    Ok(json!({ "mudou": mudou, "mensagem": v.get("mensagem"), "estado": calcular(st).await? }))
 }
 
 #[derive(Deserialize)]
@@ -371,6 +555,13 @@ mod testes_produtor {
         let mut alterada = "KG1.eyJ2IjoxLCJpZCI6IkxJQy1DQTIxQ0NDNDQ2IiwibmlmIjoiNTAwMDAwMDAwMCIsImVtcHJlc2EiOiJFbXByZXNhIEV4ZW1wbG8sIExkYSIsInBsYW5vIjoiRVNTRU5DSUFMIiwicG9zdG9zIjoxLCJtb2R1bG9zIjpbXSwiaW5pY2lvIjoiMjAyNi0wMS0wMSIsImZpbSI6IjIwMjYtMDEtMzEiLCJ0b2xlcmFuY2lhIjoxNSwiZW1pdGlkYSI6IjIwMjYtMTEtMTIifQ.lkYNQv_AXYmvKcTKShZP32NDujI4ETHDk1HJ-tcn80qkaH0lHSUB5K3RV_qjg2AVI242KefrIkQNZ0TX2t5wCw".to_string();
         alterada.insert(30, 'x');
         assert!(super::ler(&alterada).is_err());
+    }
+
+    /// Licença de exemplo (empresa fictícia) assinada pelo servidor de licenças (servidor-licencas/, chave do servidor).
+    #[test]
+    fn licenca_do_servidor_e_aceite() {
+        let l = super::ler("KG1.eyJ2IjoxLCJpZCI6IkxJQy1EQTY1NDIxNTY0IiwibmlmIjoiNTAwMDAwMDAwMCIsImVtcHJlc2EiOiJFbXByZXNhIEV4ZW1wbG8sIExkYSIsInBsYW5vIjoiQ09NRVJDSU8iLCJwb3N0b3MiOjMsIm1vZHVsb3MiOltdLCJpbmljaW8iOiIyMDI2LTExLTEzIiwiZmltIjoiMjAyNy0xMS0xMiIsInRvbGVyYW5jaWEiOjE1LCJlbWl0aWRhIjoiMjAyNi0xMS0xMyIsIm1hcXVpbmEiOiJBQUFBLUJCQkItQ0NDQyJ9.DSPOvFtjQuH1j6NGoudimi4qL3Q81p2u3PK9FhwiGiIYvzRz3coyxtmiclASgt92PQ0mAMswN3PO1mwqPDzNAg").expect("licença do servidor");
+        assert_eq!((l.plano.as_str(), l.postos, l.fim.as_str(), l.maquina.as_deref()), ("COMERCIO", 3, "2027-11-12", Some("AAAA-BBBB-CCCC")));
     }
 }
 

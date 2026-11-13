@@ -1959,6 +1959,9 @@ async fn licencas_experiencia_e_assinatura() {
     assert_eq!((e["modo"].as_str(), e["dias"].as_i64(), e["pode_emitir"].as_bool()), (Some("EXPERIENCIA"), Some(30), Some(true)), "{e}");
     assert!(e["pedido"].as_str().unwrap().starts_with("KG-5417189230-"), "{e}");
     rpc(&st, "documentos.emitir", venda.clone()).await;
+    // sem registo no servidor, sincronizar não sai para a internet
+    let r = rpc(&st, "licenca.sincronizar", Value::Null).await;
+    assert_eq!((r["mudou"].as_bool(), r["estado"]["registada"].as_bool()), (Some(false), Some(false)), "{r}");
 
     // fim da experiência: consulta-se, mas não se emite
     gravar("licenca.instalada_em", dia(-40)).await;
@@ -1992,6 +1995,13 @@ async fn licencas_experiencia_e_assinatura() {
     let e = rpc(&st, "licenca.estado", Value::Null).await;
     assert_eq!((e["modo"].as_str(), e["pode_emitir"].as_bool(), e["aviso"].as_bool(), e["dias"].as_i64()), (Some("TOLERANCIA"), Some(true), Some(true), Some(11)), "{e}");
     rpc(&st, "documentos.emitir", venda.clone()).await;
+
+    // experiência emitida pelo servidor (plano EXPERIENCIA): mostra-se como experiência, sem limite de postos
+    gravar("licenca.chave", licenca("5417189230", 0, 9, json!({ "plano": "EXPERIENCIA", "postos": 0, "tolerancia": 0 }))).await;
+    let e = rpc(&st, "licenca.estado", Value::Null).await;
+    assert_eq!((e["modo"].as_str(), e["dias"].as_i64(), e["pode_emitir"].as_bool()), (Some("EXPERIENCIA"), Some(10), Some(true)), "{e}");
+    gravar("licenca.chave", licenca("5417189230", -30, -1, json!({ "plano": "EXPERIENCIA", "postos": 0, "tolerancia": 0 }))).await;
+    assert!(rpc_err(&st, "documentos.emitir", venda.clone()).await.contains("experiência terminou"));
 
     // passada a tolerância: modo de consulta
     gravar("licenca.chave", licenca("5417189230", -365, -20, json!({}))).await;
@@ -2476,5 +2486,80 @@ async fn utilizadores_permissoes_autenticacao() {
     assert!(rpc_err(&st, "acessos.listar", json!({ "de": hoje, "ate": hoje })).await.to_lowercase().contains("permiss"));
 
     st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// O KanGest a falar com o servidor de licenças a correr no Node (servidor-licencas/teste/servidor-local.mjs):
+///   KANGEST_CHAVE_SERVIDOR=~/.kangest-licencas/servidor/privada.pem ADMIN_TOKEN=<t> node teste/servidor-local.mjs 8787
+///   KANGEST_LICENCAS_URL=http://127.0.0.1:8787 KANGEST_ADMIN_TOKEN=<t> cargo test --lib licencas_servidor_local -- --ignored
+#[tokio::test]
+#[ignore]
+async fn licencas_servidor_local() {
+    use crate::http;
+    let url = std::env::var("KANGEST_LICENCAS_URL").expect("KANGEST_LICENCAS_URL");
+    let token = std::env::var("KANGEST_ADMIN_TOKEN").expect("KANGEST_ADMIN_TOKEN");
+    let admin = |caminho: &str, corpo: Option<Value>| {
+        let (url, token, caminho) = (url.clone(), token.clone(), caminho.to_string());
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let dados = corpo.map(|c| serde_json::to_vec(&c).unwrap());
+                let r = http::pedido(
+                    if dados.is_some() { "POST" } else { "GET" },
+                    &format!("{url}/admin/api/{caminho}"),
+                    &[("Authorization", format!("Bearer {token}")), ("Content-Type", "application/json".into())],
+                    dados.as_deref(),
+                    std::time::Duration::from_secs(20),
+                )
+                .unwrap();
+                serde_json::from_slice::<Value>(&r.corpo).unwrap()
+            })
+            .await
+            .unwrap()
+        }
+    };
+
+    let pasta = std::env::temp_dir().join(format!("kigest-teste-licenca-servidor-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Empresa Exemplo, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+
+    // registo: pede o código e confirma-o
+    assert!(rpc_err(&st, "licenca.registar", json!({ "email": "sem-arroba" })).await.contains("email"));
+    let r = rpc(&st, "licenca.registar", json!({ "email": "Geral@Exemplo.ao", "telefone": "923000000" })).await;
+    assert_eq!(r["enviado"].as_bool(), Some(false), "{r}");
+    let maquina = super::licenca::id_maquina();
+    let resumo = admin("resumo", None).await;
+    let codigo = resumo["codigos"].as_array().unwrap().iter().find(|c| c["maquina"] == maquina.as_str()).expect("pedido no painel")["codigo_aberto"].as_str().unwrap().to_string();
+    assert!(rpc_err(&st, "licenca.confirmar", json!({ "codigo": if codigo == "000000" { "111111" } else { "000000" } })).await.contains("Código errado"));
+    let r = rpc(&st, "licenca.confirmar", json!({ "codigo": codigo })).await;
+    let e = &r["estado"];
+    assert_eq!((e["modo"].as_str(), e["plano"].as_str(), e["registada"].as_bool(), e["dias"].as_i64()), (Some("EXPERIENCIA"), Some("EXPERIENCIA"), Some(true), Some(30)), "{r}");
+    assert!(e["licenca_id"].as_str().unwrap().starts_with("LIC-"));
+    assert_eq!(e["email_registo"].as_str(), Some("geral@exemplo.ao"));
+
+    // pagamento no painel: a licença nova chega ao sincronizar
+    let pg = admin("pagamento", Some(json!({ "nif": "5000000000", "plano": "COMERCIO", "meses": 12, "valor": 0, "metodo": "TRANSFERENCIA" }))).await;
+    assert_eq!(pg["ok"].as_bool(), Some(true), "{pg}");
+    let r = rpc(&st, "licenca.sincronizar", Value::Null).await;
+    assert_eq!(r["mudou"].as_bool(), Some(false), "acabou de sincronizar: espera");
+    let r = rpc(&st, "licenca.sincronizar", json!({ "forcar": true })).await;
+    let e = &r["estado"];
+    assert_eq!((r["mudou"].as_bool(), e["modo"].as_str(), e["plano"].as_str(), e["postos"].as_i64(), e["fim"].as_str()), (Some(true), Some("ACTIVA"), Some("COMERCIO"), Some(3), pg["pago_ate"].as_str()), "{r}");
+    assert!(e["mensagem"].as_str().unwrap().contains("Comércio"), "{e}");
+
+    // sem mudanças no servidor: nada muda
+    let r = rpc(&st, "licenca.sincronizar", json!({ "forcar": true })).await;
+    assert_eq!(r["mudou"].as_bool(), Some(false), "{r}");
+
+    // computador bloqueado no painel: a sincronização explica, a licença que já tem continua
+    admin("maquina", Some(json!({ "nif": "5000000000", "maquina": maquina, "bloqueada": true }))).await;
+    assert!(rpc_err(&st, "licenca.sincronizar", json!({ "forcar": true })).await.contains("bloqueado"));
+    assert_eq!(rpc(&st, "licenca.estado", Value::Null).await["modo"].as_str(), Some("ACTIVA"));
     let _ = std::fs::remove_dir_all(&pasta);
 }

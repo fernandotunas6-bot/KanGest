@@ -4,7 +4,7 @@
 //
 // rota: caminho depois do "#" (ex.: /pos, /configuracoes?aba=rede). O nome vem depois do ÚLTIMO "=".
 // Acções: @texto:<início do texto> (clica no elemento mais interior com esse texto),
-//         @foco:<início do placeholder> ou @campo:<início do rótulo> e @escrever:<texto> (preencher caixas),
+//         @foco:<início do placeholder> ou @campo:<início do rótulo> e @escrever:<texto> (preencher caixas; %40 = @),
 //         @clique:<texto> (botões/links), @titulo:<início do title> (botões só com ícone),
 //         @tecla:<F12|Enter…>, @rolar:<px>,
 //         @impressao (mostra a página como sai na impressora: só o conteúdo de impressão).
@@ -78,7 +78,7 @@ for (const p of pedidos) {
         expression: `(() => { const l = [...document.querySelectorAll('label')].find(e => e.textContent.trim().toLowerCase().startsWith(${JSON.stringify(texto.toLowerCase())})); const el = l?.querySelector('input,textarea,select') ?? (l?.htmlFor ? document.getElementById(l.htmlFor) : null); if (el) { el.focus(); return true } return false })()`,
       });
     } else if (tipo === "escrever") {
-      await cmd("Input.insertText", { text: texto });
+      await cmd("Input.insertText", { text: texto.replaceAll("%40", "@") }); // %40 escreve «@» (o @ separa acções)
     } else if (tipo === "tecla") {
       await cmd("Input.dispatchKeyEvent", { type: "keyDown", key: texto, code: texto });
       await cmd("Input.dispatchKeyEvent", { type: "keyUp", key: texto, code: texto });
