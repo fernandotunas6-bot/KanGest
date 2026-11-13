@@ -13,11 +13,13 @@
     <div>
       <h2 style="font-size:30px;margin-bottom:14px">Fale connosco</h2>
       <div class="texto">
-        <p data-com-contacto hidden>Pode escrever-nos pelo formulário ou directamente pelo WhatsApp ou por email. Indique o assunto para lhe respondermos com o que interessa.</p>
+        <p data-com-contacto hidden>Ligue-nos, escreva pelo WhatsApp ou use o formulário. Indique o assunto para lhe respondermos com o que interessa.</p>
         <p data-sem-contacto>Estamos a preparar os contactos directos de vendas. Até lá, pode instalar o KanGest e experimentá-lo à vontade.</p>
       </div>
+      <a class="telefone-grande" href="tel:{{config.contacto.telefoneLink}}">{{icone:telefone}}<span><small>Telefone e WhatsApp</small>{{config.contacto.telefone}}</span></a>
       <div class="accoes" style="margin-top:22px" data-com-contacto hidden>
         <a class="btn btn-verde" data-contacto="whatsapp" href="#" target="_blank" rel="noopener" hidden>{{icone:whatsapp}}WhatsApp</a>
+        <a class="btn btn-linha" href="tel:{{config.contacto.telefoneLink}}">{{icone:telefone}}Ligar</a>
         <a class="btn btn-linha" data-contacto="email" href="#" hidden>{{icone:email}}Email</a>
       </div>
       <div class="recurso" style="margin-top:28px">
