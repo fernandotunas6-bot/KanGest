@@ -498,6 +498,8 @@ fn permissao_tipo(st: &AppState, tipo: &str) -> AppResult<i64> {
 }
 
 pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
+    // licença: terminada a assinatura (ou a experiência), consulta-se mas não se emitem documentos novos
+    super::licenca::exigir_emissao(st).await?;
     let utilizador_id = permissao_tipo(st, &i.tipo)?;
     // Chave carregada fora da transacção (a primeira geração pode demorar).
     let chave = agt::chave(&st.pool).await?;

@@ -23,7 +23,7 @@ FONTE, SAIDA = RAIZ / "site-fonte", RAIZ / "site"
 
 MENU = [
     ("kangest", "kangest.html", "KanGest"),
-    ("migracao", "migracao-kigest.html", "Migração do KIGEST"),
+    ("migracao", "migracao-kigest.html", "Migração"),
     ("equipamento", "equipamento.html", "Equipamento POS"),
     ("siga", "siga-plus.html", "SIGA Plus"),
     ("projectos", "projectos.html", "Projectos"),

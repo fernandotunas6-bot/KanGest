@@ -27,6 +27,8 @@ argon2 = "0.5"
 rsa = { version = "0.9", features = ["sha1", "pem"] }
 sha1 = { version = "0.10", features = ["oid"] }
 base64 = "0.22"
+# assinatura Ed25519 das licenças do KanGest
+ring = "0.17"
 rand = "0.8"
 # Cliente HTTPS (actualizações e Facturação Electrónica da AGT) com o TLS do sistema; RS256 e SHA-256.
 native-tls = "0.2"

@@ -8,6 +8,7 @@ mod entidades;
 pub mod fe;
 mod impressao;
 pub mod importar;
+pub mod licenca;
 mod oficina;
 mod parametros;
 mod posto;
@@ -122,6 +123,9 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "series.eliminar" => series::eliminar(st, p(params)?).await,
 
         // ---- postos ----
+        "licenca.estado" => licenca::estado(st).await,
+        "licenca.activar" => licenca::activar(st, p(params)?).await,
+        "licenca.abrirSite" => licenca::abrir_site(p(params)?).await,
         "posto.obter" => posto::obter(st).await,
         "posto.guardar" => posto::guardar(st, p(params)?).await,
         "posto.selecionar" => posto::selecionar(st, p(params)?).await,

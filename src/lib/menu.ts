@@ -163,6 +163,7 @@ export const MENU: GrupoMenu[] = [
       { label: "Opções de Venda", to: "/parametrizacao?vista=venda", perm: "sistema.parametrizacao" },
       { label: "Definição de Faturas e Recibos", to: "/parametrizacao?vista=impresso", perm: "sistema.parametrizacao" },
       { label: "Importar dados do KIGEST", to: "/importar", perm: "sistema.importar" },
+      { label: "Licença e Assinatura", to: "/licenca" },
       { label: "Manual e Atalhos", to: "/sobre?vista=manual" },
       { label: "Sobre o KanGest", to: "/sobre" },
     ],

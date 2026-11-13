@@ -9,6 +9,7 @@ import { useSession } from "@/store/session";
 import { Button, Field, Input, Modal, cn } from "@/components/ui";
 import { Logo } from "@/components/Logo";
 import { bloquearSessao } from "@/components/Sessao";
+import { AvisoLicenca } from "@/components/AvisoLicenca";
 import type { Sessao } from "@/lib/types";
 
 const CHAVE_ABERTOS = "kigest.menu.abertos";
@@ -158,6 +159,7 @@ export default function AppShell() {
 
       <main className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1400px] px-8 py-7">
+          {loc.pathname !== "/licenca" && <AvisoLicenca />}
           <Outlet />
         </div>
       </main>

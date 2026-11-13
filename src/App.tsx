@@ -44,6 +44,7 @@ import Honorarios from "@/pages/rh/Honorarios";
 import Viaturas from "@/pages/oficina/Viaturas";
 import Ordens from "@/pages/oficina/Ordens";
 import Utilizadores from "@/pages/Utilizadores";
+import Licenca from "@/pages/Licenca";
 import { EcraBloqueado, MudarSenhaObrigatoria, usePolitica, useInatividade } from "@/components/Sessao";
 
 export default function App() {
@@ -122,6 +123,7 @@ export default function App() {
         <Route path="/oficina/viaturas" element={<Viaturas />} />
         <Route path="/oficina/ordens" element={<Ordens />} />
         <Route path="/utilizadores" element={<Utilizadores />} />
+        <Route path="/licenca" element={<Licenca />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

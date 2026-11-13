@@ -65,14 +65,22 @@ pub async fn guardar(st: &AppState, p: PostoIn) -> AppResult<Value> {
                 .await?;
             id
         }
-        None => sqlx::query("INSERT INTO postos (descricao, armazem_id, serie_prefixo, opcoes) VALUES (?, ?, ?, COALESCE(?, (SELECT opcoes FROM postos WHERE id = 1)))")
+        None => {
+            if let Some(limite) = super::licenca::limite_postos(st).await? {
+                let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM postos").fetch_one(&st.pool).await?;
+                if n >= limite {
+                    return Err(AppError::msg(format!("A licença permite {limite} {}. Para mais postos, mude de plano em Sistema → Licença e Assinatura.", if limite == 1 { "posto" } else { "postos" })));
+                }
+            }
+            sqlx::query("INSERT INTO postos (descricao, armazem_id, serie_prefixo, opcoes) VALUES (?, ?, ?, COALESCE(?, (SELECT opcoes FROM postos WHERE id = 1)))")
             .bind(desc)
             .bind(p.armazem_id)
             .bind(&prefixo)
             .bind(&opcoes)
             .execute(&st.pool)
             .await?
-            .last_insert_rowid(),
+            .last_insert_rowid()
+        }
     };
     if id == st.posto().id {
         st.carregar_posto(id).await?;

@@ -26,7 +26,7 @@ use crate::state::{AppState, Contexto, PostoAtual, CONTEXTO};
 pub const PORTA_PADRAO: u16 = 7799;
 /// Métodos que são sempre desta máquina, mesmo em modo cliente: configuração de rede,
 /// impressão (a impressora é local) e gravação de ficheiros exportados.
-const LOCAIS: [&str; 4] = ["rede.", "impressao.", "sistema.exportar", "atualizacao."];
+const LOCAIS: [&str; 5] = ["rede.", "impressao.", "sistema.exportar", "atualizacao.", "licenca.abrirSite"];
 
 // ============================== configuração ==============================
 

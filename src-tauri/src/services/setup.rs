@@ -93,6 +93,7 @@ pub async fn inicializar(st: &AppState, i: InicializarIn) -> AppResult<Value> {
         .execute(&st.pool)
         .await?;
     agt::chave(&st.pool).await?; // gera par de chaves de desenvolvimento
+    super::licenca::registar_instalacao(&st.pool).await?; // começa o período de experiência
     Ok(Value::Null)
 }
 

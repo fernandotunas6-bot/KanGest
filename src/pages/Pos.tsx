@@ -42,6 +42,8 @@ import DocumentoModal, { ImpressaoAutomatica } from "@/components/DocumentoModal
 import { PinModal, Segmento, TecladoModal, TextoModal } from "@/components/PosDialogs";
 import { Logo } from "@/components/Logo";
 import { bloquearSessao } from "@/components/Sessao";
+import { AvisoLicenca } from "@/components/AvisoLicenca";
+import { useLicenca } from "@/lib/licenca";
 import { useEmpresa } from "@/components/PrintCabecalho";
 import { abrirVisorEcra, ecraInteiro, linhasVisorColuna, ouvirVisorPronto, publicarVisor, type EstadoVisor } from "@/lib/equipamento";
 
@@ -132,6 +134,7 @@ export default function Pos() {
   const [pin, setPin] = useState<string | null>(null);
 
   const [pagar, setPagar] = useState(false);
+  const licenca = useLicenca();
   const [escolherCliente, setEscolherCliente] = useState<"" | "lista" | "novo">("");
   const [editarCliente, setEditarCliente] = useState(false);
   const [confirmarCliente, setConfirmarCliente] = useState(false);
@@ -347,6 +350,7 @@ export default function Pos() {
   function abrirPagamento() {
     if (!linhas.length) return;
     if (caixa.isSuccess && !caixa.data) return toast.error("Abra o caixa antes de vender.");
+    if (licenca.data && !licenca.data.pode_emitir) return toast.error(licenca.data.mensagem);
     if (opcoes.confirmar_cliente && cliente.id === 1) return setConfirmarCliente(true);
     setPagar(true);
   }
@@ -595,6 +599,7 @@ export default function Pos() {
           </Button>
         </div>
       </header>
+      <AvisoLicenca compacto className="mx-4 mt-3" />
 
       <div className="flex min-h-0 flex-1">
         {/* Catálogo */}

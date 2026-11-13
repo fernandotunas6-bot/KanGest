@@ -1922,6 +1922,91 @@ fn escrever_kigest(caminho: &std::path::Path, gzip: bool, objectos: &[(&str, &st
     }
 }
 
+#[tokio::test]
+async fn licencas_experiencia_e_assinatura() {
+    use super::licenca::teste;
+    use chrono::{Duration, Local};
+    let pasta = std::env::temp_dir().join(format!("kigest-teste-licenca-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Loja Licenciada, Lda", "nif": "5417189230" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let artigo = rpc(&st, "artigos.guardar", json!({ "descricao": "Assistência", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    let venda = json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] });
+    let dia = |d: i64| (Local::now().date_naive() + Duration::days(d)).format("%Y-%m-%d").to_string();
+    let licenca = |nif: &str, inicio: i64, fim: i64, extra: Value| {
+        let mut l = json!({ "v": 1, "id": "LIC-TESTE", "nif": nif, "empresa": "Loja Licenciada, Lda", "plano": "COMERCIO", "postos": 2,
+                            "inicio": dia(inicio), "fim": dia(fim), "tolerancia": 15, "emitida": dia(0) });
+        if let Value::Object(m) = extra {
+            l.as_object_mut().unwrap().extend(m);
+        }
+        teste::emitir(&l)
+    };
+    let gravar = |chave: &'static str, valor: String| {
+        let pool = st.pool.clone();
+        async move {
+            sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").bind(chave).bind(valor).execute(&pool).await.unwrap();
+        }
+    };
+
+    // período de experiência: 30 dias a contar da criação da empresa
+    let e = rpc(&st, "licenca.estado", Value::Null).await;
+    assert_eq!((e["modo"].as_str(), e["dias"].as_i64(), e["pode_emitir"].as_bool()), (Some("EXPERIENCIA"), Some(30), Some(true)), "{e}");
+    assert!(e["pedido"].as_str().unwrap().starts_with("KG-5417189230-"), "{e}");
+    rpc(&st, "documentos.emitir", venda.clone()).await;
+
+    // fim da experiência: consulta-se, mas não se emite
+    gravar("licenca.instalada_em", dia(-40)).await;
+    let e = rpc(&st, "licenca.estado", Value::Null).await;
+    assert_eq!((e["modo"].as_str(), e["pode_emitir"].as_bool()), (Some("EXPIRADA"), Some(false)), "{e}");
+    assert!(rpc_err(&st, "documentos.emitir", venda.clone()).await.contains("experiência terminou"));
+    assert_eq!(rpc(&st, "documentos.listar", json!({})).await.as_array().unwrap().len(), 1, "o histórico continua a ver-se");
+
+    // licenças recusadas: outro NIF, alterada, outro computador, já terminada
+    assert!(rpc_err(&st, "licenca.activar", json!({ "chave": licenca("5000000000", 0, 365, json!({})) })).await.contains("NIF"));
+    let boa = licenca("5417189230", 0, 365, json!({}));
+    let mut alterada: Vec<char> = boa.chars().collect();
+    alterada[20] = if alterada[20] == 'A' { 'B' } else { 'A' };
+    assert!(rpc_err(&st, "licenca.activar", json!({ "chave": alterada.into_iter().collect::<String>() })).await.contains("não é válida"));
+    assert!(rpc_err(&st, "licenca.activar", json!({ "chave": "isto não é uma licença" })).await.contains("KG1"));
+    assert!(rpc_err(&st, "licenca.activar", json!({ "chave": licenca("5417189230", 0, 365, json!({ "maquina": "0000-0000-0000" })) })).await.contains("computador"));
+    assert!(rpc_err(&st, "licenca.activar", json!({ "chave": licenca("5417189230", -400, -30, json!({})) })).await.contains("terminou"));
+
+    // licença boa (com espaços e quebras de linha, como chega por WhatsApp): volta a facturar
+    let colada = format!("  {}\n{}  ", &boa[..40], &boa[40..]);
+    let r = rpc(&st, "licenca.activar", json!({ "chave": colada })).await;
+    assert_eq!((r["estado"]["modo"].as_str(), r["estado"]["plano"].as_str(), r["estado"]["postos"].as_i64()), (Some("ACTIVA"), Some("COMERCIO"), Some(2)), "{r}");
+    rpc(&st, "documentos.emitir", venda.clone()).await;
+
+    // a licença limita os postos (2): o segundo cria-se, o terceiro não
+    rpc(&st, "posto.guardar", json!({ "descricao": "Posto#2", "armazem_id": 1, "serie_prefixo": "P2" })).await;
+    assert!(rpc_err(&st, "posto.guardar", json!({ "descricao": "Posto#3", "armazem_id": 1, "serie_prefixo": "P3" })).await.contains("permite 2 postos"));
+
+    // terminada há 5 dias, com 15 de tolerância: ainda factura, com aviso
+    gravar("licenca.chave", licenca("5417189230", -365, -5, json!({}))).await;
+    let e = rpc(&st, "licenca.estado", Value::Null).await;
+    assert_eq!((e["modo"].as_str(), e["pode_emitir"].as_bool(), e["aviso"].as_bool(), e["dias"].as_i64()), (Some("TOLERANCIA"), Some(true), Some(true), Some(11)), "{e}");
+    rpc(&st, "documentos.emitir", venda.clone()).await;
+
+    // passada a tolerância: modo de consulta
+    gravar("licenca.chave", licenca("5417189230", -365, -20, json!({}))).await;
+    assert!(rpc_err(&st, "documentos.emitir", venda.clone()).await.contains("assinatura terminou"));
+
+    // relógio atrasado (a última utilização foi «daqui a 5 dias»): não factura até acertar a data
+    gravar("licenca.chave", boa.clone()).await;
+    gravar("licenca.ultimo_visto", format!("{}T10:00:00", dia(5))).await;
+    let e = rpc(&st, "licenca.estado", Value::Null).await;
+    assert_eq!(e["modo"], "RELOGIO", "{e}");
+    assert!(rpc_err(&st, "documentos.emitir", venda.clone()).await.contains("data deste computador"));
+    gravar("licenca.ultimo_visto", format!("{}T00:00:00", dia(0))).await;
+    assert_eq!(rpc(&st, "licenca.estado", Value::Null).await["modo"], "ACTIVA");
+}
+
 /// Serve uma base já existente (ex.: a criada por `importar_ficheiro_real`) na porta 7799, como o
 /// `servidor_demo`, para ver e imprimir os dados reais no browser:
 ///   KANGEST_PASTA=/tmp/x cargo test --offline servidor_base -- --ignored --nocapture
