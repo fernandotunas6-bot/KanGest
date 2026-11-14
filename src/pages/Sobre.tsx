@@ -189,6 +189,8 @@ interface EstadoAtualizacao {
   plataforma: string;
   fonte: string;
   chave_publica: boolean;
+  /** A chave das actualizações vem com o programa: assinatura obrigatória. */
+  chave_embutida?: boolean;
   ultima_verificacao: string | null;
 }
 interface Verificacao {
@@ -258,12 +260,18 @@ function Atualizacoes() {
           <Field label="Origem (endereço ou pasta partilhada na rede)" hint="Onde está o ficheiro kangest-atualizacao.json, ex.: https://… ou \\SERVIDOR\KanGest">
             <Input disabled={!admin} value={fonte ?? estado?.fonte ?? ""} onChange={(e) => setFonte(e.target.value)} placeholder="https://… ou \\SERVIDOR\KanGest" />
           </Field>
-          <Field
-            label="Chave pública de assinatura (opcional)"
-            hint={estado?.chave_publica ? "Configurada: só se instalam pacotes assinados com esta chave." : "Sem chave, o pacote é conferido apenas pelo SHA-256 do manifesto."}
-          >
-            <Input disabled={!admin} value={chave} onChange={(e) => setChave(e.target.value)} placeholder={estado?.chave_publica ? "•••• (deixe vazio para manter)" : "Chave minisign (tauri signer)"} />
-          </Field>
+          {estado?.chave_embutida ? (
+            <p className="rounded-lg bg-ok-50 px-3 py-2 text-[13px] text-ok">
+              Só se instalam pacotes assinados pelo produtor do KanGest: a chave pública vem com o programa e não se altera aqui.
+            </p>
+          ) : (
+            <Field
+              label="Chave pública de assinatura (opcional)"
+              hint={estado?.chave_publica ? "Configurada: só se instalam pacotes assinados com esta chave." : "Sem chave, o pacote é conferido apenas pelo SHA-256 do manifesto."}
+            >
+              <Input disabled={!admin} value={chave} onChange={(e) => setChave(e.target.value)} placeholder={estado?.chave_publica ? "•••• (deixe vazio para manter)" : "Chave minisign (tauri signer)"} />
+            </Field>
+          )}
           {admin && (
             <Button variant="secondary" loading={busy === "gravar"} disabled={fonte === null && !chave.trim()} onClick={gravar}>
               Gravar origem

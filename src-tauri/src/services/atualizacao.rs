@@ -159,11 +159,25 @@ pub fn sha256_hex(dados: &[u8]) -> String {
     Sha256::digest(dados).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Ficheiro com o SHA-256 conferido de um pacote descarregado.
+fn conferido(pacote: &Path) -> PathBuf {
+    let mut n = pacote.as_os_str().to_owned();
+    n.push(".sha256");
+    PathBuf::from(n)
+}
+
 fn pasta(st: &AppState) -> PathBuf {
     st.pasta_dados.join("atualizacoes")
 }
 
 // ------------------------------------------------------------------ RPC
+
+/// Chave pública que confirma os pacotes: a que vem com o programa (compilação oficial) ou, em
+/// desenvolvimento, a configurada nesta instalação. Com a chave do programa, a assinatura é obrigatória
+/// e não pode ser trocada no ecrã (uma origem adulterada não instala nada).
+fn chave_efectiva(c: &Config) -> Option<String> {
+    crate::produtor::chave_actualizacoes().or_else(|| Some(c.chave_publica.trim().to_string()).filter(|k| !k.is_empty()))
+}
 
 pub async fn estado(st: &AppState) -> AppResult<Value> {
     st.sessao()?;
@@ -172,7 +186,8 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
         "versao_atual": env!("CARGO_PKG_VERSION"),
         "plataforma": plataforma(),
         "fonte": c.fonte,
-        "chave_publica": !c.chave_publica.trim().is_empty(),
+        "chave_publica": chave_efectiva(&c).is_some(),
+        "chave_embutida": crate::produtor::chave_actualizacoes().is_some(),
         "ultima_verificacao": c.ultima_verificacao,
     }))
 }
@@ -189,7 +204,7 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
     st.exigir_perm("sistema.atualizacoes")?;
     let mut c = ler_cfg(&st.pasta_dados);
     c.fonte = g.fonte.trim().to_string();
-    if let Some(k) = g.chave_publica {
+    if let Some(k) = g.chave_publica.filter(|_| crate::produtor::chave_actualizacoes().is_none()) {
         let k = k.trim().to_string();
         if !k.is_empty() {
             // valida já a chave
@@ -239,14 +254,16 @@ pub async fn descarregar(st: &AppState) -> AppResult<Value> {
         if sha256_hex(&dados) != p.sha256.trim().to_ascii_lowercase() {
             return Err(AppError::msg("O pacote descarregado não confere com o SHA-256 do manifesto: actualização recusada."));
         }
-        if !c.chave_publica.trim().is_empty() {
+        if let Some(chave) = chave_efectiva(&c) {
             let a = p.assinatura.as_deref().filter(|a| !a.trim().is_empty()).ok_or_else(|| AppError::msg("O pacote não está assinado e esta instalação exige assinatura."))?;
-            verificar_assinatura(&c.chave_publica, a, &dados)?;
+            verificar_assinatura(&chave, a, &dados)?;
         }
         std::fs::create_dir_all(&destino_dir).map_err(|e| AppError::msg(e.to_string()))?;
         let nome = Path::new(&p.ficheiro).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "kangest-instalador".into());
         let destino = destino_dir.join(nome);
         std::fs::write(&destino, &dados).map_err(|e| AppError::msg(format!("Não foi possível gravar {}: {e}", destino.display())))?;
+        // o SHA-256 conferido fica ao lado: antes de abrir o instalador volta a conferir-se
+        std::fs::write(conferido(&destino), sha256_hex(&dados)).map_err(|e| AppError::msg(e.to_string()))?;
         Ok((destino, m.versao))
     })
     .await
@@ -275,6 +292,12 @@ pub async fn instalar(st: &AppState, i: InstalarIn) -> AppResult<Value> {
     let f = Path::new(&i.ficheiro).canonicalize().map_err(|_| AppError::msg("O instalador já não existe."))?;
     if !f.starts_with(&dir) {
         return Err(AppError::msg("Instalador inválido."));
+    }
+    // o ficheiro tem de ser o mesmo que foi descarregado e conferido (não trocado entretanto)
+    let esperado = std::fs::read_to_string(conferido(&f)).map_err(|_| AppError::msg("Descarregue de novo a actualização."))?;
+    let dados = std::fs::read(&f).map_err(|e| AppError::msg(format!("Não foi possível ler o instalador: {e}")))?;
+    if sha256_hex(&dados) != esperado.trim() {
+        return Err(AppError::msg("O instalador foi alterado depois de descarregado: actualização recusada. Descarregue-a de novo."));
     }
     // o «start» passa pelo ShellExecute, que pede elevação (UAC) quando o instalador a exige;
     // sem o prefixo «\\?\» do canonicalize, que o cmd não aceita

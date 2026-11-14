@@ -2793,3 +2793,27 @@ async fn segredos_cifrados_na_configuracao() {
     }
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+#[tokio::test]
+async fn actualizacao_conferida_antes_de_instalar() {
+    let (st, pasta) = base_com_admin("actualizacao").await;
+    let origem = pasta.join("origem");
+    std::fs::create_dir_all(&origem).unwrap();
+    let plat = rpc(&st, "atualizacao.estado", Value::Null).await["plataforma"].as_str().unwrap().to_string();
+    let pacote = b"instalador de teste";
+    std::fs::write(origem.join("KanGest_9.9.9.bin"), pacote).unwrap();
+    let manifesto = json!({ "versao": "9.9.9", "data": "2026-12-01", "notas": "teste",
+        "pacotes": { plat: { "ficheiro": "KanGest_9.9.9.bin", "sha256": crate::services::atualizacao::sha256_hex(pacote) } } });
+    std::fs::write(origem.join("kangest-atualizacao.json"), manifesto.to_string()).unwrap();
+    rpc(&st, "atualizacao.guardar", json!({ "fonte": origem.display().to_string() })).await;
+    let d = rpc(&st, "atualizacao.descarregar", Value::Null).await;
+    let ficheiro = d["ficheiro"].as_str().unwrap().to_string();
+    // trocado depois de descarregado: não se abre
+    std::fs::write(&ficheiro, b"outro programa").unwrap();
+    assert!(rpc_err(&st, "atualizacao.instalar", json!({ "ficheiro": ficheiro })).await.contains("alterado"));
+    // sem chave embutida (desenvolvimento) a assinatura continua opcional; com ela é obrigatória
+    if crate::produtor::chave_actualizacoes().is_some() {
+        assert_eq!(rpc(&st, "atualizacao.estado", Value::Null).await["chave_embutida"], true);
+    }
+    let _ = std::fs::remove_dir_all(&pasta);
+}
