@@ -2563,3 +2563,75 @@ async fn licencas_servidor_local() {
     assert_eq!(rpc(&st, "licenca.estado", Value::Null).await["modo"].as_str(), Some("ACTIVA"));
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Base temporária com a empresa criada e o administrador com sessão iniciada.
+async fn base_com_admin(nome: &str) -> (AppState, std::path::PathBuf) {
+    let pasta = std::env::temp_dir().join(format!("kigest-{nome}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.expect("posto 1");
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Loja Teste, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    (st, pasta)
+}
+
+#[tokio::test]
+async fn notas_de_credito_limitadas_a_origem() {
+    let (st, pasta) = base_com_admin("nc-limites").await;
+    let arroz = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 100000, "custo": 50000 })).await["id"].as_i64().unwrap();
+    let oleo = rpc(&st, "artigos.guardar", json!({ "descricao": "Óleo", "taxa_iva_id": 1, "preco1": 500000, "custo": 50000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": arroz, "quantidade": 20, "preco_unitario": 50000 }, { "artigo_id": oleo, "quantidade": 20, "preco_unitario": 50000 }] })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": arroz, "quantidade": 3 }], "pagamentos": [{ "modo": "NU", "valor": 342000 }] })).await;
+    let fr_id = fr["documento"]["id"].as_i64().unwrap();
+    // o preço mudou depois da venda: a nota usa o preço da factura
+    rpc(&st, "artigos.guardar", json!({ "id": arroz, "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 900000, "custo": 50000 })).await;
+    let nc = |q: f64, artigo: i64| json!({ "tipo": "NC", "entidade_id": 1, "doc_origem_id": fr_id, "motivo": "Devolução de mercadoria", "linhas": [{ "artigo_id": artigo, "quantidade": q }] });
+
+    // mais do que o facturado, ou um artigo que não estava na factura: recusado
+    assert!(rpc_err(&st, "documentos.emitir", nc(5.0, arroz)).await.contains("só pode creditar 3"));
+    assert!(rpc_err(&st, "documentos.emitir", nc(1.0, oleo)).await.contains("não consta do documento de origem"));
+    // preço acima do facturado: o valor excede o que falta creditar
+    let caro = json!({ "tipo": "NC", "entidade_id": 1, "doc_origem_id": fr_id, "motivo": "Devolução de mercadoria", "linhas": [{ "artigo_id": arroz, "quantidade": 1, "preco_unitario": 400000 }] });
+    assert!(rpc_err(&st, "documentos.emitir", caro).await.contains("excede"));
+
+    // duas notas parciais que somam a factura; a terceira já não cabe
+    let n1 = rpc(&st, "documentos.emitir", nc(2.0, arroz)).await;
+    assert_eq!(n1["documento"]["total"], 228000, "preço da factura (1 000,00 + IVA), não o preço novo");
+    let disp = rpc(&st, "documentos.creditavel", json!({ "id": fr_id })).await;
+    assert_eq!(disp["artigos"][0]["disponivel"].as_f64(), Some(1.0));
+    assert_eq!(disp["disponivel"], 114000);
+    let n2 = rpc(&st, "documentos.emitir", nc(1.0, arroz)).await;
+    assert!(rpc_err(&st, "documentos.emitir", nc(1.0, arroz)).await.contains("só pode creditar 0"));
+    // a devolução em dinheiro nunca passa do que a venda recebeu
+    let cx = rpc(&st, "caixa.estado", Value::Null).await;
+    assert_eq!(cx["saidas"], 342000);
+    assert_eq!(cx["numerario_esperado"], 0);
+    // a nota que devolveu dinheiro não se anula (regra que já existia)
+    assert!(rpc_err(&st, "documentos.anular", json!({ "id": n2["documento"]["id"], "motivo": "Nota emitida por engano" })).await.contains("movimentado"));
+
+    // factura a crédito: anular a nota liberta a quantidade
+    let cli = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Cliente Lda", "nif": "5417000000" })).await["id"].as_i64().unwrap();
+    let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": oleo, "quantidade": 2 }] })).await;
+    let ft_id = ft["documento"]["id"].as_i64().unwrap();
+    let nc_ft = |q: f64| json!({ "tipo": "NC", "entidade_id": cli, "doc_origem_id": ft_id, "motivo": "Devolução de mercadoria", "linhas": [{ "artigo_id": oleo, "quantidade": q }] });
+    let n3 = rpc(&st, "documentos.emitir", nc_ft(2.0)).await;
+    assert_eq!(rpc(&st, "documentos.obter", json!({ "id": ft_id })).await["documento"]["valor_pendente"], 0);
+    assert!(rpc_err(&st, "documentos.emitir", nc_ft(1.0)).await.contains("só pode creditar 0"));
+    rpc(&st, "documentos.anular", json!({ "id": n3["documento"]["id"], "motivo": "Nota emitida por engano" })).await;
+    assert_eq!(rpc(&st, "documentos.creditavel", json!({ "id": ft_id })).await["artigos"][0]["disponivel"].as_f64(), Some(2.0));
+    rpc(&st, "documentos.emitir", nc_ft(1.0)).await;
+
+    // compras: a V/Nota de crédito segue as mesmas regras
+    let forn = rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Fornecedor SA", "nif": "5410000000" })).await["id"].as_i64().unwrap();
+    let fc = rpc(&st, "documentos.emitir", json!({ "tipo": "FC", "entidade_id": forn, "doc_externo": "FT A/1", "linhas": [{ "artigo_id": oleo, "quantidade": 4, "preco_unitario": 60000 }] })).await;
+    let vnc = |q: f64| json!({ "tipo": "VNC", "entidade_id": forn, "doc_externo": "NC 9", "motivo": "Devolução ao fornecedor", "doc_origem_id": fc["documento"]["id"], "linhas": [{ "artigo_id": oleo, "quantidade": q }] });
+    assert!(rpc_err(&st, "documentos.emitir", vnc(5.0)).await.contains("só pode creditar 4"));
+    let v = rpc(&st, "documentos.emitir", vnc(4.0)).await;
+    assert_eq!(v["documento"]["total"], 273600, "4 × 600,00 + IVA, ao custo da factura do fornecedor");
+    let _ = std::fs::remove_dir_all(&pasta);
+}

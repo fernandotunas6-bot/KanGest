@@ -175,6 +175,7 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "documentos.listar" => documentos::listar(st, p(params)?).await,
         "documentos.obter" => documentos::obter(st, p(params)?).await,
         "documentos.anular" => documentos::anular(st, p(params)?).await,
+        "documentos.creditavel" => documentos::creditavel(st, p(params)?).await,
         "documentos.auxiliares" => documentos::auxiliares(st).await,
 
         // ---- POS: suspensos ----
