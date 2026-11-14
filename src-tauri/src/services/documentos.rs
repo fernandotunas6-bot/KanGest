@@ -583,6 +583,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     let utilizador_id = permissao_tipo(st, &i.tipo)?;
     // Chave carregada fora da transacção (a primeira geração pode demorar).
     let chave = agt::chave(&st.pool).await?;
+    let versao_chave = agt::versao_assinatura(&st.pool).await?;
     let _guard = st.emissao.lock().await;
 
     let posto = st.posto();
@@ -1146,6 +1147,9 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     }
     let numero = ultimo + 1;
     let numero_doc = format!("{} {}/{}", tipo.codigo, serie, numero);
+    if tipo.assinado {
+        agt::exigir_certificacao(&st.pool).await?;
+    }
     let (hash, controlo) = if tipo.assinado {
         let h = agt::assinar(&chave, &agt::mensagem(&data_doc, &agora, &numero_doc, total, &hash_ant));
         let c = agt::controlo(&h);
@@ -1223,12 +1227,13 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     .execute(&mut *tx)
     .await?
     .last_insert_rowid();
-    sqlx::query("UPDATE documentos SET origem = ?, doc_manual = ?, credito_disponivel = ?, vendedor_id = ?, endereco_entrega = ? WHERE id = ?")
+    sqlx::query("UPDATE documentos SET origem = ?, doc_manual = ?, credito_disponivel = ?, vendedor_id = ?, endereco_entrega = ?, hash_versao = ? WHERE id = ?")
         .bind(if manual.is_some() { "M" } else { "P" })
         .bind(manual.as_ref().map(|m| m.0.clone()))
         .bind(if adiantamento { total } else { 0 })
         .bind(vendedor_id)
         .bind(txt(&i.endereco_entrega))
+        .bind(if tipo.assinado { Some(versao_chave.as_str()) } else { None })
         .bind(doc_id)
         .execute(&mut *tx)
         .await?;

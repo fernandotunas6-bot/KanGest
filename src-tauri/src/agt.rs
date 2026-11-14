@@ -21,7 +21,22 @@ use crate::error::{AppError, AppResult};
 pub const CHAVE_CONFIG: &str = "agt.chave_privada";
 pub const CERTIFICADO_CONFIG: &str = "agt.numero_certificado";
 
+/// Chave que assina os documentos.
+///
+/// - Compilação oficial: a chave do produtor vem embutida no programa (`produtor::chave_agt`) e nunca
+///   é gravada na base de dados. Se a base ainda tiver uma chave (de desenvolvimento ou carregada à
+///   mão em versões anteriores), fica só a pública arquivada em `agt_chaves` e a privada é apagada.
+/// - Compilação de desenvolvimento: usa a chave da base de dados ou gera uma de desenvolvimento.
 pub async fn chave(pool: &SqlitePool) -> AppResult<RsaPrivateKey> {
+    if let Some(k) = crate::produtor::chave_agt().map_err(AppError::msg)? {
+        retirar_chave_da_base(pool, k).await?;
+        // a pública fica registada: se uma versão futura trouxer outra chave, estes documentos continuam verificáveis
+        sqlx::query("INSERT OR IGNORE INTO agt_chaves (chave_publica, origem) VALUES (?, 'PRODUTOR')")
+            .bind(chave_publica_pem(k)?)
+            .execute(pool)
+            .await?;
+        return Ok(k.clone());
+    }
     let pem: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?")
         .bind(CHAVE_CONFIG)
         .fetch_optional(pool)
@@ -45,6 +60,66 @@ pub async fn chave(pool: &SqlitePool) -> AppResult<RsaPrivateKey> {
     Ok(chave)
 }
 
+/// Com a chave do produtor embutida, a privada que esteja na base de dados sai de lá (fica a pública).
+pub(crate) async fn retirar_chave_da_base(pool: &SqlitePool, produtor: &RsaPrivateKey) -> AppResult<()> {
+    let pem: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(CHAVE_CONFIG).fetch_optional(pool).await?;
+    let Some(pem) = pem else { return Ok(()) };
+    let mut tx = pool.begin().await?;
+    if RsaPrivateKey::from_pkcs8_pem(&pem).map(|k| k.to_public_key() != produtor.to_public_key()).unwrap_or(false) {
+        let importada: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'agt.chave_importada_em'").fetch_optional(&mut *tx).await?;
+        arquivar_chave(&mut tx, if importada.is_some() { "IMPORTADA" } else { "DESENVOLVIMENTO" }).await?;
+    }
+    sqlx::query("DELETE FROM config WHERE chave = ?").bind(CHAVE_CONFIG).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (NULL, 'AGT_CHAVE', 'Chave privada retirada da base de dados: passa a ser usada a chave do produtor incluída no programa')")
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// De onde vem a chave que assina: PRODUTOR (embutida), IMPORTADA (carregada à mão) ou DESENVOLVIMENTO.
+pub async fn origem_chave(pool: &SqlitePool) -> AppResult<&'static str> {
+    if crate::produtor::chave_agt().map_err(AppError::msg)?.is_some() {
+        return Ok("PRODUTOR");
+    }
+    let importada: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'agt.chave_importada_em'").fetch_optional(pool).await?;
+    Ok(if importada.is_some() { "IMPORTADA" } else { "DESENVOLVIMENTO" })
+}
+
+/// N.º do certificado AGT: o da compilação oficial ou o configurado no programa.
+pub async fn certificado(pool: &SqlitePool) -> AppResult<String> {
+    if let Some(c) = crate::produtor::certificado() {
+        return Ok(c);
+    }
+    let c: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(CERTIFICADO_CONFIG).fetch_optional(pool).await?;
+    Ok(c.unwrap_or_default().trim().to_string())
+}
+
+/// Versão da chave com que se assina agora (HashControl do SAF-T): "0" enquanto o programa não tem
+/// certificado; depois, a versão da chave do produtor.
+pub async fn versao_assinatura(pool: &SqlitePool) -> AppResult<String> {
+    let cert = certificado(pool).await?;
+    if cert.is_empty() || cert == "0" {
+        return Ok("0".into());
+    }
+    if crate::produtor::chave_agt().map_err(AppError::msg)?.is_some() {
+        return Ok(crate::produtor::versao_chave());
+    }
+    let v: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'agt.versao_chave'").fetch_optional(pool).await?;
+    Ok(v.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).unwrap_or_else(|| "1".into()))
+}
+
+/// Compilação que exige a certificação: sem chave do produtor e n.º de certificado não se assina.
+pub async fn exigir_certificacao(pool: &SqlitePool) -> AppResult<()> {
+    if !crate::produtor::exigir_certificacao() {
+        return Ok(());
+    }
+    if crate::produtor::chave_agt().map_err(AppError::msg)?.is_none() || certificado(pool).await?.is_empty() {
+        return Err(AppError::msg("Esta versão do KanGest só emite documentos assinados com a chave e o certificado do produtor, que não vieram na instalação. Instale a versão oficial."));
+    }
+    Ok(())
+}
+
 pub fn chave_publica_pem(chave: &RsaPrivateKey) -> AppResult<String> {
     chave
         .to_public_key()
@@ -56,9 +131,14 @@ pub fn chave_publica_pem(chave: &RsaPrivateKey) -> AppResult<String> {
 /// (tabela `agt_chaves`). Não gera chave nenhuma.
 pub async fn chaves_publicas(pool: &SqlitePool) -> AppResult<Vec<RsaPublicKey>> {
     let mut v: Vec<RsaPublicKey> = Vec::new();
+    if let Ok(Some(k)) = crate::produtor::chave_agt() {
+        v.push(k.to_public_key());
+    }
     let pem: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(CHAVE_CONFIG).fetch_optional(pool).await?;
     if let Some(k) = pem.and_then(|p| RsaPrivateKey::from_pkcs8_pem(&p).ok()) {
-        v.push(k.to_public_key());
+        if !v.contains(&k.to_public_key()) {
+            v.push(k.to_public_key());
+        }
     }
     let antigas: Vec<String> = sqlx::query_scalar("SELECT chave_publica FROM agt_chaves ORDER BY id DESC").fetch_all(pool).await?;
     for k in antigas.iter().filter_map(|p| RsaPublicKey::from_public_key_pem(p).ok()) {

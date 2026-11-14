@@ -814,7 +814,17 @@ function Sistema() {
 function Agt() {
   const { data, refetch } = useQuery({
     queryKey: ["agt"],
-    queryFn: () => call<{ chave_publica: string; certificado: string; certificado_anterior: string | null; chave_importada: string | null }>("agt.info"),
+    queryFn: () =>
+      call<{
+        chave_publica: string;
+        certificado: string;
+        certificado_anterior: string | null;
+        chave_importada: string | null;
+        chave_origem: "PRODUTOR" | "IMPORTADA" | "DESENVOLVIMENTO";
+        certificado_embutido: boolean;
+        exigir_certificacao: boolean;
+        versao_chave: string;
+      }>("agt.info"),
   });
   const [cert, setCert] = useState("");
   useEffect(() => data && setCert(data.certificado), [data]);
@@ -847,13 +857,29 @@ function Agt() {
           Cada factura, recibo e nota de crédito é assinada com RSA-SHA1 sobre <code className="rounded bg-sunken px-1">Data;DataHora;Número;Total;HashAnterior</code>, formando uma
           cadeia por série. Os 4 caracteres de controlo (posições 1, 11, 21 e 31 do hash) são impressos no documento.
         </p>
-        <Field label="N.º do certificado AGT" hint="Ex.: 123 — aparece como “Processado por programa válido n.º 123/AGT”.">
+        <Field
+          label="N.º do certificado AGT"
+          hint={
+            data?.certificado_embutido
+              ? "Vem com esta versão do KanGest (certificado do produtor)."
+              : "Ex.: 123 — aparece como “Processado por programa válido n.º 123/AGT”."
+          }
+        >
           <div className="flex gap-2">
-            <Input value={cert} onChange={(e) => setCert(e.target.value)} />
-            <Button onClick={guardar}>Guardar</Button>
+            <Input value={cert} onChange={(e) => setCert(e.target.value)} disabled={data?.certificado_embutido} />
+            {!data?.certificado_embutido && <Button onClick={guardar}>Guardar</Button>}
           </div>
         </Field>
+        {data && (
+          <div className="mt-3 text-[13px] text-ink-3">Versão da chave nos documentos novos (HashControl do SAF-T): {data.versao_chave}</div>
+        )}
       </Card>
+      {data?.chave_origem === "DESENVOLVIMENTO" && (
+        <div className="rounded-xl bg-accent-50 px-4 py-3 text-[#9a6514]">
+          <b>Chave de desenvolvimento.</b> Os documentos estão a ser assinados com uma chave gerada nesta instalação, que a AGT não conhece. Use a versão oficial do
+          KanGest, que traz a chave e o certificado do produtor.
+        </div>
+      )}
       {data?.certificado_anterior && (
         <Card className="p-6">
           <div className="mb-1 font-semibold">Certificado do sistema anterior (KIGEST)</div>
@@ -867,16 +893,24 @@ function Agt() {
       <Card className="p-6">
         <div className="mb-1 flex items-center justify-between">
           <span className="font-semibold">Chave de assinatura</span>
-          <label className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-line-strong bg-surface px-3 text-[13px] hover:bg-sunken">
-            Carregar chave do produtor (PEM)
-            <input type="file" accept=".pem,.key,text/plain" className="hidden" onChange={(e) => e.target.files?.[0] && carregarChave(e.target.files[0])} />
-          </label>
+          {data && data.chave_origem !== "PRODUTOR" && (
+            <label className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-line-strong bg-surface px-3 text-[13px] hover:bg-sunken">
+              Carregar chave do produtor (PEM)
+              <input type="file" accept=".pem,.key,text/plain" className="hidden" onChange={(e) => e.target.files?.[0] && carregarChave(e.target.files[0])} />
+            </label>
+          )}
         </div>
-        <p className="mb-3 text-ink-2">
-          Se é o titular do certificado AGT deste programa, carregue a sua chave privada RSA. Caso contrário, use a chave gerada e entregue a chave pública abaixo à AGT no
-          pedido de certificação.
-          {data?.chave_importada && <span className="ml-1 text-ink-3">Chave do produtor carregada em {data.chave_importada.replace("T", " ")}.</span>}
-        </p>
+        {data?.chave_origem === "PRODUTOR" ? (
+          <p className="mb-3 text-ink-2">
+            <Badge tone="ok" className="mr-2">Chave do produtor</Badge>
+            A chave privada vem dentro do programa e não fica na base de dados nem nas cópias de segurança. Abaixo está a chave pública correspondente.
+          </p>
+        ) : (
+          <p className="mb-3 text-ink-2">
+            Só para testes e desenvolvimento: a versão oficial do KanGest já traz a chave do produtor. Uma chave carregada aqui fica guardada nesta instalação.
+            {data?.chave_importada && <span className="ml-1 text-ink-3">Chave carregada em {data.chave_importada.replace("T", " ")}.</span>}
+          </p>
+        )}
         <pre data-selectable className="overflow-x-auto rounded-xl bg-ink p-4 font-mono text-[12px] leading-relaxed text-white/90">
           {data?.chave_publica ?? "…"}
         </pre>

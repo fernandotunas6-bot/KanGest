@@ -2,6 +2,7 @@ mod agt;
 mod db;
 mod error;
 pub mod http;
+mod produtor;
 mod rede;
 mod services;
 mod state;

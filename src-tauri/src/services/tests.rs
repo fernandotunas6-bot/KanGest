@@ -603,7 +603,8 @@ async fn gc_paridade_e_importacao() {
     assert_eq!(emp["nome"], "Loja KIGEST");
     let agt_info = rpc(&st, "agt.info", Value::Null).await;
     assert_eq!(agt_info["certificado_anterior"], "123/AGT/2019");
-    assert_eq!(agt_info["certificado"], "", "o certificado do KIGEST não é activado automaticamente");
+    // o certificado do KIGEST não é activado: fica o desta versão (vazio numa compilação de desenvolvimento)
+    assert_eq!(agt_info["certificado"], crate::produtor::certificado().unwrap_or_default(), "o certificado do KIGEST não é activado automaticamente");
     let coca = rpc(&st, "artigos.codigo", json!({ "codigo": "5449000000996" })).await;
     assert_eq!(coca["preco1"], 25000);
     assert_eq!(coca["stock"].as_f64().unwrap(), 24.0);
@@ -1135,7 +1136,12 @@ async fn series_manuais_creditos_estado() {
     validar_xsd(sv["ficheiro"].as_str().unwrap());
     let xml = std::fs::read_to_string(sv["ficheiro"].as_str().unwrap()).unwrap();
     assert!(xml.contains("<SourceBilling>M</SourceBilling>"));
-    assert!(xml.contains("<HashControl>0</HashControl>") && !xml.contains("<HashControl>1</HashControl>"), "sem certificado: HashControl 0");
+    // sem certificado: HashControl 0; numa compilação com o certificado do produtor, a versão da chave
+    let hc = if crate::produtor::certificado().is_some() { crate::produtor::versao_chave() } else { "0".to_string() };
+    assert!(xml.contains(&format!("<HashControl>{hc}</HashControl>")), "HashControl {hc}");
+    if hc == "0" {
+        assert!(!xml.contains("<HashControl>1</HashControl>"), "sem certificado: HashControl 0");
+    }
     assert!(!xml.contains("RA "), "o recibo de adiantamento não é documento fiscal");
     let se = rpc(&st, "saft.exportarEstado", json!({ "de": format!("{ano}-01-01"), "ate": format!("{ano}-12-31") })).await;
     validar_xsd(se["ficheiro"].as_str().unwrap());
@@ -2676,7 +2682,11 @@ async fn integridade_da_cadeia_e_proteccao() {
     assert!(problemas.iter().any(|p| p.contains("/2") && p.contains("assinatura não confere")), "{problemas:?}");
     assert!(problemas.iter().any(|p| p.contains("/2") && p.contains("totais")), "{problemas:?}");
 
-    // trocar de chave não estraga a verificação dos documentos antigos
+    // trocar de chave não estraga a verificação dos documentos antigos (só em desenvolvimento se carrega uma chave)
+    if crate::produtor::chave_agt().unwrap().is_some() {
+        let _ = std::fs::remove_dir_all(&pasta);
+        return;
+    }
     let (st2, pasta2) = base_com_admin("integridade-chave").await;
     let a2 = rpc(&st2, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
     rpc(&st2, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
@@ -2692,4 +2702,54 @@ async fn integridade_da_cadeia_e_proteccao() {
     assert_eq!(v2["chaves"], 2);
     let _ = std::fs::remove_dir_all(&pasta);
     let _ = std::fs::remove_dir_all(&pasta2);
+}
+
+#[tokio::test]
+async fn chave_do_produtor_sai_da_base_de_dados() {
+    // simula a passagem de uma instalação de desenvolvimento para a versão oficial
+    if crate::produtor::chave_agt().unwrap().is_some() {
+        return;
+    }
+    let (st, pasta) = base_com_admin("chave-produtor").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    assert_eq!(fr["documento"]["hash_versao"], "0", "sem certificado: HashControl 0");
+    let antes = agt::chave(&st.pool).await.unwrap();
+    // o que a versão oficial faz no arranque: a chave privada que estava na base sai, fica a pública
+    let produtor = rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 1024).unwrap();
+    agt::retirar_chave_da_base(&st.pool, &produtor).await.unwrap();
+    let privada: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(agt::CHAVE_CONFIG).fetch_optional(&st.pool).await.unwrap();
+    assert!(privada.is_none(), "a chave privada já não está na base de dados");
+    let arquivadas: Vec<(String, String)> = sqlx::query_as("SELECT chave_publica, origem FROM agt_chaves").fetch_all(&st.pool).await.unwrap();
+    assert_eq!(arquivadas.len(), 1);
+    assert_eq!(arquivadas[0], (agt::chave_publica_pem(&antes).unwrap(), "DESENVOLVIMENTO".to_string()));
+    // os documentos já assinados continuam verificáveis pela chave pública arquivada
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["series"][0]["total_erros"], 0, "{v}");
+    // com certificado configurado, os documentos novos levam a versão da chave
+    rpc(&st, "agt.guardarCertificado", json!({ "certificado": "123" })).await;
+    let fr2 = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    assert_eq!(fr2["documento"]["hash_versao"], "1");
+    let info = rpc(&st, "agt.info", Value::Null).await;
+    assert_eq!((info["chave_origem"].as_str(), info["certificado"].as_str()), (Some("DESENVOLVIMENTO"), Some("123")));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Só faz alguma coisa numa compilação com a chave do produtor embutida (KANGEST_AGT_CHAVE), como no CI.
+#[tokio::test]
+async fn chave_embutida_quando_existe() {
+    let Some(produtor) = crate::produtor::chave_agt().unwrap() else { return };
+    let (st, pasta) = base_com_admin("chave-embutida").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    let privada: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(agt::CHAVE_CONFIG).fetch_optional(&st.pool).await.unwrap();
+    assert!(privada.is_none(), "com a chave do produtor, nenhuma chave privada fica na base de dados");
+    let info = rpc(&st, "agt.info", Value::Null).await;
+    assert_eq!(info["chave_origem"], "PRODUTOR");
+    assert_eq!(info["chave_publica"].as_str().unwrap(), agt::chave_publica_pem(produtor).unwrap());
+    assert!(rpc_err(&st, "agt.importarChave", json!({ "pem": "x" })).await.contains("já traz a chave"));
+    assert_eq!(rpc(&st, "agt.verificarIntegridade", Value::Null).await["ok"], true);
+    let _ = std::fs::remove_dir_all(&pasta);
 }

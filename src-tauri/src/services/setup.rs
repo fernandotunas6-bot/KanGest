@@ -105,15 +105,12 @@ pub async fn empresa_obter(st: &AppState) -> AppResult<Value> {
     if let Some(b) = v.get("bancos").and_then(|b| b.as_str()).and_then(|s| serde_json::from_str::<Value>(s).ok()) {
         v["bancos"] = b;
     }
-    let cert: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?")
-        .bind(agt::CERTIFICADO_CONFIG)
-        .fetch_optional(&st.pool)
-        .await?;
+    let cert = agt::certificado(&st.pool).await?;
     let anterior: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'agt.certificado_anterior'")
         .fetch_optional(&st.pool)
         .await?;
     if v.is_object() {
-        v["certificado"] = json!(cert.unwrap_or_default());
+        v["certificado"] = json!(cert);
         // 2.ª via de documentos importados: foram processados pelo programa anterior (KIGEST)
         v["certificado_anterior"] = json!(anterior);
     }
@@ -134,9 +131,14 @@ pub async fn agt_info(st: &AppState) -> AppResult<Value> {
     };
     Ok(json!({
         "chave_publica": agt::chave_publica_pem(&chave)?,
-        "certificado": cfg(agt::CERTIFICADO_CONFIG).await?.unwrap_or_default(),
+        "certificado": agt::certificado(&st.pool).await?,
         "certificado_anterior": cfg("agt.certificado_anterior").await?,
         "chave_importada": cfg("agt.chave_importada_em").await?,
+        // PRODUTOR: chave e certificado vêm com o programa (não se mudam aqui)
+        "chave_origem": agt::origem_chave(&st.pool).await?,
+        "certificado_embutido": crate::produtor::certificado().is_some(),
+        "exigir_certificacao": crate::produtor::exigir_certificacao(),
+        "versao_chave": agt::versao_assinatura(&st.pool).await?,
     }))
 }
 
@@ -152,6 +154,9 @@ pub async fn agt_importar_chave(st: &AppState, c: ChaveIn) -> AppResult<Value> {
     use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding};
     use rsa::traits::PublicKeyParts;
     let s = st.exigir_perm("sistema.certificacao")?;
+    if crate::produtor::chave_agt().map_err(AppError::msg)?.is_some() {
+        return Err(AppError::msg("Esta versão do KanGest já traz a chave do produtor: não é preciso (nem possível) carregar outra."));
+    }
     let pem = c.pem.trim();
     let chave = rsa::RsaPrivateKey::from_pkcs8_pem(pem)
         .or_else(|_| rsa::RsaPrivateKey::from_pkcs1_pem(pem))
@@ -186,6 +191,9 @@ pub struct CertIn {
 
 pub async fn agt_guardar(st: &AppState, c: CertIn) -> AppResult<Value> {
     st.exigir_perm("sistema.certificacao")?;
+    if crate::produtor::certificado().is_some() {
+        return Err(AppError::msg("O n.º do certificado vem com esta versão do KanGest e não se altera aqui."));
+    }
     sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor")
         .bind(agt::CERTIFICADO_CONFIG)
         .bind(c.certificado.trim())
