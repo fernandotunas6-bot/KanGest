@@ -168,5 +168,8 @@ pub async fn fechar(st: &AppState, f: FecharIn) -> AppResult<Value> {
         .bind(sid)
         .execute(&st.pool)
         .await?;
-    resumo(st, sid).await
+    let r = resumo(st, sid).await?;
+    // o fecho de caixa é um bom momento para uma cópia de segurança
+    super::sistema::copia_evento(st, "Cópia no fecho de caixa").await;
+    Ok(r)
 }

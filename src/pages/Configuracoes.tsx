@@ -7,7 +7,7 @@ import { abrirVisorEcra, logoParaRaster } from "@/lib/equipamento";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { imprimir } from "@/lib/print";
-import { call } from "@/lib/api";
+import { call, reiniciar } from "@/lib/api";
 import { useTabelas } from "@/lib/hooks";
 import { dataHora, parseKz, toInputKz } from "@/lib/format";
 import type { Empresa, EscPos, Posto, PostoOpcoes, VisorOpcoes } from "@/lib/types";
@@ -755,59 +755,221 @@ function Tabelas() {
   );
 }
 
+interface Copia {
+  ficheiro: string;
+  nome: string;
+  bytes: number;
+  data: string;
+  verificada: boolean;
+  cifrada: boolean;
+}
+interface EstadoCopias {
+  pasta: string;
+  copias: Copia[];
+  externas: Copia[];
+  config: { intervalo_horas: number; manter: number; pasta_externa: string; cifrar_externa: boolean; tem_senha: boolean };
+  estado: { ultima: string | null; ultima_externa: string | null; erro_externa: string | null; pasta_externa_acessivel: boolean };
+  posto_cliente: boolean;
+}
+
 function Sistema() {
-  const { data, refetch } = useQuery({
-    queryKey: ["copias"],
-    queryFn: () => call<{ pasta: string; copias: { ficheiro: string; bytes: number }[] }>("sistema.copias"),
-  });
-  const [busy, setBusy] = useState(false);
-  async function copiar() {
-    setBusy(true);
+  const { data, refetch } = useQuery({ queryKey: ["copias"], queryFn: () => call<EstadoCopias>("sistema.copias") });
+  const [busy, setBusy] = useState<"" | "agora" | "exportar" | "gravar">("");
+  const [f, setF] = useState<{ intervalo_horas: number; manter: number; pasta_externa: string; cifrar_externa: boolean; senha: string } | null>(null);
+  const [restaurar, setRestaurar] = useState<{ ficheiro: string; cifrada: boolean; descricao: string } | null>(null);
+  const [outro, setOutro] = useState("");
+  useEffect(() => {
+    if (data && !f) setF({ ...data.config, senha: "" });
+  }, [data, f]);
+
+  async function acao(tipo: "agora" | "exportar") {
+    setBusy(tipo);
     try {
-      const r = await call<{ ficheiro: string }>("sistema.backup");
-      toast.success("Cópia de segurança criada.", { description: r.ficheiro, duration: 10000 });
+      const r = await call<{ ficheiro: string; externa?: string | null }>(tipo === "agora" ? "sistema.copiaAgora" : "sistema.backup");
+      toast.success(tipo === "agora" ? "Cópia de segurança feita e verificada." : "Cópia exportada.", { description: r.externa ?? r.ficheiro, duration: 8000 });
       refetch();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
-      setBusy(false);
+      setBusy("");
+    }
+  }
+  async function gravar() {
+    if (!f) return;
+    setBusy("gravar");
+    try {
+      await call("sistema.copiasGuardar", { ...f, senha: f.senha || undefined });
+      toast.success("Configuração das cópias guardada.");
+      setF(null);
+      refetch();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy("");
     }
   }
   const mb = (b: number) => `${(b / 1024 / 1024).toFixed(2)} MB`;
+  const linha = (c: Copia, onde: string) => (
+    <tr key={c.ficheiro}>
+      <Td>
+        <div className="font-mono text-[12px]">{c.nome}</div>
+        <div className="text-[11.5px] text-ink-3">{onde}</div>
+      </Td>
+      <Td className="text-ink-2">{dataHora(c.data)}</Td>
+      <Td className="num text-right text-ink-2">{mb(c.bytes)}</Td>
+      <Td>
+        {c.verificada && <Badge tone="ok">verificada</Badge>} {c.cifrada && <Badge tone="brand">cifrada</Badge>}
+      </Td>
+      <Td className="text-right">
+        {!data?.posto_cliente && (
+          <Button size="sm" variant="secondary" onClick={() => setRestaurar({ ficheiro: c.ficheiro, cifrada: c.cifrada, descricao: `${c.nome} (${dataHora(c.data)})` })}>
+            Restaurar
+          </Button>
+        )}
+      </Td>
+    </tr>
+  );
+  if (data?.posto_cliente) {
+    return (
+      <Card className="max-w-4xl p-6">
+        <div className="mb-1 font-semibold">Cópias de segurança</div>
+        <p className="text-ink-2">Este posto trabalha sobre a base de dados do servidor: as cópias de segurança fazem-se e restauram-se na máquina do servidor.</p>
+      </Card>
+    );
+  }
   return (
     <div className="grid max-w-4xl gap-4">
       <Card className="p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="mb-1 font-semibold">Cópia de segurança</div>
+            <div className="mb-1 font-semibold">Cópias de segurança</div>
             <p className="text-ink-2">
-              Uma cópia automática é feita todos os dias ao abrir o programa (guardam-se as últimas 14). Pode também criar uma cópia manual na pasta Transferências e guardá-la
-              numa pen ou na nuvem.
+              Automáticas ao abrir, de {data?.config.intervalo_horas || "—"} em {data?.config.intervalo_horas || "—"} horas e em cada fecho de caixa; cada cópia é verificada.
+              Guarde-as também fora deste computador (pen, disco de rede ou pasta do OneDrive / Google Drive).
             </p>
+            <p className="mt-2 text-[13px] text-ink-3">
+              Última cópia: {data?.estado.ultima ? dataHora(data.estado.ultima) : "—"} · Última na pasta externa:{" "}
+              {data?.estado.ultima_externa ? dataHora(data.estado.ultima_externa) : "—"}
+            </p>
+            {data?.estado.erro_externa && <p className="mt-1 text-[13px] text-danger">Pasta externa: {data.estado.erro_externa}</p>}
           </div>
-          <Button loading={busy} onClick={copiar}>
-            <DatabaseBackup className="size-4" /> Copiar agora
-          </Button>
+          <div className="flex shrink-0 flex-col gap-2">
+            <Button loading={busy === "agora"} onClick={() => acao("agora")}>
+              <DatabaseBackup className="size-4" /> Fazer cópia agora
+            </Button>
+            <Button variant="secondary" loading={busy === "exportar"} onClick={() => acao("exportar")}>
+              Exportar para Transferências
+            </Button>
+          </div>
         </div>
       </Card>
+      {f && (
+        <Card className="p-6">
+          <div className="mb-3 font-semibold">Automáticas e pasta externa</div>
+          <div className="grid grid-cols-3 gap-4">
+            <Field label="Frequência">
+              <Select value={f.intervalo_horas} onChange={(e) => setF({ ...f, intervalo_horas: Number(e.target.value) })}>
+                <option value={0}>Só ao abrir o programa</option>
+                {[1, 2, 4, 8, 12, 24].map((h) => (
+                  <option key={h} value={h}>
+                    De {h} em {h} horas
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Cópias a guardar">
+              <Input className="num" type="number" min={3} max={365} value={f.manter} onChange={(e) => setF({ ...f, manter: Number(e.target.value) || 30 })} />
+            </Field>
+            <div />
+            <Field label="Pasta externa (opcional)" className="col-span-3" hint="Ex.: E:\Copias KanGest (pen) ou C:\Users\…\OneDrive\KanGest. Se a pen não estiver ligada, a cópia local faz-se na mesma.">
+              <Input className="font-mono" value={f.pasta_externa} onChange={(e) => setF({ ...f, pasta_externa: e.target.value })} placeholder="E:\Copias KanGest" />
+            </Field>
+            <label className="col-span-3 flex items-center gap-2 text-[13.5px]">
+              <input type="checkbox" checked={f.cifrar_externa} onChange={(e) => setF({ ...f, cifrar_externa: e.target.checked })} />
+              Cifrar as cópias da pasta externa com uma senha (protege os dados se a pen se perder)
+            </label>
+            {f.cifrar_externa && (
+              <Field label="Senha das cópias" className="col-span-2" hint="Mínimo 8 caracteres. Guarde-a num sítio seguro: sem ela a cópia não se restaura noutro computador.">
+                <Input type="password" value={f.senha} onChange={(e) => setF({ ...f, senha: e.target.value })} placeholder={data?.config.tem_senha ? "•••••• (manter)" : ""} />
+              </Field>
+            )}
+          </div>
+          <Button className="mt-4" loading={busy === "gravar"} onClick={gravar}>
+            Guardar
+          </Button>
+        </Card>
+      )}
       <Card>
-        <div className="px-5 pt-4 font-semibold">Cópias automáticas</div>
+        <div className="px-5 pt-4 font-semibold">Cópias guardadas</div>
         <div className="px-5 pb-2 text-[12px] text-ink-3" data-selectable>
           {data?.pasta}
         </div>
         <Table>
           <tbody>
-            {data?.copias.map((c) => (
-              <tr key={c.ficheiro}>
-                <Td className="font-mono text-[12px]" >{c.ficheiro.split(/[\\/]/).pop()}</Td>
-                <Td className="num text-right text-ink-2">{mb(c.bytes)}</Td>
-              </tr>
-            ))}
+            {data?.copias.map((c) => linha(c, "Neste computador"))}
+            {data?.externas.map((c) => linha(c, "Pasta externa"))}
           </tbody>
         </Table>
-        {!data?.copias.length && <p className="py-6 text-center text-ink-3">Ainda não há cópias automáticas.</p>}
+        {!data?.copias.length && !data?.externas.length && <p className="py-6 text-center text-ink-3">Ainda não há cópias.</p>}
+        <div className="flex items-end gap-2 border-t border-line px-5 py-4">
+          <Field label="Restaurar outro ficheiro" className="flex-1" hint="Caminho completo de uma cópia .db ou .kgc (ex.: numa pen).">
+            <Input className="font-mono" value={outro} onChange={(e) => setOutro(e.target.value)} placeholder="E:\Copias KanGest\kangest-….kgc" />
+          </Field>
+          <Button variant="secondary" disabled={!outro.trim()} onClick={() => setRestaurar({ ficheiro: outro.trim(), cifrada: outro.trim().endsWith(".kgc"), descricao: outro.trim() })}>
+            Restaurar
+          </Button>
+        </div>
       </Card>
+      {restaurar && <RestaurarCopia alvo={restaurar} temSenha={!!data?.config.tem_senha} onClose={() => setRestaurar(null)} metodo="sistema.restaurar" />}
     </div>
+  );
+}
+
+/** Confirmação do restauro: guarda a base actual, marca a troca e reinicia. */
+export function RestaurarCopia({
+  alvo,
+  temSenha,
+  onClose,
+  metodo,
+}: {
+  alvo: { ficheiro: string; cifrada: boolean; descricao: string };
+  temSenha: boolean;
+  onClose: () => void;
+  metodo: "sistema.restaurar" | "setup.restaurar";
+}) {
+  const [senha, setSenha] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function confirmar() {
+    setBusy(true);
+    try {
+      await call(metodo, { ficheiro: alvo.ficheiro, senha: senha || undefined });
+      toast.success("Cópia verificada. O KanGest vai reiniciar para a restaurar.");
+      setTimeout(() => reiniciar(), 1200);
+    } catch (e) {
+      toast.error((e as Error).message);
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal open onClose={onClose} title="Restaurar cópia de segurança" width="max-w-lg">
+      <p className="text-ink-2">
+        A base de dados passa a ser a da cópia <b className="break-all">{alvo.descricao}</b>. O que foi registado depois dessa cópia deixa de aparecer.
+        {metodo === "sistema.restaurar" && " Antes, o KanGest guarda uma cópia da base actual (em «copias»)."} O programa reinicia no fim.
+      </p>
+      {alvo.cifrada && (
+        <Field label="Senha da cópia" className="mt-4" hint={temSenha ? "Deixe vazio para usar a senha guardada neste computador." : undefined}>
+          <Input type="password" autoFocus value={senha} onChange={(e) => setSenha(e.target.value)} />
+        </Field>
+      )}
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose}>
+          Cancelar
+        </Button>
+        <Button loading={busy} onClick={confirmar}>
+          Restaurar e reiniciar
+        </Button>
+      </div>
+    </Modal>
   );
 }
 

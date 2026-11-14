@@ -38,8 +38,17 @@ pub async fn chave(pool: &SqlitePool) -> AppResult<RsaPrivateKey> {
         return Ok(k.clone());
     }
     // compilação de desenvolvimento: chave guardada (cifrada) na configuração
-    if let Some(pem) = crate::segredos::ler(pool, CHAVE_CONFIG).await? {
-        return RsaPrivateKey::from_pkcs8_pem(&pem).map_err(|e| AppError::msg(format!("Chave AGT inválida: {e}")));
+    match crate::segredos::ler(pool, CHAVE_CONFIG).await {
+        Ok(Some(pem)) => return RsaPrivateKey::from_pkcs8_pem(&pem).map_err(|e| AppError::msg(format!("Chave AGT inválida: {e}"))),
+        Ok(None) => {}
+        Err(_) => {
+            // base restaurada noutro computador: a chave cifrada não se lê aqui. A pública já está em
+            // agt_chaves (os documentos antigos continuam verificáveis); gera-se uma chave nova.
+            sqlx::query("DELETE FROM config WHERE chave = ?").bind(CHAVE_CONFIG).execute(pool).await?;
+            sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (NULL, 'AGT_CHAVE', 'Chave de desenvolvimento ilegível nesta máquina (cópia restaurada): gerada uma nova')")
+                .execute(pool)
+                .await?;
+        }
     }
     let chave = tokio::task::spawn_blocking(|| RsaPrivateKey::new(&mut rand::thread_rng(), 1024))
         .await
@@ -50,6 +59,10 @@ pub async fn chave(pool: &SqlitePool) -> AppResult<RsaPrivateKey> {
         .map_err(|e| AppError::msg(e.to_string()))?
         .to_string();
     crate::segredos::gravar(pool, CHAVE_CONFIG, &pem).await?;
+    sqlx::query("INSERT OR IGNORE INTO agt_chaves (chave_publica, origem) VALUES (?, 'DESENVOLVIMENTO')")
+        .bind(chave_publica_pem(&chave)?)
+        .execute(pool)
+        .await?;
     Ok(chave)
 }
 

@@ -68,3 +68,9 @@ export async function call<T = unknown>(method: string, params?: unknown): Promi
     throw new Error(typeof e === "string" ? e : (e as Error)?.message ?? "Erro desconhecido");
   }
 }
+
+/** Reinicia a aplicação (ex.: depois de marcar o restauro de uma cópia de segurança). */
+export async function reiniciar(): Promise<void> {
+  if ("__TAURI_INTERNALS__" in window) await invoke("reiniciar");
+  else location.reload();
+}

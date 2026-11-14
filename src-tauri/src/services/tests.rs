@@ -246,9 +246,11 @@ async fn fluxo_completo() {
     // ---- cópias de segurança ----
     let bk = rpc(&st, "sistema.backup", Value::Null).await;
     assert!(std::path::Path::new(bk["ficheiro"].as_str().unwrap()).exists());
-    assert!(super::sistema::backup_automatico(&st.pool, &pasta).await.unwrap().is_some());
+    // o fecho de caixa já fez uma cópia (verificada); ao abrir no mesmo dia não se repete
+    let copias = rpc(&st, "sistema.copias", Value::Null).await;
+    assert_eq!(copias["copias"].as_array().unwrap().len(), 1, "{copias}");
+    assert_eq!(copias["copias"][0]["verificada"], true);
     assert!(super::sistema::backup_automatico(&st.pool, &pasta).await.unwrap().is_none(), "uma cópia automática por dia");
-    assert_eq!(rpc(&st, "sistema.copias", Value::Null).await["copias"].as_array().unwrap().len(), 1);
 
     // ---- posto 2 com série própria ----
     let p2 = rpc(&st, "posto.guardar", json!({ "descricao": "Posto#2", "armazem_id": 1, "serie_prefixo": "p2" })).await["id"].as_i64().unwrap();
@@ -2817,5 +2819,72 @@ async fn actualizacao_conferida_antes_de_instalar() {
     if crate::produtor::chave_actualizacoes().is_some() {
         assert_eq!(rpc(&st, "atualizacao.estado", Value::Null).await["chave_embutida"], true);
     }
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn copias_externas_cifradas_e_restauro() {
+    let (st, pasta) = base_com_admin("copias").await;
+    let pen = pasta.join("pen");
+    std::fs::create_dir_all(&pen).unwrap();
+    rpc(&st, "artigos.guardar", json!({ "descricao": "Antes da cópia", "taxa_iva_id": 1, "preco1": 100000 })).await;
+    // pasta externa inexistente é recusada; a pen, aceite, com cópias cifradas
+    assert!(rpc_err(&st, "sistema.copiasGuardar", json!({ "intervalo_horas": 4, "manter": 5, "pasta_externa": pasta.join("nao-existe").display().to_string() })).await.contains("não existe"));
+    assert!(rpc_err(&st, "sistema.copiasGuardar", json!({ "intervalo_horas": 4, "manter": 5, "pasta_externa": pen.display().to_string(), "cifrar_externa": true })).await.contains("senha"));
+    rpc(&st, "sistema.copiasGuardar", json!({ "intervalo_horas": 2, "manter": 5, "pasta_externa": pen.display().to_string(), "cifrar_externa": true, "senha": "senha-da-pen-123" })).await;
+    let c = rpc(&st, "sistema.copiaAgora", Value::Null).await;
+    let externa = c["externa"].as_str().expect("cópia na pen").to_string();
+    assert!(externa.ends_with(".kgc"));
+    let bytes = std::fs::read(&externa).unwrap();
+    assert!(bytes.starts_with(b"KGCOPIA1") && !bytes.windows(15).any(|w| w == b"Antes da c\xc3\xb3pia"), "a cópia da pen está cifrada");
+    let lista = rpc(&st, "sistema.copias", Value::Null).await;
+    assert_eq!(lista["externas"].as_array().unwrap().len(), 1);
+    assert_eq!(lista["copias"][0]["verificada"], true);
+    assert!(lista["estado"]["erro_externa"].is_null());
+
+    // depois da cópia entra outro artigo; restaurar a cópia da pen (com a senha) volta ao estado anterior
+    rpc(&st, "artigos.guardar", json!({ "descricao": "Depois da cópia", "taxa_iva_id": 1, "preco1": 100000 })).await;
+    assert!(rpc_err(&st, "sistema.restaurar", json!({ "ficheiro": externa, "senha": "errada-errada" })).await.contains("Senha errada"));
+    let r = rpc(&st, "sistema.restaurar", json!({ "ficheiro": externa, "senha": "senha-da-pen-123" })).await;
+    assert_eq!(r["reiniciar"], true);
+    assert!(std::path::Path::new(r["copia_da_base_atual"].as_str().unwrap()).exists(), "a base actual fica guardada antes do restauro");
+    // o que o arranque faz: fecha a base, troca o ficheiro e volta a abrir
+    st.pool.close().await;
+    assert!(super::sistema::aplicar_restauro_pendente(&pasta).unwrap().is_some());
+    let pool = db::abrir(&pasta.join("kigest.db")).await.unwrap();
+    let nomes: Vec<String> = sqlx::query_scalar("SELECT descricao FROM artigos ORDER BY id").fetch_all(&pool).await.unwrap();
+    assert!(nomes.contains(&"Antes da cópia".to_string()) && !nomes.contains(&"Depois da cópia".to_string()), "{nomes:?}");
+    pool.close().await;
+
+    // um ficheiro que não é uma cópia do KanGest é recusado
+    let (st2, pasta2) = base_com_admin("copias-2").await;
+    let lixo = pasta2.join("lixo.db");
+    std::fs::write(&lixo, b"nada de sqlite aqui").unwrap();
+    let e = rpc_err(&st2, "sistema.restaurar", json!({ "ficheiro": lixo.display().to_string() })).await;
+    assert!(e.contains("não é uma cópia de segurança"), "{e}");
+    // o restauro inicial só existe enquanto o KanGest não está configurado
+    assert!(rpc_err(&st2, "setup.restaurar", json!({ "ficheiro": externa })).await.contains("já está configurado"));
+    let _ = std::fs::remove_dir_all(&pasta);
+    let _ = std::fs::remove_dir_all(&pasta2);
+}
+
+/// Base restaurada noutro computador (compilação de desenvolvimento): a chave cifrada não se lê,
+/// gera-se outra e os documentos antigos continuam verificáveis.
+#[tokio::test]
+async fn chave_ilegivel_depois_de_restaurar() {
+    if crate::produtor::chave_agt().unwrap().is_some() {
+        return;
+    }
+    let (st, pasta) = base_com_admin("chave-ilegivel").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let venda = json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] });
+    rpc(&st, "documentos.emitir", venda.clone()).await;
+    // o que acontece com a chave mestra de outra máquina: o valor cifrado não abre
+    sqlx::query("UPDATE config SET valor = 'kgs1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' WHERE chave = ?").bind(agt::CHAVE_CONFIG).execute(&st.pool).await.unwrap();
+    rpc(&st, "documentos.emitir", venda).await;
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["chaves"], 2);
     let _ = std::fs::remove_dir_all(&pasta);
 }

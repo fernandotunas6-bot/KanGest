@@ -170,6 +170,10 @@ pub async fn agt_importar_chave(st: &AppState, c: ChaveIn) -> AppResult<Value> {
     // a chave anterior fica arquivada (só a pública): os documentos que assinou continuam verificáveis
     agt::arquivar_chave(&mut tx, "ANTERIOR").await?;
     crate::segredos::gravar(&mut *tx, agt::CHAVE_CONFIG, &pkcs8).await?;
+    sqlx::query("INSERT OR IGNORE INTO agt_chaves (chave_publica, origem) VALUES (?, 'IMPORTADA')")
+        .bind(agt::chave_publica_pem(&chave)?)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("INSERT INTO config (chave, valor) VALUES ('agt.chave_importada_em', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor")
         .bind(&agora)
         .execute(&mut *tx)

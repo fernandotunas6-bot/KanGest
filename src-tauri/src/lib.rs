@@ -30,6 +30,12 @@ fn imprimir(janela: tauri::WebviewWindow) -> Result<(), String> {
     janela.print().map_err(|e| e.to_string())
 }
 
+/// Reinicia a aplicação (depois de marcar um restauro de cópia de segurança).
+#[tauri::command]
+fn reiniciar(app: tauri::AppHandle) {
+    app.restart();
+}
+
 /// N.º do posto desta máquina (ficheiro local; a base de dados pode vir a ser partilhada).
 fn posto_local(dir: &std::path::Path) -> i64 {
     std::fs::read_to_string(dir.join("posto.json"))
@@ -47,6 +53,12 @@ pub fn run() {
             let caminho = dir.join("kigest.db");
             // chave mestra dos segredos da configuração (fora da base de dados)
             segredos::iniciar(&dir)?;
+            // restauro de uma cópia de segurança marcado antes de reiniciar
+            match services::sistema::aplicar_restauro_pendente(&dir) {
+                Ok(Some(origem)) => eprintln!("Cópia de segurança restaurada: {origem}"),
+                Ok(None) => {}
+                Err(e) => eprintln!("O restauro da cópia de segurança falhou: {e}"),
+            }
             let pool = tauri::async_runtime::block_on(db::abrir(&caminho))?;
             if let Err(e) = tauri::async_runtime::block_on(segredos::cifrar_existentes(&pool)) {
                 eprintln!("Não foi possível cifrar os segredos guardados: {e}");
@@ -80,10 +92,12 @@ pub fn run() {
             }
             // Facturação electrónica da AGT: envia e consulta os documentos em segundo plano.
             services::fe::iniciar(estado.clone());
+            // Cópias de segurança periódicas enquanto o programa está aberto.
+            services::sistema::iniciar_agendamento(estado.clone());
             app.manage(estado);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![rpc, imprimir])
+        .invoke_handler(tauri::generate_handler![rpc, imprimir, reiniciar])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o KanGest");
 }
