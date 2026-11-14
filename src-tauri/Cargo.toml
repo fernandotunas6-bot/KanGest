@@ -46,6 +46,9 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.blake2]
 opt-level = 3
+# PBKDF2 da rede entre postos e AES/ChaCha dos segredos
+[profile.dev.package.ring]
+opt-level = 3
 
 [profile.release]
 codegen-units = 1

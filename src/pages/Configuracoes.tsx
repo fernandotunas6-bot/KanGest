@@ -997,6 +997,8 @@ interface EstadoRede {
   porta: number;
   servidor: string;
   chave: string;
+  /** A chave em uso tem menos de 10 caracteres (aceite, mas fraca). */
+  chave_curta?: boolean;
   servidor_activo: number | null;
   enderecos: string[];
   ligados: { posto_id: number; posto: string; utilizador: string | null; endereco: string; ultimo: string; pedidos: number }[];
@@ -1007,6 +1009,14 @@ const MODOS = [
   { id: "servidor", label: "Servidor", icon: Server, texto: "Esta máquina guarda a base de dados e serve os outros postos da rede local." },
   { id: "cliente", label: "Posto em rede", icon: Wifi, texto: "Esta máquina trabalha sobre a base de dados do servidor." },
 ] as const;
+
+/** Chave de rede forte: 20 caracteres sem ambiguidades (sem 0/O, 1/I/L), em grupos de 5. */
+function gerarChaveRede() {
+  const alfabeto = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  const b = crypto.getRandomValues(new Uint8Array(20));
+  const c = Array.from(b, (x) => alfabeto[x % alfabeto.length]).join("");
+  return c.match(/.{5}/g)!.join("-");
+}
 
 /** Vários postos ligados ao mesmo servidor (substitui o SQL Server partilhado do KIGEST). */
 function Rede() {
@@ -1077,9 +1087,25 @@ function Rede() {
               <Field label="Porta">
                 <Input className="num" value={v.porta ?? 7799} onChange={(e) => set({ porta: Number(e.target.value.replace(/\D/g, "")) || 0 })} />
               </Field>
-              <Field label="Chave de rede" className={v.modo === "cliente" ? "col-span-3" : "col-span-2"} hint="Igual em todos os postos; mínimo 6 caracteres">
-                <Input value={v.chave ?? ""} onChange={(e) => set({ chave: e.target.value })} />
+              <Field
+                label="Chave de rede"
+                className={v.modo === "cliente" ? "col-span-3" : "col-span-2"}
+                hint="Igual em todos os postos (mínimo 10 caracteres). Nunca passa na rede: serve para cifrar os pedidos."
+              >
+                <div className="flex gap-2">
+                  <Input className="font-mono" value={v.chave ?? ""} onChange={(e) => set({ chave: e.target.value })} />
+                  {v.modo === "servidor" && (
+                    <Button variant="secondary" onClick={() => set({ chave: gerarChaveRede() })}>
+                      Gerar chave
+                    </Button>
+                  )}
+                </div>
               </Field>
+              {r.chave_curta && (
+                <p className="col-span-3 rounded-lg bg-accent-50 px-3 py-2 text-[12.5px] text-[#9a6514]">
+                  A chave de rede em uso é curta. Gere uma chave nova no servidor e escreva-a em cada posto.
+                </p>
+              )}
             </div>
           )}
 

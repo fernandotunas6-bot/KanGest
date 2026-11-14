@@ -5,8 +5,12 @@
 //! chave de rede, o n.º do posto e um identificador de posto (token) com que o servidor guarda
 //! a sessão desse posto. Nada é partilhado entre postos a não ser a base de dados.
 //!
-//! Fica deliberadamente simples: HTTP em texto na rede local, sem TLS (como o SQL Server do
-//! KIGEST original), protegido por uma chave de rede. Não expor a porta à Internet.
+//! Protocolo 2 (KanGest 1.2): o corpo de cada pedido e de cada resposta vai cifrado e autenticado
+//! (AES-256-GCM) com uma chave derivada da chave de rede (PBKDF2-HMAC-SHA256, 100 000
+//! iterações, com o sal do servidor). A chave de rede nunca passa na rede; um pedido com outra chave
+//! não se consegue abrir. Cada pedido leva a hora e um identificador único: pedidos repetidos ou
+//! com o relógio muito desacertado são recusados, e um endereço que erre a chave muitas vezes fica
+//! bloqueado uns minutos. Mesmo assim, a porta é para a rede local: não a exponha à Internet.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -24,6 +28,8 @@ use crate::services;
 use crate::state::{AppState, Contexto, PostoAtual, CONTEXTO};
 
 pub const PORTA_PADRAO: u16 = 7799;
+/// Comprimento mínimo de uma chave de rede nova.
+pub const CHAVE_MINIMA: usize = 10;
 /// Métodos que são sempre desta máquina, mesmo em modo cliente: configuração de rede,
 /// impressão (a impressora é local) e gravação de ficheiros exportados.
 const LOCAIS: [&str; 5] = ["rede.", "impressao.", "sistema.exportar", "atualizacao.", "licenca.abrirSite"];
@@ -42,6 +48,9 @@ pub struct Config {
     pub servidor: String,
     #[serde(default)]
     pub chave: String,
+    /// Sal da derivação da chave (servidor; gerado ao abrir o servidor pela primeira vez).
+    #[serde(default)]
+    pub sal: String,
 }
 
 fn modo_padrao() -> String {
@@ -53,7 +62,7 @@ fn porta_padrao() -> u16 {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { modo: modo_padrao(), porta: PORTA_PADRAO, servidor: String::new(), chave: String::new() }
+        Self { modo: modo_padrao(), porta: PORTA_PADRAO, servidor: String::new(), chave: String::new(), sal: String::new() }
     }
 }
 
@@ -99,6 +108,123 @@ fn gravar(dir: &Path, c: &Config) -> AppResult<()> {
         .map_err(|e| AppError::msg(format!("Não foi possível gravar {}: {e}", ficheiro(dir).display())))?;
     *celula().lock().unwrap() = c.clone();
     Ok(())
+}
+
+// ============================== cifra do protocolo ==============================
+
+pub const PROTOCOLO: u32 = 2;
+const AAD_PEDIDO: &[u8] = b"kangest-rede-v2-pedido";
+const AAD_RESPOSTA: &[u8] = b"kangest-rede-v2-resposta";
+/// Diferença máxima entre os relógios do posto e do servidor.
+const DESVIO_MAXIMO_MS: i64 = 15 * 60 * 1000;
+/// Tentativas falhadas (chave errada) antes de bloquear o endereço, e por quanto tempo.
+const TENTATIVAS: u32 = 10;
+const BLOQUEIO: Duration = Duration::from_secs(10 * 60);
+
+mod cifra {
+    use std::num::NonZeroU32;
+
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
+    use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, NONCE_LEN};
+    use ring::rand::{SecureRandom, SystemRandom};
+    use serde_json::{json, Value};
+
+    pub fn aleatorio(n: usize) -> Vec<u8> {
+        let mut b = vec![0u8; n];
+        SystemRandom::new().fill(&mut b).expect("gerador aleatório do sistema");
+        b
+    }
+
+    pub fn novo_sal() -> String {
+        B64.encode(aleatorio(16))
+    }
+
+    /// Chave de 256 bits a partir da chave de rede e do sal do servidor (com cache: PBKDF2 é lento de propósito).
+    pub fn derivar(chave: &str, sal: &str) -> [u8; 32] {
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+        static CACHE: OnceLock<Mutex<HashMap<(String, String), [u8; 32]>>> = OnceLock::new();
+        let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let k = (chave.to_string(), sal.to_string());
+        if let Some(v) = cache.lock().unwrap().get(&k) {
+            return *v;
+        }
+        let mut out = [0u8; 32];
+        ring::pbkdf2::derive(
+            ring::pbkdf2::PBKDF2_HMAC_SHA256,
+            NonZeroU32::new(100_000).unwrap(),
+            format!("kangest-rede:{sal}").as_bytes(),
+            chave.as_bytes(),
+            &mut out,
+        );
+        cache.lock().unwrap().insert(k, out);
+        out
+    }
+
+    fn chave(k: &[u8; 32]) -> LessSafeKey {
+        LessSafeKey::new(UnboundKey::new(&AES_256_GCM, k).expect("chave AES-256"))
+    }
+
+    /// `{"v":2,"n":nonce,"c":texto cifrado}`
+    pub fn selar(k: &[u8; 32], aad: &[u8], texto: &[u8]) -> Value {
+        let n: [u8; NONCE_LEN] = aleatorio(NONCE_LEN).try_into().unwrap();
+        let mut dados = texto.to_vec();
+        chave(k).seal_in_place_append_tag(Nonce::assume_unique_for_key(n), Aad::from(aad), &mut dados).expect("cifrar");
+        json!({ "v": super::PROTOCOLO, "n": B64.encode(n), "c": B64.encode(dados) })
+    }
+
+    pub fn abrir(k: &[u8; 32], aad: &[u8], v: &Value) -> Option<Vec<u8>> {
+        let n = B64.decode(v["n"].as_str()?).ok()?;
+        let mut dados = B64.decode(v["c"].as_str()?).ok()?;
+        let nonce = Nonce::try_assume_unique_for_key(&n).ok()?;
+        chave(k).open_in_place(nonce, Aad::from(aad), &mut dados).ok().map(|t| t.to_vec())
+    }
+}
+
+fn agora_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+/// Endereços que erraram a chave: (falhas, primeira falha, bloqueado até).
+fn tentativas() -> &'static Mutex<HashMap<String, (u32, std::time::Instant, Option<std::time::Instant>)>> {
+    static T: OnceLock<Mutex<HashMap<String, (u32, std::time::Instant, Option<std::time::Instant>)>>> = OnceLock::new();
+    T.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn bloqueado(ip: &str) -> bool {
+    let mut t = tentativas().lock().unwrap();
+    match t.get(ip).and_then(|e| e.2) {
+        Some(ate) if ate > std::time::Instant::now() => true,
+        Some(_) => {
+            t.remove(ip);
+            false
+        }
+        None => false,
+    }
+}
+
+fn falhou(ip: &str) {
+    let agora = std::time::Instant::now();
+    let mut t = tentativas().lock().unwrap();
+    let e = t.entry(ip.to_string()).or_insert((0, agora, None));
+    if agora.duration_since(e.1) > BLOQUEIO {
+        *e = (0, agora, None);
+    }
+    e.0 += 1;
+    if e.0 >= TENTATIVAS {
+        e.2 = Some(agora + BLOQUEIO);
+    }
+}
+
+/// Identificadores de pedidos já atendidos (contra a repetição de um pedido capturado).
+fn ja_visto(id: &str) -> bool {
+    static VISTOS: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
+    let mut v = VISTOS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
+    let agora = agora_ms();
+    if v.len() > 50_000 {
+        v.retain(|_, t| agora - *t < 2 * DESVIO_MAXIMO_MS);
+    }
+    v.insert(id.to_string(), agora).is_some()
 }
 
 // ============================== postos ligados (lado servidor) ==============================
@@ -153,7 +279,13 @@ pub fn iniciar_servidor(estado: Arc<AppState>, cfg: &Config) -> AppResult<u16> {
     }
     let escuta = TcpListener::bind(("0.0.0.0", cfg.porta))
         .map_err(|e| AppError::msg(format!("Não foi possível abrir a porta {}: {e}. Escolha outra porta ou autorize a aplicação na firewall.", cfg.porta)))?;
-    let chave = cfg.chave.trim().to_string();
+    // o sal fica guardado no rede.json: os postos já ligados continuam a derivar a mesma chave
+    let mut cfg = cfg.clone();
+    if cfg.sal.trim().is_empty() {
+        cfg.sal = cifra::novo_sal();
+        gravar(&estado.pasta_dados, &cfg)?;
+    }
+    let chave = Seguranca { chave: cifra::derivar(cfg.chave.trim(), &cfg.sal), sal: cfg.sal.clone() };
     std::thread::Builder::new()
         .name("kigest-rede".into())
         .spawn(move || {
@@ -179,9 +311,21 @@ pub fn iniciar_servidor(estado: Arc<AppState>, cfg: &Config) -> AppResult<u16> {
     Ok(cfg.porta)
 }
 
+/// Chave derivada e sal do servidor.
+#[derive(Clone)]
+struct Seguranca {
+    chave: [u8; 32],
+    sal: String,
+}
+
 fn resposta(codigo: u16, corpo: &Value) -> Vec<u8> {
     let texto = corpo.to_string();
-    let estado = if codigo == 200 { "200 OK" } else if codigo == 401 { "401 Unauthorized" } else { "400 Bad Request" };
+    let estado = match codigo {
+        200 => "200 OK",
+        401 => "401 Unauthorized",
+        429 => "429 Too Many Requests",
+        _ => "400 Bad Request",
+    };
     format!(
         "HTTP/1.1 {estado}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{texto}",
         texto.len()
@@ -226,7 +370,6 @@ fn ler_pedido(fluxo: &mut TcpStream) -> Result<(String, String), String> {
 
 #[derive(Deserialize)]
 struct Pedido {
-    chave: String,
     token: String,
     #[serde(default = "um")]
     posto: i64,
@@ -235,30 +378,59 @@ struct Pedido {
     params: Value,
     #[serde(default)]
     descricao_posto: Option<String>,
+    /// Hora do posto (ms desde 1970, UTC) e identificador único do pedido.
+    t: i64,
+    id: String,
 }
 
 fn um() -> i64 {
     1
 }
 
-fn atender(st: &AppState, chave: &str, mut fluxo: TcpStream) {
+fn atender(st: &AppState, seg: &Seguranca, mut fluxo: TcpStream) {
     fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
     let endereco = fluxo.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
     let saida = match ler_pedido(&mut fluxo) {
         Err(e) => resposta(400, &json!({ "ok": false, "erro": e })),
-        Ok((linha, corpo)) => {
-            if linha.starts_with("GET") {
-                // serve para confirmar, do outro lado, que há aqui um KanGest à escuta
-                resposta(200, &json!({ "ok": true, "app": "kigest", "versao": env!("CARGO_PKG_VERSION") }))
-            } else {
-                match serde_json::from_str::<Pedido>(&corpo) {
-                    Err(e) => resposta(400, &json!({ "ok": false, "erro": format!("Pedido inválido: {e}") })),
-                    Ok(p) if p.chave != chave => resposta(401, &json!({ "ok": false, "erro": "Chave de rede inválida." })),
-                    Ok(p) => resposta(200, &executar(st, p, &endereco)),
-                }
-            }
+        Ok((linha, _)) if linha.starts_with("GET") => {
+            // confirma, do outro lado, que há aqui um KanGest à escuta, e dá o sal para derivar a chave
+            resposta(200, &json!({ "ok": true, "app": "kigest", "versao": env!("CARGO_PKG_VERSION"), "protocolo": PROTOCOLO, "sal": seg.sal }))
         }
+        Ok(_) if bloqueado(&endereco) => {
+            resposta(429, &json!({ "ok": false, "erro": "Demasiadas tentativas com a chave de rede errada a partir deste posto. Aguarde 10 minutos." }))
+        }
+        Ok((_, corpo)) => match serde_json::from_str::<Value>(&corpo) {
+            Err(e) => resposta(400, &json!({ "ok": false, "erro": format!("Pedido inválido: {e}") })),
+            // postos com o protocolo antigo (chave em claro): não se atendem
+            Ok(v) if v.get("chave").is_some() => resposta(
+                400,
+                &json!({ "ok": false, "erro": format!("Este posto tem uma versão antiga do KanGest. Actualize-o para a versão {} (a do servidor) para voltar a trabalhar em rede.", env!("CARGO_PKG_VERSION")) }),
+            ),
+            Ok(v) => match cifra::abrir(&seg.chave, AAD_PEDIDO, &v) {
+                None => {
+                    falhou(&endereco);
+                    resposta(401, &json!({ "ok": false, "erro": "Chave de rede inválida." }))
+                }
+                Some(texto) => {
+                    let r = match serde_json::from_slice::<Pedido>(&texto) {
+                        Err(e) => json!({ "ok": false, "erro": format!("Pedido inválido: {e}") }),
+                        Ok(p) if (agora_ms() - p.t).abs() > DESVIO_MAXIMO_MS => json!({ "ok": false, "id": p.id, "erro": format!(
+                            "O relógio deste posto difere do servidor em {} minutos. Acerte a data e a hora (nos dois computadores) e tente de novo.",
+                            (agora_ms() - p.t).abs() / 60_000
+                        ) }),
+                        Ok(p) if ja_visto(&p.id) => json!({ "ok": false, "id": p.id, "erro": "Pedido repetido recusado." }),
+                        Ok(p) => {
+                            let id = p.id.clone();
+                            let mut r = executar(st, p, &endereco);
+                            r["id"] = json!(id);
+                            r
+                        }
+                    };
+                    resposta(200, &cifra::selar(&seg.chave, AAD_RESPOSTA, r.to_string().as_bytes()))
+                }
+            },
+        },
     };
     let _ = fluxo.write_all(&saida);
     let _ = fluxo.flush();
@@ -322,20 +494,16 @@ fn destino(cfg: &Config) -> AppResult<std::net::SocketAddr> {
         .ok_or_else(|| AppError::msg(format!("Endereço do servidor inválido: {alvo}")))
 }
 
-/// Envia um pedido ao servidor e devolve o resultado (ou o erro que ele deu).
-fn pedir(cfg: &Config, metodo: &str, params: Value, posto_id: i64, descricao: &str) -> AppResult<Value> {
+/// Pedido HTTP simples ao servidor; devolve o JSON do corpo da resposta.
+fn http(cfg: &Config, metodo: &str, corpo: Option<&str>) -> AppResult<Value> {
     let addr = destino(cfg)?;
-    let corpo = json!({
-        "chave": cfg.chave, "token": token(), "posto": posto_id,
-        "metodo": metodo, "params": params, "descricao_posto": descricao,
-    })
-    .to_string();
     let mut fluxo = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
         .map_err(|e| AppError::msg(format!("Sem ligação ao servidor {}: {e}", cfg.servidor)))?;
     fluxo.set_read_timeout(Some(Duration::from_secs(60))).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
+    let corpo = corpo.unwrap_or("");
     let pedido = format!(
-        "POST / HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}",
+        "{metodo} / HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}",
         cfg.servidor.trim(),
         corpo.len()
     );
@@ -348,13 +516,70 @@ fn pedir(cfg: &Config, metodo: &str, params: Value, posto_id: i64, descricao: &s
         .map_err(|e| AppError::msg(format!("Resposta do servidor interrompida: {e}")))?;
     let texto = String::from_utf8_lossy(&bruto);
     let (cabecalho, corpo) = texto.split_once("\r\n\r\n").ok_or_else(|| AppError::msg("Resposta do servidor ilegível."))?;
-    let v: Value = serde_json::from_str(corpo.trim())
-        .map_err(|_| AppError::msg(format!("O servidor respondeu de forma inesperada: {}", cabecalho.lines().next().unwrap_or("").trim())))?;
-    if v["ok"] == Value::Bool(true) {
-        Ok(v.get("dados").cloned().unwrap_or(Value::Null))
-    } else {
-        Err(AppError::msg(v["erro"].as_str().unwrap_or("Erro no servidor.").to_string()))
+    serde_json::from_str(corpo.trim())
+        .map_err(|_| AppError::msg(format!("O servidor respondeu de forma inesperada: {}", cabecalho.lines().next().unwrap_or("").trim())))
+}
+
+/// Sal do servidor (para derivar a chave), guardado depois da primeira vez.
+fn sal_do_servidor(cfg: &Config, renovar: bool) -> AppResult<String> {
+    static SAIS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    let sais = SAIS.get_or_init(|| Mutex::new(HashMap::new()));
+    let alvo = destino(cfg)?.to_string();
+    if !renovar {
+        if let Some(s) = sais.lock().unwrap().get(&alvo) {
+            return Ok(s.clone());
+        }
     }
+    let v = http(cfg, "GET", None)?;
+    let sal = v["sal"].as_str().filter(|s| !s.is_empty()).map(String::from).ok_or_else(|| {
+        AppError::msg(format!(
+            "O servidor tem uma versão antiga do KanGest (sem rede cifrada). Actualize o servidor para a versão {} ou superior.",
+            env!("CARGO_PKG_VERSION")
+        ))
+    })?;
+    sais.lock().unwrap().insert(alvo, sal.clone());
+    Ok(sal)
+}
+
+/// Envia um pedido ao servidor e devolve o resultado (ou o erro que ele deu).
+fn pedir(cfg: &Config, metodo: &str, params: Value, posto_id: i64, descricao: &str) -> AppResult<Value> {
+    pedir_com_token(cfg, token(), metodo, params, posto_id, descricao)
+}
+
+/// Pedido cifrado (protocolo 2) em nome de um posto (`token` identifica a sessão dele no servidor).
+pub fn pedir_com_token(cfg: &Config, token: &str, metodo: &str, params: Value, posto_id: i64, descricao: &str) -> AppResult<Value> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    for tentativa in 0..2 {
+        let sal = sal_do_servidor(cfg, tentativa > 0)?;
+        let k = cifra::derivar(cfg.chave.trim(), &sal);
+        let id = URL_SAFE_NO_PAD.encode(cifra::aleatorio(16));
+        let texto = json!({
+            "token": token, "posto": posto_id, "metodo": metodo, "params": params.clone(),
+            "descricao_posto": descricao, "t": agora_ms(), "id": id,
+        })
+        .to_string();
+        let corpo = cifra::selar(&k, AAD_PEDIDO, texto.as_bytes()).to_string();
+        let v = http(cfg, "POST", Some(&corpo))?;
+        if v.get("c").is_some() {
+            let aberto = cifra::abrir(&k, AAD_RESPOSTA, &v).ok_or_else(|| AppError::msg("Resposta do servidor ilegível (a chave de rede é diferente?)."))?;
+            let r: Value = serde_json::from_slice(&aberto)?;
+            if r["id"].as_str() != Some(id.as_str()) {
+                return Err(AppError::msg("A resposta do servidor não corresponde ao pedido."));
+            }
+            return if r["ok"] == Value::Bool(true) {
+                Ok(r.get("dados").cloned().unwrap_or(Value::Null))
+            } else {
+                Err(AppError::msg(r["erro"].as_str().unwrap_or("Erro no servidor.").to_string()))
+            };
+        }
+        let erro = v["erro"].as_str().unwrap_or("Erro no servidor.").to_string();
+        // o sal pode ter mudado (servidor reinstalado): tenta uma vez com o sal novo
+        if tentativa == 0 && erro.contains("Chave de rede inválida") {
+            continue;
+        }
+        return Err(AppError::msg(erro));
+    }
+    Err(AppError::msg("Chave de rede inválida."))
 }
 
 /// Despacha um método: localmente, ou no servidor quando esta máquina é um posto cliente.
@@ -456,8 +681,10 @@ fn enderecos_locais() -> Vec<String> {
 }
 
 pub async fn estado(st: &AppState) -> AppResult<Value> {
-    st.sessao()?;
+    let s = st.sessao()?;
     let c = config();
+    // a chave de rede só a vê quem pode mudar a configuração
+    let admin = s.tem("sistema.configuracoes");
     let ligados: Vec<Value> = ligacoes()
         .lock()
         .unwrap()
@@ -470,7 +697,10 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
         })
         .collect();
     Ok(json!({
-        "modo": c.modo, "porta": c.porta, "servidor": c.servidor, "chave": c.chave,
+        "modo": c.modo, "porta": c.porta, "servidor": c.servidor,
+        "chave": if admin { c.chave.clone() } else { String::new() },
+        "chave_curta": c.modo != "local" && c.chave.chars().count() < CHAVE_MINIMA,
+        "protocolo": PROTOCOLO,
         "servidor_activo": servidor_activo(),
         "enderecos": enderecos_locais(),
         "posto": st.posto(),
@@ -495,9 +725,20 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
     if !["local", "servidor", "cliente"].contains(&g.modo.as_str()) {
         return Err(AppError::msg("Modo de rede inválido."));
     }
-    let c = Config { modo: g.modo, porta: if g.porta == 0 { PORTA_PADRAO } else { g.porta }, servidor: g.servidor.trim().to_string(), chave: g.chave.trim().to_string() };
-    if c.modo != "local" && c.chave.chars().count() < 6 {
-        return Err(AppError::msg("A chave de rede tem de ter pelo menos 6 caracteres e ser igual em todos os postos."));
+    let antes = config();
+    // o sal mantém-se (os postos já ligados continuam a derivar a mesma chave)
+    let c = Config {
+        modo: g.modo,
+        porta: if g.porta == 0 { PORTA_PADRAO } else { g.porta },
+        servidor: g.servidor.trim().to_string(),
+        chave: g.chave.trim().to_string(),
+        sal: antes.sal.clone(),
+    };
+    // chave nova: pelo menos CHAVE_MINIMA caracteres; uma chave antiga mais curta pode manter-se
+    if c.modo != "local" && c.chave.chars().count() < CHAVE_MINIMA && !(c.chave == antes.chave && c.chave.chars().count() >= 6) {
+        return Err(AppError::msg(format!(
+            "A chave de rede tem de ter pelo menos {CHAVE_MINIMA} caracteres e ser igual em todos os postos. Use «Gerar chave»."
+        )));
     }
     if c.modo == "cliente" {
         if c.servidor.is_empty() {
@@ -505,7 +746,6 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
         }
         // confirma logo que o servidor responde e aceita a chave
         let posto = st.posto();
-        let antes = config();
         *celula().lock().unwrap() = c.clone();
         let teste = tokio::task::block_in_place(|| pedir(&c, "setup.estado", Value::Null, posto.id, &posto.descricao));
         if let Err(e) = teste {
@@ -541,4 +781,21 @@ pub async fn testar(st: &AppState) -> AppResult<Value> {
     let posto = st.posto();
     let r = tokio::task::block_in_place(|| pedir(&c, "setup.estado", Value::Null, posto.id, &posto.descricao))?;
     Ok(json!({ "ok": true, "empresa": r["empresa"] }))
+}
+
+/// Testes: um pedido cifrado tal como iria na rede (para o repetir) e a resposta aberta.
+#[cfg(test)]
+pub fn teste_pedido_cifrado(cfg: &Config, token: &str, metodo: &str, params: Value, posto: i64) -> (String, [u8; 32]) {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let sal = sal_do_servidor(cfg, false).unwrap();
+    let k = cifra::derivar(cfg.chave.trim(), &sal);
+    let texto = json!({ "token": token, "posto": posto, "metodo": metodo, "params": params, "t": agora_ms(), "id": URL_SAFE_NO_PAD.encode(cifra::aleatorio(16)) });
+    (cifra::selar(&k, AAD_PEDIDO, texto.to_string().as_bytes()).to_string(), k)
+}
+
+#[cfg(test)]
+pub fn teste_abrir_resposta(k: &[u8; 32], http: &str) -> Value {
+    let corpo = http.split_once("\r\n\r\n").expect("resposta HTTP").1;
+    let v: Value = serde_json::from_str(corpo.trim()).expect("JSON");
+    serde_json::from_slice(&cifra::abrir(k, AAD_RESPOSTA, &v).expect("resposta cifrada com a chave do posto")).unwrap()
 }
