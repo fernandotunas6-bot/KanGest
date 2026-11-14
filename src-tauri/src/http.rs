@@ -168,22 +168,24 @@ fn completa(b: &[u8], head: bool) -> bool {
     false
 }
 
-fn desfazer_chunked(b: &[u8]) -> AppResult<Vec<u8>> {
+/// Junta os blocos de um corpo «chunked». Nunca indexa fora do corpo: também lê os pedidos que chegam à API
+/// de integração, vindos de quem quer que seja (e um pânico fecharia a aplicação, que corre com `panic = "abort"`).
+pub(crate) fn desfazer_chunked(b: &[u8]) -> AppResult<Vec<u8>> {
+    let truncada = || AppError::msg("Resposta HTTP truncada.");
     let mut out = Vec::new();
     let mut i = 0;
     loop {
-        let fim = b[i..].windows(2).position(|w| w == b"\r\n").ok_or_else(|| AppError::msg("Resposta HTTP truncada."))? + i;
+        let resto = b.get(i..).ok_or_else(truncada)?;
+        let fim = resto.windows(2).position(|w| w == b"\r\n").ok_or_else(truncada)? + i;
         let linha = String::from_utf8_lossy(&b[i..fim]);
         let n = usize::from_str_radix(linha.split(';').next().unwrap_or("").trim(), 16).map_err(|_| AppError::msg("Resposta HTTP inválida."))?;
         i = fim + 2;
         if n == 0 {
             return Ok(out);
         }
-        if i + n > b.len() {
-            return Err(AppError::msg("Resposta HTTP truncada."));
-        }
-        out.extend_from_slice(&b[i..i + n]);
-        i += n + 2;
+        let fim_dados = i.checked_add(n).filter(|f| *f <= b.len()).ok_or_else(truncada)?;
+        out.extend_from_slice(&b[i..fim_dados]);
+        i = fim_dados + 2;
     }
 }
 
@@ -203,6 +205,10 @@ mod testes {
         assert!(!u.https && u.porta == 8080 && u.caminho == "/");
         assert!(partir("ftp://x").is_err());
         assert_eq!(desfazer_chunked(b"4\r\nWiki\r\n5;x=1\r\npedia\r\n0\r\n\r\n").unwrap(), b"Wikipedia");
+        // corpos malformados dão erro, nunca pânico
+        for mau in [&b"5\r\n0\r\n\r\n"[..], b"3\r\nabc", b"ffffffffffffffff\r\nx\r\n0\r\n\r\n", b"zz\r\n0\r\n\r\n", b"", b"\r\n", b"2\r\nab"] {
+            assert!(desfazer_chunked(mau).is_err(), "{:?}", String::from_utf8_lossy(mau));
+        }
     }
 
     /// Servidor que não fecha a ligação (keep-alive): a leitura termina pelo Content-Length.

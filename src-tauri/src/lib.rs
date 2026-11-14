@@ -1,4 +1,5 @@
 mod agt;
+pub mod api;
 mod db;
 mod error;
 pub mod http;
@@ -58,6 +59,7 @@ pub fn run() {
             // Postos em rede: abre o servidor ou liga-se a ele conforme o `rede.json` desta máquina.
             let estado = Arc::new(estado);
             rede::registar_estado(estado.clone());
+            api::registar_estado(estado.clone());
             let config_rede = rede::carregar(&dir);
             if config_rede.modo == "servidor" {
                 if let Err(e) = rede::iniciar_servidor(estado.clone(), &config_rede) {
@@ -70,6 +72,10 @@ pub fn run() {
                         eprintln!("Sem ligação ao servidor: {e}");
                     }
                 });
+            }
+            // API de integração para outros sistemas: só na máquina que guarda a base de dados.
+            if !config_rede.cliente() {
+                api::arrancar(estado.clone());
             }
             // Facturação electrónica da AGT: envia e consulta os documentos em segundo plano.
             services::fe::iniciar(estado.clone());

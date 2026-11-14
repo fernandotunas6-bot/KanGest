@@ -1877,7 +1877,22 @@ async fn servidor_demo() {
     let mut r = String::new();
     s.read_to_string(&mut r).unwrap();
     assert!(r.contains("\"ok\":true"), "{r}");
-    eprintln!("SERVIDOR-DEMO-PRONTO porta 7799");
+
+    // API de integração (porta 7800, só nesta máquina): uma chave da loja online com alguns pedidos no registo
+    let loja = rpc(&arc, "utilizadores.guardar", json!({ "nome": "Loja Online", "login": "loja", "perfil": "CAIXA", "senha": "loja12345", "mudar_senha": false })).await["id"].as_i64().unwrap();
+    let posto_w = rpc(&arc, "posto.guardar", json!({ "descricao": "Loja online", "armazem_id": 1, "serie_prefixo": "W" })).await["id"].as_i64().unwrap();
+    let k = rpc(&arc, "api.chaveCriar", json!({ "nome": "Loja online (WooCommerce)", "utilizador_id": loja, "posto_id": posto_w,
+        "permissoes": ["api.artigos", "api.stock", "api.entidades", "api.documentos", "clientes", "vendas.fatura_recibo", "vendas.fatura", "vendas.proforma"] })).await["chave"].as_str().unwrap().to_string();
+    rpc(&arc, "api.chaveCriar", json!({ "nome": "Contabilidade", "utilizador_id": loja, "permissoes": ["api.documentos", "sistema.saft"], "ips": "192.168.1.0/24", "expira_em": format!("{}-12-31", ano + 1) })).await;
+    crate::api::registar_estado(arc.clone());
+    rpc(&arc, "api.guardar", json!({ "ativo": true, "porta": 7800, "rede": false })).await;
+    let ag = rpc(&arc, "artigos.obter", json!({ "id": arts[0] })).await;
+    let venda = json!({ "tipo": "FR", "referencia": "WC-1001", "linhas": [{ "artigo_id": arts[0], "quantidade": 3 }], "pagamentos": [{ "modo": "TB", "valor": (ag["preco1"].as_i64().unwrap() as f64 * 3.0 * 1.14).round() as i64 }] });
+    for (m, c, b) in [("GET", "/api/v1", None), ("GET", "/api/v1/artigos?alterado_desde=2026-01-01", None), ("POST", "/api/v1/documentos", Some(&venda)), ("GET", "/api/v1/artigos/codigo/000", None), ("POST", "/api/v1/documentos", Some(&json!({ "tipo": "NC" })))] {
+        api_http(7800, m, c, Some(&k), b, &[]);
+    }
+    api_http(7800, "GET", "/api/v1/stock", Some("kg_chave_errada"), None, &[]);
+    eprintln!("SERVIDOR-DEMO-PRONTO porta 7799 (API na porta 7800)");
     tokio::time::sleep(std::time::Duration::from_secs(3 * 3600)).await;
 }
 
@@ -2561,5 +2576,335 @@ async fn licencas_servidor_local() {
     admin("maquina", Some(json!({ "nif": "5000000000", "maquina": maquina, "bloqueada": true }))).await;
     assert!(rpc_err(&st, "licenca.sincronizar", json!({ "forcar": true })).await.contains("bloqueado"));
     assert_eq!(rpc(&st, "licenca.estado", Value::Null).await["modo"].as_str(), Some("ACTIVA"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Pedido HTTP simples à API: (código, cabeçalhos, corpo em JSON — ou em texto se não for JSON).
+fn api_http(porta: u16, metodo: &str, caminho: &str, chave: Option<&str>, corpo: Option<&Value>, extra: &[(&str, &str)]) -> (u16, String, Value) {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", porta)).expect("ligar à API");
+    let b = corpo.map(|c| c.to_string()).unwrap_or_default();
+    let mut req = format!("{metodo} {caminho} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n");
+    if let Some(k) = chave {
+        req.push_str(&format!("Authorization: Bearer {k}\r\n"));
+    }
+    for (k, v) in extra {
+        req.push_str(&format!("{k}: {v}\r\n"));
+    }
+    if corpo.is_some() {
+        req.push_str(&format!("Content-Type: application/json\r\nContent-Length: {}\r\n", b.len()));
+    }
+    req.push_str("\r\n");
+    req.push_str(&b);
+    s.write_all(req.as_bytes()).unwrap();
+    let mut r = Vec::new();
+    s.read_to_end(&mut r).unwrap();
+    let r = String::from_utf8_lossy(&r).to_string();
+    let (cab, corpo) = r.split_once("\r\n\r\n").expect("resposta HTTP");
+    let estado = cab.split_whitespace().nth(1).unwrap().parse().unwrap();
+    let v = serde_json::from_str(corpo).unwrap_or_else(|_| Value::String(corpo.to_string()));
+    (estado, cab.to_string(), v)
+}
+
+/// API de integração: chaves de acesso, permissões por chave limitadas às do utilizador, IPs permitidos,
+/// limite de pedidos, emissão com idempotência, cliente por NIF, artigos por referência, SAF-T e registo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn api_integracao() {
+    let pasta = std::env::temp_dir().join(format!("kigest-api-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Loja API, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let arroz = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz 5kg", "referencia": "ARZ5", "codigo_barras": "5601234567890", "taxa_iva_id": 1, "preco1": 100000, "custo": 60000 })).await["id"].as_i64().unwrap();
+    let oleo = rpc(&st, "artigos.guardar", json!({ "descricao": "Óleo 1L", "referencia": "OLE1", "taxa_iva_id": 1, "preco1": 80000, "custo": 50000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": arroz, "quantidade": 50, "preco_unitario": 60000 }, { "artigo_id": oleo, "quantidade": 10, "preco_unitario": 50000 }] })).await;
+    let posto = rpc(&st, "posto.guardar", json!({ "descricao": "Loja online", "armazem_id": 1, "serie_prefixo": "W" })).await["id"].as_i64().unwrap();
+    let loja = rpc(&st, "utilizadores.guardar", json!({ "nome": "Loja Online", "login": "loja", "senha": "segredo99", "perfil": "CAIXA", "mudar_senha": false })).await["id"].as_i64().unwrap();
+    assert!(!crate::state::permissoes_perfil("GESTOR").contains(&"sistema.api".to_string()), "só o administrador gere a API por omissão");
+
+    // ---- chaves: validação e criação (o segredo só aparece aqui) ----
+    assert!(rpc_err(&st, "api.chaveCriar", json!({ "nome": "X", "utilizador_id": loja, "permissoes": [] })).await.contains("pelo menos uma"));
+    assert!(rpc_err(&st, "api.chaveCriar", json!({ "nome": "X", "utilizador_id": loja, "permissoes": ["sistema.utilizadores"] })).await.contains("desconhecida"));
+    assert!(rpc_err(&st, "api.chaveCriar", json!({ "nome": "X", "utilizador_id": loja, "permissoes": ["api.artigos"], "ips": "300.1.1.1" })).await.contains("inválido"));
+    let perms = json!(["api.artigos", "api.stock", "api.entidades", "api.documentos", "vendas.fatura_recibo", "vendas.fatura", "clientes", "stock.entrada"]);
+    let criada = rpc(&st, "api.chaveCriar", json!({ "nome": "Loja online", "utilizador_id": loja, "posto_id": posto, "permissoes": perms })).await;
+    let k1 = criada["chave"].as_str().unwrap().to_string();
+    let k1_id = criada["id"].as_i64().unwrap();
+    assert!(k1.starts_with("kg_") && k1.len() == 51, "{k1}");
+    let est = rpc(&st, "api.estado", Value::Null).await;
+    assert!(!est.to_string().contains(&k1), "o segredo não volta a ser mostrado");
+    let c1 = est["chaves"].as_array().unwrap().iter().find(|c| c["id"] == k1_id).unwrap().clone();
+    assert_eq!((c1["estado"].as_str(), c1["prefixo"].as_str()), (Some("ACTIVA"), Some(&k1[..11])));
+    assert_eq!(c1["sem_efeito"], json!(["stock.entrada"]), "a caixa não faz entradas de stock: a chave também não");
+    assert!(est["permissoes"].as_array().unwrap().len() >= 20);
+
+    // ---- servidor da API (só nesta máquina, numa porta livre) ----
+    let porta = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let arc = std::sync::Arc::new(st);
+    crate::api::registar_estado(arc.clone());
+    assert!(rpc_err(&arc, "api.guardar", json!({ "ativo": true, "porta": 80 })).await.contains("1024"));
+    let e = rpc(&arc, "api.guardar", json!({ "ativo": true, "porta": porta, "rede": false })).await;
+    assert_eq!(e["a_servir"], porta);
+    let http = |m: &str, c: &str, k: Option<&str>, b: Option<&Value>| api_http(porta, m, c, k, b, &[]);
+
+    // públicos, sem chave
+    assert_eq!(http("GET", "/api/v1/saude", None, None).2["ok"], true);
+    let (s, _, spec) = http("GET", "/api/v1/openapi.json", None, None);
+    assert_eq!(s, 200);
+    assert!(spec["openapi"].as_str().unwrap().starts_with("3."), "{spec}");
+    // sem chave, chave errada, rota desconhecida, método errado
+    let (s, cab, v) = http("GET", "/api/v1", None, None);
+    assert_eq!((s, v["erro"]["codigo"].as_str()), (401, Some("nao_autenticado")));
+    assert!(cab.contains("WWW-Authenticate"));
+    let falsa = format!("kg_{}", "x".repeat(48));
+    assert_eq!(http("GET", "/api/v1", Some(&falsa), None).2["erro"]["codigo"], "chave_invalida");
+    assert_eq!(http("GET", "/api/v1/naoexiste", Some(&k1), None).0, 404);
+    assert_eq!(http("DELETE", "/api/v1/artigos", Some(&k1), None).0, 405);
+    // a chave por X-API-Key também serve
+    let (s, _, info) = api_http(porta, "GET", "/api/v1", None, None, &[("X-API-Key", &k1)]);
+    assert_eq!(s, 200, "{info}");
+    assert_eq!(info["empresa"]["nif"], "5000000000");
+    assert_eq!(info["posto"]["serie_prefixo"], "W");
+    assert_eq!(info["chave"]["utilizador"], "Loja Online");
+    assert!(!info["chave"]["permissoes"].as_array().unwrap().contains(&json!("stock.entrada")), "permissão sem efeito não conta");
+
+    // ---- artigos: sem custos (falta api.custos), preço com IVA, paginação por id ----
+    let (s, _, l) = http("GET", "/api/v1/artigos?limite=1", Some(&k1), None);
+    assert_eq!(s, 200, "{l}");
+    assert_eq!((l["mais"].as_bool(), l["seguinte"].as_i64()), (Some(true), Some(arroz)));
+    let a = &l["dados"][0];
+    assert_eq!((a["referencia"].as_str(), a["preco1_iva"].as_i64(), a["stock"].as_f64(), a["ativo"].as_bool()), (Some("ARZ5"), Some(114000), Some(50.0), Some(true)));
+    assert!(a.get("custo").is_none() && a.get("custo_medio").is_none(), "sem api.custos não há custos: {a}");
+    let l2 = http("GET", &format!("/api/v1/artigos?desde_id={arroz}"), Some(&k1), None).2;
+    assert_eq!((l2["dados"][0]["id"].as_i64(), l2["mais"].as_bool()), (Some(oleo), Some(false)));
+    assert_eq!(http("GET", "/api/v1/artigos?q=%C3%93leo", Some(&k1), None).2["dados"].as_array().unwrap().len(), 1);
+    assert_eq!(http("GET", "/api/v1/artigos/codigo/5601234567890", Some(&k1), None).2["id"], arroz);
+    assert_eq!(http("GET", "/api/v1/artigos/codigo/000", Some(&k1), None).0, 404);
+    assert_eq!(http("GET", "/api/v1/artigos?alterado_desde=2000-01-01", Some(&k1), None).2["dados"].as_array().unwrap().len(), 2);
+    assert_eq!(http("GET", "/api/v1/artigos?alterado_desde=2999-01-01", Some(&k1), None).2["dados"].as_array().unwrap().len(), 0);
+    let t = http("GET", "/api/v1/tabelas", Some(&k1), None).2;
+    assert!(t["taxas_iva"].as_array().unwrap().iter().any(|x| x["percentagem"] == 14.0));
+    // stock com o detalhe por armazém
+    let sk = http("GET", &format!("/api/v1/stock?artigo_id={arroz}"), Some(&k1), None).2;
+    assert_eq!((sk["dados"][0]["quantidade"].as_f64(), sk["dados"][0]["armazens"][0]["armazem"].as_str()), (Some(50.0), Some("Principal")));
+    assert!(sk["dados"][0].get("custo_medio").is_none());
+
+    // ---- venda FR pela referência, com Idempotency-Key: repetir não emite outra ----
+    let venda = json!({ "tipo": "FR", "referencia": "ENC-1001", "linhas": [{ "referencia": "ARZ5", "quantidade": 2 }], "pagamentos": [{ "modo": "TB", "valor": 228000 }] });
+    let (s, cab, fr) = api_http(porta, "POST", "/api/v1/documentos", Some(&k1), Some(&venda), &[("Idempotency-Key", "enc-1001")]);
+    assert_eq!(s, 201, "{fr}");
+    assert!(cab.contains("Location: /api/v1/documentos/"));
+    let fr_id = fr["id"].as_i64().unwrap();
+    assert!(fr["numero_doc"].as_str().unwrap().contains('W'), "série do posto da chave: {}", fr["numero_doc"]);
+    assert_eq!((fr["total"].as_i64(), fr["api_chave_id"].as_i64(), fr["referencia"].as_str()), (Some(228000), Some(k1_id), Some("ENC-1001")));
+    assert_eq!(fr["hash_controlo"].as_str().unwrap().len(), 4);
+    assert!(fr["linhas"][0].get("custo").is_none());
+    let (s, cab, de_novo) = api_http(porta, "POST", "/api/v1/documentos", Some(&k1), Some(&venda), &[("Idempotency-Key", "enc-1001")]);
+    assert_eq!((s, de_novo["id"].as_i64()), (200, Some(fr_id)));
+    assert!(cab.contains("Idempotent-Replayed: true"));
+    assert_eq!(http("GET", &format!("/api/v1/stock?artigo_id={arroz}"), Some(&k1), None).2["dados"][0]["quantidade"], 48.0, "só uma venda");
+    // preço com IVA igual ao da ficha não precisa de permissão; preço diferente precisa
+    let ok = json!({ "tipo": "FR", "linhas": [{ "artigo_id": oleo, "quantidade": 1, "preco_com_iva": 91200 }], "pagamentos": [{ "modo": "NU", "valor": 91200 }] });
+    assert_eq!(http("POST", "/api/v1/documentos", Some(&k1), Some(&ok)).0, 201);
+    let barato = json!({ "tipo": "FR", "linhas": [{ "artigo_id": oleo, "quantidade": 1, "preco_unitario": 1000 }], "pagamentos": [{ "modo": "NU", "valor": 1140 }] });
+    let (s, _, v) = http("POST", "/api/v1/documentos", Some(&k1), Some(&barato));
+    assert_eq!((s, v["erro"]["codigo"].as_str()), (403, Some("sem_permissao")), "{v}");
+    assert!(v["erro"]["mensagem"].as_str().unwrap().contains("pos.alterar_preco"));
+    // erros de negócio: 422 com a mensagem do programa
+    let curto = json!({ "tipo": "FR", "linhas": [{ "artigo_id": oleo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 100 }] });
+    let (s, _, v) = http("POST", "/api/v1/documentos", Some(&k1), Some(&curto));
+    assert_eq!(s, 422);
+    assert!(v["erro"]["mensagem"].as_str().unwrap().contains("insuficiente"), "{v}");
+    assert_eq!(http("POST", "/api/v1/documentos", Some(&k1), Some(&json!({ "tipo": "FR", "linhas": [{ "referencia": "NAO", "quantidade": 1 }] }))).0, 422);
+    // valores absurdos ficam à porta (nada de totais que transbordem num documento assinado)
+    for linha in [json!({ "artigo_id": oleo, "quantidade": 1e12 }), json!({ "artigo_id": oleo, "quantidade": 1, "preco_unitario": -5 }), json!({ "artigo_id": oleo, "quantidade": 1, "desconto_pct": 150 }), json!({ "artigo_id": oleo })] {
+        let (s, _, v) = http("POST", "/api/v1/documentos", Some(&k1), Some(&json!({ "tipo": "FR", "linhas": [linha], "pagamentos": [{ "modo": "NU", "valor": 1 }] })));
+        assert_eq!((s, v["erro"]["codigo"].as_str()), (422, Some("validacao")), "{v}");
+    }
+    assert_eq!(http("POST", "/api/v1/documentos", Some(&k1), Some(&json!({ "tipo": "FR", "linhas": [], "pagamentos": [{ "modo": "NU", "valor": 1e300 }] }))).0, 422);
+    // tipos sem permissão ou fora da API
+    assert_eq!(http("POST", "/api/v1/documentos", Some(&k1), Some(&json!({ "tipo": "NC" }))).2["erro"]["codigo"], "sem_permissao");
+    assert_eq!(http("POST", "/api/v1/documentos", Some(&k1), Some(&json!({ "tipo": "ES", "linhas": [{ "artigo_id": arroz, "quantidade": 1 }] }))).0, 403, "o utilizador não tem stock.entrada");
+    assert_eq!(http("POST", "/api/v1/documentos", Some(&k1), Some(&json!({ "tipo": "VRC" }))).0, 422);
+    assert_eq!(http("POST", "/api/v1/artigos", Some(&k1), Some(&json!({ "descricao": "X", "taxa_iva_id": 1, "preco1": 1 }))).0, 403);
+    // JSON inválido
+    {
+        use std::io::{Read, Write};
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", porta)).unwrap();
+        s.write_all(format!("POST /api/v1/clientes HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {k1}\r\nContent-Length: 4\r\n\r\n{{abc").as_bytes()).unwrap();
+        let mut r = String::new();
+        s.read_to_string(&mut r).unwrap();
+        assert!(r.starts_with("HTTP/1.1 400") && r.contains("JSON inv"), "{r}");
+    }
+
+    // corpo «chunked» malformado (antes de qualquer chave): 400, e o servidor continua a responder
+    {
+        use std::io::{Read, Write};
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", porta)).unwrap();
+        s.write_all(b"POST /api/v1/documentos HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n0\r\n\r\n").unwrap();
+        let mut r = String::new();
+        s.read_to_string(&mut r).unwrap();
+        assert!(r.starts_with("HTTP/1.1 400"), "{r}");
+        assert_eq!(http("GET", "/api/v1/saude", None, None).0, 200);
+    }
+
+    // ---- FT a crédito com o cliente indicado pelo NIF (criado na primeira vez) ----
+    let ft = json!({ "tipo": "FT", "cliente": { "nif": "5000111222", "nome": "Empresa X, Lda", "email": "compras@x.ao" }, "linhas": [{ "codigo_barras": "5601234567890", "quantidade": 1 }] });
+    let (s, _, f1) = http("POST", "/api/v1/documentos", Some(&k1), Some(&ft));
+    assert_eq!(s, 201, "{f1}");
+    assert_eq!((f1["entidade_nome"].as_str(), f1["valor_pendente"].as_i64()), (Some("Empresa X, Lda"), Some(114000)));
+    let f2 = http("POST", "/api/v1/documentos", Some(&k1), Some(&ft)).2;
+    assert_eq!(f2["entidade_id"], f1["entidade_id"], "o mesmo NIF não cria outro cliente");
+    let cli = http("GET", "/api/v1/clientes?nif=5000111222", Some(&k1), None).2;
+    assert_eq!((cli["dados"].as_array().unwrap().len(), cli["dados"][0]["saldo"].as_i64()), (1, Some(228000)));
+    let pend = http("GET", &format!("/api/v1/clientes/{}/pendentes", f1["entidade_id"]), Some(&k1), None).2;
+    assert_eq!(pend["dados"].as_array().unwrap().len(), 2);
+
+    // ---- clientes: criar, alterar só um campo, campos desconhecidos ----
+    let (s, _, c) = http("POST", "/api/v1/clientes", Some(&k1), Some(&json!({ "nome": "Cliente API", "nif": "5000999888", "email": "a@b.ao" })));
+    assert_eq!(s, 201, "{c}");
+    let cid = c["id"].as_i64().unwrap();
+    let (s, _, c) = http("PATCH", &format!("/api/v1/clientes/{cid}"), Some(&k1), Some(&json!({ "telefone": "923000000" })));
+    assert_eq!((s, c["nome"].as_str(), c["email"].as_str(), c["telefone"].as_str()), (200, Some("Cliente API"), Some("a@b.ao"), Some("923000000")));
+    assert_eq!(http("POST", "/api/v1/clientes", Some(&k1), Some(&json!({ "nome": "Y", "campo_errado": 1 }))).2["erro"]["codigo"], "campo_desconhecido");
+    assert_eq!(http("GET", &format!("/api/v1/fornecedores/{cid}"), Some(&k1), None).0, 404, "um cliente não é fornecedor");
+    assert_eq!(http("POST", "/api/v1/fornecedores", Some(&k1), Some(&json!({ "nome": "Forn" }))).0, 403);
+
+    // ---- documentos: lista por id com linhas, filtros, só os desta chave ----
+    let ds = http("GET", "/api/v1/documentos?linhas=1", Some(&k1), None).2;
+    let lista = ds["dados"].as_array().unwrap();
+    assert!(lista.iter().any(|d| d["tipo_codigo"] == "ES"));
+    assert!(lista.iter().all(|d| d["linhas"].is_array() && d["pagamentos"].is_array()));
+    assert_eq!(http("GET", "/api/v1/documentos?tipo=FT", Some(&k1), None).2["dados"].as_array().unwrap().len(), 2);
+    assert_eq!(http("GET", "/api/v1/documentos?tipo=FT,FR&desta_chave=1", Some(&k1), None).2["dados"].as_array().unwrap().len(), 4);
+    let d = http("GET", &format!("/api/v1/documentos/{fr_id}"), Some(&k1), None).2;
+    assert_eq!((d["numero_doc"].as_str(), d["pagamentos"][0]["modo_codigo"].as_str()), (fr["numero_doc"].as_str(), Some("TB")));
+    assert!(d.get("empresa").is_none());
+    assert_eq!(http("POST", &format!("/api/v1/documentos/{fr_id}/anular"), Some(&k1), Some(&json!({ "motivo": "Encomenda cancelada" }))).0, 403);
+
+    // ---- conversão de uma nota de encomenda: sem pos.alterar_preco, preços e descontos vêm da origem ----
+    let ne = rpc(&arc, "documentos.emitir", json!({ "tipo": "NE", "linhas": [{ "artigo_id": oleo, "quantidade": 2, "preco_unitario": 70000, "desconto_pct": 5 }] })).await;
+    let ne_id = ne["documento"]["id"].as_i64().unwrap();
+    let conv = |linhas: Value| json!({ "tipo": "FR", "doc_origem_id": ne_id, "linhas": linhas, "pagamentos": [{ "modo": "NU", "valor": 151620 }] });
+    let (s, _, v) = http("POST", "/api/v1/documentos", Some(&k1), Some(&conv(json!([{ "artigo_id": oleo, "quantidade": 2, "preco_unitario": 1 }]))));
+    assert_eq!(s, 403, "a origem não serve para mudar o preço: {v}");
+    assert_eq!(http("POST", "/api/v1/documentos", Some(&k1), Some(&conv(json!([{ "artigo_id": oleo, "quantidade": 2, "desconto_pct": 50 }])))).0, 403);
+    assert_eq!(http("POST", "/api/v1/documentos", Some(&k1), Some(&conv(json!([{ "artigo_id": arroz, "quantidade": 1 }])))).0, 422, "artigo fora da origem");
+    let (s, _, f) = http("POST", "/api/v1/documentos", Some(&k1), Some(&conv(json!([{ "artigo_id": oleo, "quantidade": 2 }]))));
+    assert_eq!((s, f["total"].as_i64(), f["linhas"][0]["desconto_pct"].as_f64()), (201, Some(151620), Some(5.0)), "{f}");
+    assert_eq!(rpc(&arc, "documentos.obter", json!({ "id": ne_id })).await["documento"]["estado"], "F", "a encomenda fica facturada");
+
+    // ---- chave de catálogo (administrador): custos, criar e alterar artigos, limite de pedidos ----
+    let admin_id = rpc(&arc, "utilizadores.listar", Value::Null).await.as_array().unwrap().iter().find(|u| u["login"] == "admin").unwrap()["id"].as_i64().unwrap();
+    let k2 = rpc(&arc, "api.chaveCriar", json!({ "nome": "Catálogo", "utilizador_id": admin_id, "permissoes": ["api.artigos", "api.custos", "artigos.criar", "artigos.editar"], "limite_minuto": 6 })).await["chave"].as_str().unwrap().to_string();
+    let (s, _, a) = http("POST", "/api/v1/artigos", Some(&k2), Some(&json!({ "descricao": "Feijão 1kg", "referencia": "FEI1", "taxa_iva_id": 1, "preco1_iva": 57000, "custo": 30000 })));
+    assert_eq!(s, 201, "{a}");
+    assert_eq!((a["preco1"].as_i64(), a["preco1_iva"].as_i64(), a["custo"].as_i64()), (Some(50000), Some(57000), Some(30000)));
+    let fid = a["id"].as_i64().unwrap();
+    let (s, _, a) = http("PUT", &format!("/api/v1/artigos/{fid}"), Some(&k2), Some(&json!({ "preco1_iva": 68400 })));
+    assert_eq!((s, a["preco1"].as_i64(), a["descricao"].as_str(), a["custo"].as_i64(), a["referencia"].as_str()), (200, Some(60000), Some("Feijão 1kg"), Some(30000), Some("FEI1")), "{a}");
+    assert_eq!(http("PUT", &format!("/api/v1/artigos/{fid}"), Some(&k2), Some(&json!({ "preco1": 1, "preco1_iva": 2 }))).0, 422);
+    // 5 pedidos feitos neste minuto; o 7.º passa o limite de 6
+    let mut ultimo = 0;
+    for _ in 0..3 {
+        ultimo = http("GET", "/api/v1/artigos?limite=1", Some(&k2), None).0;
+    }
+    if ultimo != 429 {
+        // (o minuto pode ter mudado a meio: insiste até ao limite)
+        for _ in 0..8 {
+            ultimo = http("GET", "/api/v1/artigos?limite=1", Some(&k2), None).0;
+            if ultimo == 429 {
+                break;
+            }
+        }
+    }
+    assert_eq!(ultimo, 429, "limite de pedidos por minuto");
+    let (_, cab, _) = http("GET", "/api/v1", Some(&k2), None);
+    assert!(cab.contains("Retry-After"));
+
+    // ---- IPs permitidos (e o IP indicado por um túnel na própria máquina) ----
+    let base = json!({ "id": k1_id, "nome": "Loja online", "utilizador_id": loja, "posto_id": posto, "permissoes": perms });
+    let mut com_ips = base.clone();
+    com_ips["ips"] = json!("10.0.0.0/8");
+    rpc(&arc, "api.chaveGuardar", com_ips).await;
+    let (s, _, v) = http("GET", "/api/v1", Some(&k1), None);
+    assert_eq!((s, v["erro"]["codigo"].as_str()), (403, Some("ip_nao_autorizado")));
+    assert_eq!(api_http(porta, "GET", "/api/v1", Some(&k1), None, &[("X-Forwarded-For", "10.1.2.3")]).0, 200);
+
+    // ---- validade, desactivar, renovar e revogar ----
+    let mut expirada = base.clone();
+    expirada["expira_em"] = json!("2001-01-01");
+    rpc(&arc, "api.chaveGuardar", expirada).await;
+    assert_eq!(http("GET", "/api/v1", Some(&k1), None).2["erro"]["codigo"], "chave_expirada");
+    let mut inactiva = base.clone();
+    inactiva["ativa"] = json!(false);
+    rpc(&arc, "api.chaveGuardar", inactiva).await;
+    assert_eq!(http("GET", "/api/v1", Some(&k1), None).2["erro"]["codigo"], "chave_inactiva");
+    rpc(&arc, "api.chaveGuardar", base.clone()).await;
+    assert_eq!(http("GET", "/api/v1", Some(&k1), None).0, 200);
+    let nova = rpc(&arc, "api.chaveRenovar", json!({ "id": k1_id })).await["chave"].as_str().unwrap().to_string();
+    assert_eq!(http("GET", "/api/v1", Some(&k1), None).0, 401, "o segredo antigo deixa de servir");
+    assert_eq!(http("GET", "/api/v1", Some(&nova), None).0, 200);
+    // o utilizador desactivado leva as suas chaves
+    rpc(&arc, "utilizadores.guardar", json!({ "id": loja, "nome": "Loja Online", "login": "loja", "perfil": "CAIXA", "ativo": false })).await;
+    assert_eq!(http("GET", "/api/v1", Some(&nova), None).2["erro"]["codigo"], "utilizador_inactivo");
+    rpc(&arc, "api.chaveRevogar", json!({ "id": k1_id })).await;
+    assert_eq!(http("GET", "/api/v1", Some(&nova), None).2["erro"]["codigo"], "chave_revogada");
+    assert!(rpc_err(&arc, "api.chaveGuardar", base.clone()).await.contains("revogada"));
+    assert!(rpc_err(&arc, "api.chaveRevogar", json!({ "id": k1_id })).await.contains("revogada"));
+
+    // ---- vendas da API não entram no caixa aberto do posto (nem as devoluções saem da gaveta) ----
+    rpc(&arc, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let k4 = rpc(&arc, "api.chaveCriar", json!({ "nome": "Balcão virtual", "utilizador_id": admin_id, "permissoes": ["vendas.fatura_recibo", "vendas.nota_credito", "api.documentos"] })).await["chave"].as_str().unwrap().to_string();
+    let (s, _, fr4) = http("POST", "/api/v1/documentos", Some(&k4), Some(&json!({ "tipo": "FR", "linhas": [{ "artigo_id": arroz, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })));
+    assert_eq!(s, 201, "{fr4}");
+    assert!(fr4["caixa_sessao_id"].is_null(), "a venda da API não fica no caixa do posto 1");
+    assert!(fr4["api_chave_id"].as_i64().is_some());
+    let nc4 = http("POST", "/api/v1/documentos", Some(&k4), Some(&json!({ "tipo": "NC", "doc_origem_id": fr4["id"], "motivo": "Devolução da encomenda", "linhas": [{ "artigo_id": arroz, "quantidade": 1 }] }))).2;
+    assert_eq!(nc4["credito_disponivel"], 114000, "sem gaveta, o valor fica como crédito do cliente: {nc4}");
+    let cx = rpc(&arc, "caixa.estado", Value::Null).await;
+    assert!(!cx.to_string().contains("Devolução NC"), "nenhuma saída de dinheiro no caixa: {cx}");
+    let fr_balcao = rpc(&arc, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": arroz, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    assert!(fr_balcao["documento"]["caixa_sessao_id"].as_i64().is_some(), "no programa, a venda continua a entrar no caixa");
+    assert!(fr_balcao["documento"]["api_chave_id"].is_null());
+
+    // ---- SAF-T pela API ----
+    let k3 = rpc(&arc, "api.chaveCriar", json!({ "nome": "Contabilidade", "utilizador_id": admin_id, "permissoes": ["sistema.saft", "api.documentos"] })).await["chave"].as_str().unwrap().to_string();
+    let hoje = db::hoje();
+    let (s, cab, xml) = http("GET", &format!("/api/v1/saft?de={}-01&ate={hoje}", &hoje[..7]), Some(&k3), None);
+    assert_eq!(s, 200, "{xml}");
+    assert!(cab.contains("application/xml") && cab.contains("SAFT_AO_5000000000"));
+    let xml = xml.as_str().unwrap();
+    assert!(xml.starts_with("<?xml") && xml.contains("<AuditFile") && xml.contains(fr["numero_doc"].as_str().unwrap()));
+    assert!(std::fs::read_dir(&pasta).unwrap().all(|f| !f.unwrap().file_name().to_string_lossy().starts_with("SAFT")), "a API não grava ficheiros");
+    assert_eq!(http("GET", "/api/v1/saft?de=2026-02-30&ate=2026-03-01", Some(&k3), None).0, 400);
+    assert_eq!(http("GET", "/api/v1/artigos", Some(&k3), None).0, 403);
+
+    // ---- registo de pedidos e auditoria ----
+    let reg = rpc(&arc, "api.pedidos", json!({ "chave_id": k1_id })).await;
+    let reg = reg.as_array().unwrap();
+    assert!(reg.iter().any(|r| r["estado"] == 201 && r["metodo"] == "POST"));
+    assert!(reg.iter().any(|r| r["estado"] == 403 && r["erro"].as_str().is_some_and(|e| e.contains("10.0.0.0") || e.contains("autorizado"))));
+    assert!(rpc(&arc, "api.pedidos", json!({ "erros": true })).await.as_array().unwrap().iter().all(|r| r["estado"].as_i64().unwrap() >= 400));
+    let est = rpc(&arc, "api.estado", Value::Null).await;
+    let c1 = est["chaves"].as_array().unwrap().iter().find(|c| c["id"] == k1_id).unwrap().clone();
+    assert_eq!((c1["estado"].as_str(), c1["documentos"].as_i64()), (Some("REVOGADA"), Some(5)));
+    assert!(c1["pedidos"].as_i64().unwrap() > 10);
+    let hoje_ = db::hoje();
+    let aud = rpc(&arc, "auditoria.listar", json!({ "de": hoje_, "ate": hoje_, "evento": "API_CHAVE" })).await;
+    assert!(aud.as_array().unwrap().len() >= 4, "{aud}");
+
+    // ---- desligar: a porta fecha ----
+    let e = rpc(&arc, "api.guardar", json!({ "ativo": false, "porta": porta, "rede": false })).await;
+    assert!(e["a_servir"].is_null());
+    assert!(std::net::TcpStream::connect(("127.0.0.1", porta)).is_err(), "a API desligada não aceita ligações");
+
+    arc.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }

@@ -57,6 +57,8 @@ pub const PERMISSOES: &[&str] = &[
     "sistema.auditoria",
     "tesouraria.regularizar",
     "rh.configuracao",
+    // API de integração: chaves de acesso para outros sistemas
+    "sistema.api",
 ];
 
 /// Permissões que, por omissão, só o administrador tem (o gestor tem todas as outras).
@@ -70,6 +72,7 @@ pub const SO_ADMIN: &[&str] = &[
     "sistema.certificacao",
     "sistema.auditoria",
     "rh.configuracao",
+    "sistema.api",
 ];
 
 /// Permissões por omissão de cada perfil (quando o utilizador não tem lista própria).
@@ -171,6 +174,8 @@ impl Default for PostoAtual {
 pub struct Contexto {
     pub sessao: Arc<Mutex<Option<Sessao>>>,
     pub posto: PostoAtual,
+    /// Pedido da API de integração: a chave que o fez (os documentos ficam com ela e não entram no caixa).
+    pub api_chave: Option<i64>,
 }
 
 tokio::task_local! {

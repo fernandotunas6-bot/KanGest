@@ -48,6 +48,9 @@ Cada instalador tem de ser gerado no respectivo sistema operativo ou no GitHub A
 O passo a passo, incluindo a instalação no PC do KIGEST e a importação dos dados, está em [docs/BUILD.md](docs/BUILD.md).
 A comparação entre o KIGEST e o KanGest (funções e dados) está em [docs/COMPARACAO-KIGEST.md](docs/COMPARACAO-KIGEST.md).
 O equipamento do posto de venda (impressora térmica, gaveta, leitor, visor de cliente, terminal táctil) está em [docs/EQUIPAMENTO-POS.md](docs/EQUIPAMENTO-POS.md).
+A **API de integração** (loja online, contabilidade, BI e outras aplicações, com chaves de acesso) está em [docs/API.md](docs/API.md)
+e a especificação OpenAPI em [docs/openapi.json](docs/openapi.json). O estudo do que falta face aos grandes POS está em
+[docs/ANALISE-POS-MERCADO.md](docs/ANALISE-POS-MERCADO.md).
 
 ## Testes
 
@@ -83,6 +86,8 @@ A matriz de cobertura face ao KIGEST original está em [docs/COBERTURA.md](docs/
 src/                     React (páginas, componentes, impressão)
 src-tauri/src/
   lib.rs                 arranque, comando rpc
+  rede.rs                postos em rede (servidor / cliente na rede local)
+  api.rs                 API de integração para outros sistemas (HTTP, chaves de acesso)
   services/              auth, catálogo, entidades, documentos, caixa, relatórios
   agt.rs                 assinatura RSA-SHA1 encadeada
   db.rs                  SQLite (WAL) + migrações

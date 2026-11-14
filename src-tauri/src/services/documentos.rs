@@ -1026,8 +1026,10 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         .execute(&mut *tx)
         .await?;
 
-    // Dinheiro recebido no POS fica associado ao caixa aberto do posto (não nos documentos manuais recuperados).
-    let sessao_caixa: Option<i64> = if manual.is_none() && tipo.grupo == "VENDAS" && (tipo.pago_no_acto || tipo.credito) {
+    // Dinheiro recebido no POS fica associado ao caixa aberto do posto (não nos documentos manuais recuperados,
+    // nem nos emitidos pela API de integração: uma venda da loja online não passa pela gaveta de nenhum posto).
+    let api_chave = crate::state::contexto().and_then(|c| c.api_chave);
+    let sessao_caixa: Option<i64> = if manual.is_none() && api_chave.is_none() && tipo.grupo == "VENDAS" && (tipo.pago_no_acto || tipo.credito) {
         sqlx::query_scalar("SELECT id FROM caixa_sessoes WHERE posto_id = ? AND estado = 'ABERTA' ORDER BY id DESC LIMIT 1")
             .bind(posto.id)
             .fetch_optional(&mut *tx)
@@ -1087,12 +1089,13 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     .execute(&mut *tx)
     .await?
     .last_insert_rowid();
-    sqlx::query("UPDATE documentos SET origem = ?, doc_manual = ?, credito_disponivel = ?, vendedor_id = ?, endereco_entrega = ? WHERE id = ?")
+    sqlx::query("UPDATE documentos SET origem = ?, doc_manual = ?, credito_disponivel = ?, vendedor_id = ?, endereco_entrega = ?, api_chave_id = ? WHERE id = ?")
         .bind(if manual.is_some() { "M" } else { "P" })
         .bind(manual.as_ref().map(|m| m.0.clone()))
         .bind(if adiantamento { total } else { 0 })
         .bind(vendedor_id)
         .bind(txt(&i.endereco_entrega))
+        .bind(api_chave)
         .bind(doc_id)
         .execute(&mut *tx)
         .await?;

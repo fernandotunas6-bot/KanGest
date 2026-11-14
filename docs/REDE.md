@@ -38,3 +38,5 @@ continua a ser serializada num só lugar — o servidor.
   reabra o KanGest no servidor.
 - Uma sessão de posto é esquecida depois de 12 horas sem pedidos.
 - A base de dados **não** deve ser partilhada por uma pasta de rede: é para isso que existe este modo.
+- Para ligar **outros sistemas** (loja online, contabilidade, BI) não se usa a chave de rede: a API de integração tem
+  porta própria (7800) e chaves de acesso por sistema, com permissões — ver [API.md](API.md).

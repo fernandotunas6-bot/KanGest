@@ -6,7 +6,7 @@ mod contas;
 mod documentos;
 mod entidades;
 pub mod fe;
-mod impressao;
+pub(crate) mod impressao;
 pub mod importar;
 pub mod licenca;
 mod oficina;
@@ -15,7 +15,7 @@ mod posto;
 mod rh;
 mod tesouraria;
 mod relatorios;
-mod saft;
+pub(crate) mod saft;
 mod series;
 mod setup;
 pub mod sistema;
@@ -132,6 +132,15 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "posto.obter" => posto::obter(st).await,
         "posto.guardar" => posto::guardar(st, p(params)?).await,
         "posto.selecionar" => posto::selecionar(st, p(params)?).await,
+
+        // ---- API de integração (chaves de acesso para outros sistemas) ----
+        "api.estado" => crate::api::estado(st).await,
+        "api.guardar" => crate::api::guardar(st, p(params)?).await,
+        "api.chaveCriar" => crate::api::chave_criar(st, p(params)?).await,
+        "api.chaveGuardar" => crate::api::chave_guardar(st, p(params)?).await,
+        "api.chaveRenovar" => crate::api::chave_renovar(st, p(params)?).await,
+        "api.chaveRevogar" => crate::api::chave_revogar(st, p(params)?).await,
+        "api.pedidos" => crate::api::pedidos(st, p(params)?).await,
 
         // ---- postos em rede (servidor / cliente) ----
         "rede.estado" => crate::rede::estado(st).await,
