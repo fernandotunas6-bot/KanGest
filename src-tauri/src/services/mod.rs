@@ -8,6 +8,7 @@ mod entidades;
 pub mod fe;
 mod impressao;
 pub mod importar;
+mod integridade;
 pub mod licenca;
 mod oficina;
 mod parametros;
@@ -82,6 +83,7 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "agt.info" => setup::agt_info(st).await,
         "agt.guardarCertificado" => setup::agt_guardar(st, p(params)?).await,
         "agt.importarChave" => setup::agt_importar_chave(st, p(params)?).await,
+        "agt.verificarIntegridade" => integridade::verificar(st).await,
 
         // ---- importação do KIGEST (SQL Server) ----
         "importar.analisar" => importar::analisar(st, p(params)?).await,

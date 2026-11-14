@@ -2635,3 +2635,61 @@ async fn notas_de_credito_limitadas_a_origem() {
     assert_eq!(v["documento"]["total"], 273600, "4 × 600,00 + IVA, ao custo da factura do fornecedor");
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+#[tokio::test]
+async fn integridade_da_cadeia_e_proteccao() {
+    let (st, pasta) = base_com_admin("integridade").await;
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 100000, "custo": 50000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": art, "quantidade": 20, "preco_unitario": 50000 }] })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let mut ids = Vec::new();
+    for q in [1, 2, 3] {
+        let d = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": art, "quantidade": q }], "pagamentos": [{ "modo": "NU", "valor": 114000 * q }] })).await;
+        ids.push(d["documento"]["id"].as_i64().unwrap());
+    }
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert!(v["verificados"].as_i64().unwrap() >= 3);
+    assert_eq!(v["protecao"]["ativa"], true);
+
+    // os dados fiscais de um documento assinado não se alteram nem se apagam
+    let e = sqlx::query("UPDATE documentos SET total = 1 WHERE id = ?").bind(ids[0]).execute(&st.pool).await.unwrap_err().to_string();
+    assert!(e.contains("Documento assinado"), "{e}");
+    assert!(sqlx::query("DELETE FROM documentos WHERE id = ?").bind(ids[2]).execute(&st.pool).await.is_err());
+    assert!(sqlx::query("UPDATE documento_linhas SET quantidade = 9 WHERE documento_id = ?").bind(ids[1]).execute(&st.pool).await.is_err());
+    assert!(sqlx::query("DELETE FROM documento_pagamentos WHERE documento_id = ?").bind(ids[1]).execute(&st.pool).await.is_err());
+    assert!(sqlx::query("UPDATE series SET ultimo_numero = 1 WHERE tipo_codigo = 'FR'").execute(&st.pool).await.is_err());
+    assert!(sqlx::query("DELETE FROM series WHERE tipo_codigo = 'FR'").execute(&st.pool).await.is_err());
+    // o que a aplicação muda depois de emitir continua a funcionar (anulação, conta corrente)
+    rpc(&st, "documentos.anular", json!({ "id": ids[2], "motivo": "Venda registada por engano" })).await;
+    assert!(sqlx::query("UPDATE documentos SET estado = 'N' WHERE id = ?").bind(ids[2]).execute(&st.pool).await.is_err(), "anulado não volta a valer");
+    assert_eq!(rpc(&st, "agt.verificarIntegridade", Value::Null).await["ok"], true, "anular não quebra a cadeia");
+
+    // quem desligar a protecção e mexer no total é apanhado pela verificação
+    sqlx::query("DROP TRIGGER trg_doc_assinado_upd").execute(&st.pool).await.unwrap();
+    sqlx::query("UPDATE documentos SET total = 1000 WHERE id = ?").bind(ids[1]).execute(&st.pool).await.unwrap();
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["protecao"]["em_falta"][0], "trg_doc_assinado_upd");
+    let fr = v["series"].as_array().unwrap().iter().find(|s| s["tipo"] == "FR").unwrap().clone();
+    let problemas: Vec<String> = fr["erros"].as_array().unwrap().iter().map(|e| format!("{}: {}", e["documento"], e["problema"])).collect();
+    assert!(problemas.iter().any(|p| p.contains("/2") && p.contains("assinatura não confere")), "{problemas:?}");
+    assert!(problemas.iter().any(|p| p.contains("/2") && p.contains("totais")), "{problemas:?}");
+
+    // trocar de chave não estraga a verificação dos documentos antigos
+    let (st2, pasta2) = base_com_admin("integridade-chave").await;
+    let a2 = rpc(&st2, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st2, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    rpc(&st2, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a2, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    let nova = {
+        use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+        rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 1024).unwrap().to_pkcs8_pem(LineEnding::LF).unwrap().to_string()
+    };
+    rpc(&st2, "agt.importarChave", json!({ "pem": nova })).await;
+    rpc(&st2, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a2, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    let v2 = rpc(&st2, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v2["ok"], true, "{v2}");
+    assert_eq!(v2["chaves"], 2);
+    let _ = std::fs::remove_dir_all(&pasta);
+    let _ = std::fs::remove_dir_all(&pasta2);
+}

@@ -9,7 +9,7 @@ import { PrintPortal } from "@/components/DocumentoPrint";
 import { imprimir } from "@/lib/print";
 import { call } from "@/lib/api";
 import { useTabelas } from "@/lib/hooks";
-import { parseKz, toInputKz } from "@/lib/format";
+import { dataHora, parseKz, toInputKz } from "@/lib/format";
 import type { Empresa, EscPos, Posto, PostoOpcoes, VisorOpcoes } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
@@ -881,7 +881,78 @@ function Agt() {
           {data?.chave_publica ?? "…"}
         </pre>
       </Card>
+      <Integridade />
     </div>
+  );
+}
+
+interface ResultadoIntegridade {
+  ok: boolean;
+  resumo: string;
+  verificados: number;
+  chaves: number;
+  data: string;
+  protecao: { ativa: boolean; em_falta: string[] };
+  series: { tipo: string; serie: string; documentos: number; primeiro: string | null; ultimo: string | null; total_erros: number; erros: { documento: string; problema: string }[] }[];
+}
+
+/** Refaz a cadeia de assinaturas de todas as séries, como faria um auditor da AGT. */
+function Integridade() {
+  const [r, setR] = useState<ResultadoIntegridade | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function verificar() {
+    setBusy(true);
+    try {
+      setR(await call<ResultadoIntegridade>("agt.verificarIntegridade"));
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const comErro = r?.series.filter((s) => s.total_erros > 0) ?? [];
+  return (
+    <Card className="p-6">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="font-semibold">Integridade da cadeia de assinaturas</span>
+        <Button variant="secondary" loading={busy} onClick={verificar}>
+          Verificar agora
+        </Button>
+      </div>
+      <p className="mb-3 text-ink-2">
+        Refaz a assinatura de cada documento, série a série, e confirma a numeração sem saltos, os caracteres de controlo e os totais. Os documentos assinados estão
+        protegidos na base de dados: não se alteram nem se apagam (corrigem-se com nota de crédito ou anulação com motivo).
+      </p>
+      {r && (
+        <div className="grid gap-3">
+          <div className={cn("rounded-xl px-4 py-3 font-medium", r.ok ? "bg-ok-50 text-ok" : "bg-danger-50 text-danger")}>
+            {r.resumo} <span className="font-normal text-ink-3">({dataHora(r.data)}, {r.chaves} chave(s) pública(s))</span>
+          </div>
+          {!r.protecao.ativa && (
+            <div className="rounded-xl bg-danger-50 px-4 py-3 text-danger">
+              A protecção dos documentos assinados foi removida da base de dados ({r.protecao.em_falta.join(", ")}). Contacte o suporte: a base pode ter sido mexida fora do KanGest.
+            </div>
+          )}
+          {comErro.map((s) => (
+            <div key={s.tipo + s.serie} className="rounded-xl border border-line p-3">
+              <div className="mb-2 font-medium">
+                {s.tipo} {s.serie}: {s.total_erros} problema(s) em {s.documentos} documento(s)
+              </div>
+              <ul className="grid gap-1 text-[13px]">
+                {s.erros.map((e, i) => (
+                  <li key={i}>
+                    <Badge tone="danger" className="mr-2">{e.documento}</Badge>
+                    {e.problema}
+                  </li>
+                ))}
+                {s.total_erros > s.erros.length && <li className="text-ink-3">… e mais {s.total_erros - s.erros.length}.</li>}
+              </ul>
+            </div>
+          ))}
+          {r.ok && <div className="text-[13px] text-ink-3">{r.series.map((s) => `${s.tipo} ${s.serie}: ${s.documentos}`).join(" · ")}</div>}
+        </div>
+      )}
+    </Card>
   );
 }
 

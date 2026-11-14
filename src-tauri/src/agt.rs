@@ -9,12 +9,12 @@
 //! serve para desenvolvimento até haver certificado.
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use rsa::pkcs1v15::SigningKey;
-use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey, LineEnding};
-use rsa::signature::{SignatureEncoding, Signer};
-use rsa::RsaPrivateKey;
+use rsa::pkcs1v15::{Signature, SigningKey, VerifyingKey};
+use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey, LineEnding};
+use rsa::signature::{SignatureEncoding, Signer, Verifier};
+use rsa::{RsaPrivateKey, RsaPublicKey};
 use sha1::Sha1;
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::error::{AppError, AppResult};
 
@@ -50,6 +50,44 @@ pub fn chave_publica_pem(chave: &RsaPrivateKey) -> AppResult<String> {
         .to_public_key()
         .to_public_key_pem(LineEnding::LF)
         .map_err(|e| AppError::msg(e.to_string()))
+}
+
+/// Chaves públicas com que se verificam os documentos: a da chave actual e as usadas antes
+/// (tabela `agt_chaves`). Não gera chave nenhuma.
+pub async fn chaves_publicas(pool: &SqlitePool) -> AppResult<Vec<RsaPublicKey>> {
+    let mut v: Vec<RsaPublicKey> = Vec::new();
+    let pem: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(CHAVE_CONFIG).fetch_optional(pool).await?;
+    if let Some(k) = pem.and_then(|p| RsaPrivateKey::from_pkcs8_pem(&p).ok()) {
+        v.push(k.to_public_key());
+    }
+    let antigas: Vec<String> = sqlx::query_scalar("SELECT chave_publica FROM agt_chaves ORDER BY id DESC").fetch_all(pool).await?;
+    for k in antigas.iter().filter_map(|p| RsaPublicKey::from_public_key_pem(p).ok()) {
+        if !v.contains(&k) {
+            v.push(k);
+        }
+    }
+    Ok(v)
+}
+
+/// A assinatura (`hash`, Base64) da mensagem confere com alguma das chaves?
+pub fn confere(chaves: &[RsaPublicKey], msg: &str, hash: &str) -> bool {
+    let Ok(bytes) = B64.decode(hash.trim()) else { return false };
+    let Ok(sig) = Signature::try_from(bytes.as_slice()) else { return false };
+    chaves.iter().any(|k| VerifyingKey::<Sha1>::new(k.clone()).verify(msg.as_bytes(), &sig).is_ok())
+}
+
+/// Guarda a chave pública da chave em uso antes de a substituir: os documentos que ela assinou
+/// continuam verificáveis na verificação de integridade.
+pub async fn arquivar_chave(tx: &mut Transaction<'_, Sqlite>, origem: &str) -> AppResult<()> {
+    let pem: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(CHAVE_CONFIG).fetch_optional(&mut **tx).await?;
+    if let Some(k) = pem.and_then(|p| RsaPrivateKey::from_pkcs8_pem(&p).ok()) {
+        sqlx::query("INSERT OR IGNORE INTO agt_chaves (chave_publica, origem) VALUES (?, ?)")
+            .bind(chave_publica_pem(&k)?)
+            .bind(origem)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
 }
 
 /// Total com 2 casas decimais e ponto (ex.: 81.23), a partir de cêntimos.

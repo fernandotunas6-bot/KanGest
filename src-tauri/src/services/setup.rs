@@ -162,6 +162,8 @@ pub async fn agt_importar_chave(st: &AppState, c: ChaveIn) -> AppResult<Value> {
     let pkcs8 = chave.to_pkcs8_pem(LineEnding::LF).map_err(|e| AppError::msg(e.to_string()))?.to_string();
     let agora = crate::db::agora();
     let mut tx = st.pool.begin().await?;
+    // a chave anterior fica arquivada (só a pública): os documentos que assinou continuam verificáveis
+    agt::arquivar_chave(&mut tx, "ANTERIOR").await?;
     for (k, v) in [(agt::CHAVE_CONFIG, pkcs8.as_str()), ("agt.chave_importada_em", agora.as_str())] {
         sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor")
             .bind(k)
