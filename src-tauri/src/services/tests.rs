@@ -2888,3 +2888,42 @@ async fn chave_ilegivel_depois_de_restaurar() {
     assert_eq!(v["chaves"], 2);
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+#[tokio::test]
+async fn fecho_de_caixa_cego_por_notas_e_formas_de_pagamento() {
+    let (st, pasta) = base_com_admin("fecho-cego").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    // o posto fecha às cegas; a operadora (perfil Caixa) não tem «ver totais»
+    rpc(&st, "posto.guardar", json!({ "id": 1, "descricao": "Caixa 1", "armazem_id": 1, "opcoes": { "fecho_cego": true } })).await;
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Ana", "login": "ana", "senha": "ana12345", "perfil": "CAIXA", "mudar_senha": false })).await;
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "ana", "senha": "ana12345" })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 500000 })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 200000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 2 }], "pagamentos": [{ "modo": "MB", "valor": 228000 }] })).await;
+    let aberto = rpc(&st, "caixa.estado", Value::Null).await;
+    assert_eq!(aberto["cego"], true);
+    assert!(aberto["numerario_esperado"].is_null() && aberto["total_vendido"].is_null(), "às cegas: {aberto}");
+    assert!(aberto["por_modo"].as_array().unwrap().iter().all(|m| m["total"].is_null()));
+
+    // nota que não existe é recusada; a contagem por notas dá o total
+    assert!(rpc_err(&st, "caixa.fechar", json!({ "contagem": { "3000": 1 } })).await.contains("3000"));
+    // esperado em numerário: 5 000 + 1 140 = 6 140 Kz; contados 6 100 (faltam 40) e o talão do TPA certo
+    let z = rpc(&st, "caixa.fechar", json!({ "contagem": { "5000": 1, "1000": 1, "100": 1 }, "contado_modos": { "MB": 228000 }, "observacoes": "Faltam 40 Kz" })).await;
+    assert_eq!(z["sessao"]["numero_z"], 1);
+    assert_eq!(z["sessao"]["valor_contado"], 610000);
+    assert_eq!(z["sessao"]["contagem"]["5000"], 1);
+    assert_eq!(z["numerario_esperado"], 614000, "depois de fechar, o relatório Z mostra tudo");
+    let conf = |c: &str| z["conferencia"].as_array().unwrap().iter().find(|m| m["codigo"] == c).cloned().unwrap();
+    assert_eq!((conf("NU")["diferenca"].as_i64(), conf("MB")["diferenca"].as_i64()), (Some(-4000), Some(0)));
+    // o fecho seguinte do mesmo posto é o Z n.º 2
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let z2 = rpc(&st, "caixa.fechar", json!({ "valor_contado": 0 })).await;
+    assert_eq!(z2["sessao"]["numero_z"], 2);
+    // quem tem «ver totais» (o gestor/administrador) vê o esperado mesmo às cegas
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 100 })).await;
+    assert_eq!(rpc(&st, "caixa.estado", Value::Null).await["numerario_esperado"], 100);
+    let _ = std::fs::remove_dir_all(&pasta);
+}

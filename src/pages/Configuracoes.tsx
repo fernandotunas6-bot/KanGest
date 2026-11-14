@@ -424,6 +424,9 @@ function Postos() {
               <label className="flex items-center gap-2">
                 <input type="checkbox" checked={!!o.pos_ecra_inteiro} onChange={(e) => setO({ pos_ecra_inteiro: e.target.checked })} /> Abrir o POS em ecrã inteiro (terminais POS)
               </label>
+              <label className="flex items-center gap-2" title="Quem fecha o caixa conta o dinheiro sem ver o valor esperado (excepto quem tem a permissão «ver o valor esperado»)">
+                <input type="checkbox" checked={!!o.fecho_cego} onChange={(e) => setO({ fecho_cego: e.target.checked })} /> Fecho de caixa cego
+              </label>
             </div>
             <div className="space-y-3">
               <div className="text-[12px] font-medium uppercase tracking-wide text-ink-2">Impressão</div>
