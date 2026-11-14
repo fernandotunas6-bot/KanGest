@@ -73,7 +73,7 @@ export default function FeriasFaltas() {
           {!ferias.data?.length ? (
             <Empty icon={<CalendarDays className="size-6" />} title="Sem férias marcadas" text="Marque os períodos de férias do pessoal. São 22 dias úteis por ano, regra geral (confirme a Lei Geral do Trabalho)." />
           ) : (
-            <Table className="max-h-[calc(100vh-280px)]">
+            <Table className="max-h-[calc(100vh-324px)]">
               <thead>
                 <tr>
                   <Th>Funcionário</Th>

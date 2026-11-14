@@ -221,7 +221,7 @@ function Alteracoes({ ano, mes }: { ano: number; mes: number }) {
         {!lista.data?.length ? (
           <Empty icon={<Plus className="size-6" />} title={`Sem alterações em ${periodo(ano, mes)}`} text="O salário base e os subsídios fixos da ficha entram automaticamente; aqui lançam-se só as variações do mês." />
         ) : (
-          <Table className="tabela-compacta max-h-[calc(100vh-380px)]">
+          <Table className="tabela-compacta max-h-[calc(100vh-424px)]">
             <thead>
               <tr>
                 <Th>Funcionário</Th>
@@ -376,7 +376,7 @@ function Simulacao({ ano, mes, onProcessado }: { ano: number; mes: number; onPro
     <>
       {tabs && !tabs.parametros.tabela_confirmada && (
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-accent/40 bg-accent-50 px-4 py-3 text-[13px]">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[#9a6514]" />
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-accent-ink" />
           <div>
             A tabela de IRT (Grupo A, Lei n.º 14/25) e as taxas de INSS (3% + 8%) vêm pré-carregadas e ainda não foram confirmadas.{" "}
             <Link to="/rh/configuracao" className="font-medium text-brand underline">
@@ -403,7 +403,7 @@ function Simulacao({ ano, mes, onProcessado }: { ano: number; mes: number; onPro
         {!linhas.length ? (
           <Empty icon={<Banknote className="size-6" />} title="Sem funcionários activos" text="Crie as fichas dos funcionários com o salário base e os subsídios fixos." />
         ) : (
-          <Table className="tabela-compacta max-h-[calc(100vh-330px)]">
+          <Table className="tabela-compacta max-h-[calc(100vh-374px)]">
             <thead>
               <tr>
                 <Th className="w-8" />

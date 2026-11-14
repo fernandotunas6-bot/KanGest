@@ -90,7 +90,7 @@ export default function Contas() {
       <Card className={cn("transition-opacity", isFetching && "opacity-60")}>
         {vista === "entidades" ? (
           r?.entidades.length ? (
-            <Table className="max-h-[calc(100vh-380px)]">
+            <Table className="max-h-[calc(100vh-424px)]">
               <thead>
                 <tr>
                   <Th>Entidade</Th>
@@ -122,7 +122,7 @@ export default function Contas() {
             <Empty icon={<HandCoins className="size-6" />} title="Nada em dívida" text={pagar ? "Não há facturas de fornecedores por pagar." : "Não há facturas de clientes por receber."} />
           )
         ) : (
-          <Table className="max-h-[calc(100vh-380px)]">
+          <Table className="max-h-[calc(100vh-424px)]">
             <thead>
               <tr>
                 <Th>Documento</Th>

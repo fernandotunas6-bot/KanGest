@@ -278,7 +278,7 @@ export default function RelatoriosStock() {
             <Td className="font-mono text-[12.5px]">{l.referencia}</Td>
             <Td className="font-medium">{l.descricao}</Td>
             <Td className="text-ink-2">{l.familia ?? "—"}</Td>
-            <Td className={cn("num text-right", l.quantidade <= 0 ? "text-danger" : l.quantidade <= (l.qtd_minima ?? 0) && "text-[#9a6514]")}>
+            <Td className={cn("num text-right", l.quantidade <= 0 ? "text-danger" : l.quantidade <= (l.qtd_minima ?? 0) && "text-accent-ink")}>
               {qtd(l.quantidade)} {l.unidade ?? ""}
             </Td>
             <Td className="num text-right text-ink-2">{kz(l.custo_medio)}</Td>
@@ -359,7 +359,7 @@ export default function RelatoriosStock() {
       </div>
       <Card className={cn("transition-opacity", isFetching && "opacity-60")}>
         {linhas.length ? (
-          <Table className="max-h-[calc(100vh-250px)]">{tabela}</Table>
+          <Table className="max-h-[calc(100vh-294px)]">{tabela}</Table>
         ) : (
           <Empty icon={<actual.icon className="size-5" />} title="Nada a assinalar" text={actual.texto} />
         )}

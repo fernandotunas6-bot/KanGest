@@ -156,6 +156,11 @@ async fn fluxo_completo() {
     .await;
     assert_eq!(rc["documento"]["total"], 114000);
     assert_eq!(rpc(&st, "documentos.obter", json!({ "id": ft_id })).await["documento"]["valor_pendente"], 0);
+    // a ficha da FT mostra o recibo que a liquidou (documentos ligados)
+    let ligados = rpc(&st, "documentos.obter", json!({ "id": ft_id })).await;
+    assert_eq!(ligados["recibos"].as_array().unwrap().len(), 1);
+    assert_eq!(ligados["recibos"][0]["id"], rc["documento"]["id"]);
+    assert_eq!(ligados["recibos"][0]["valor"], 114000);
 
     // FT com recibo não pode ser anulada; anula-se o recibo primeiro
     assert!(rpc_err(&st, "documentos.anular", json!({ "id": ft_id, "motivo": "erro de digitação" })).await.contains("recibos"));
@@ -182,7 +187,11 @@ async fn fluxo_completo() {
     assert_eq!(stock(&st, artigo).await, 7.0); // proforma não mexe em stock
     let pp_id = pp["documento"]["id"].as_i64().unwrap();
     rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "doc_origem_id": pp_id, "linhas": [{ "artigo_id": artigo, "quantidade": 3 }] })).await;
-    assert_eq!(rpc(&st, "documentos.obter", json!({ "id": pp_id })).await["documento"]["estado"], "F");
+    let pp_ligados = rpc(&st, "documentos.obter", json!({ "id": pp_id })).await;
+    assert_eq!(pp_ligados["documento"]["estado"], "F");
+    assert_eq!(pp_ligados["derivados"][0]["tipo_codigo"], "FT", "a proforma mostra a factura emitida a partir dela");
+    let fr1_ligados = rpc(&st, "documentos.obter", json!({ "id": fr1_id })).await;
+    assert_eq!(fr1_ligados["derivados"][0]["tipo_codigo"], "NC", "a FR mostra a nota de crédito");
     assert_eq!(stock(&st, artigo).await, 4.0);
 
     // ---- transferência entre armazéns ----
@@ -215,6 +224,12 @@ async fn fluxo_completo() {
     let dash = rpc(&st, "dashboard", Value::Null).await;
     // FR1 228000 + FR2 114000 + FR3 114000 + FT(proforma) 342000 − NC 114000 (FT anulada não conta)
     assert_eq!(dash["vendas_hoje"], 228000 + 114000 + 114000 + 342000 - 114000);
+    assert_eq!(dash["vendas_mes_anterior"], 0);
+    let ant = &dash["antiguidade"];
+    let soma_faixas: i64 = ["por_vencer", "d1_30", "d31_60", "d61_90", "mais_90"].iter().map(|k| ant[*k].as_i64().unwrap()).sum();
+    assert_eq!(soma_faixas, dash["a_receber"].as_i64().unwrap(), "as faixas de antiguidade somam o «A receber»");
+    assert!(dash["alertas"]["proformas_a_expirar"].is_i64() && dash["alertas"]["fe_rejeitadas"].is_i64());
+    assert!(!dash["por_modo"].as_array().unwrap().is_empty(), "recebimentos do mês por meio de pagamento");
     for g in ["dia", "artigo", "familia", "operador", "cliente", "pagamento", "iva"] {
         let r = rpc(&st, "relatorios.vendas", json!({ "de": "2000-01-01", "ate": "2100-01-01", "agrupar": g })).await;
         assert!(r.as_array().map(|x| !x.is_empty()).unwrap_or(false), "relatório {g} vazio");

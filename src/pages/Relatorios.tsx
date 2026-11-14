@@ -32,6 +32,16 @@ const VISTAS = [
   { id: "irt_c", label: "IRT Grupo C (por mês)" },
 ] as const;
 
+type Vista = (typeof VISTAS)[number]["id"];
+
+/** Os 17 mapas arrumados por assunto (como os grupos de mapas do Primavera e o menu de relatórios do Odoo). */
+const CATEGORIAS: { id: string; label: string; vistas: Vista[] }[] = [
+  { id: "vendas", label: "Vendas", vistas: ["sintese", "dia", "mes", "artigo", "familia", "cliente"] },
+  { id: "equipa", label: "Operadores e postos", vistas: ["operador", "vendedor", "posto", "artigo_operador"] },
+  { id: "documentos", label: "Pagamentos e documentos", vistas: ["pagamento", "artigo_entidade", "documento"] },
+  { id: "impostos", label: "Impostos", vistas: ["iva", "iva_dia", "iva_familia", "irt_c"] },
+];
+
 type Linha = { chave: string; docs?: number; quantidade?: number; liquido?: number; iva?: number; total: number; lucro?: number; irt?: number };
 
 const MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -131,7 +141,8 @@ function TabelaSintese({ s }: { s: Sintese }) {
 
 export default function Relatorios() {
   const [sp] = useSearchParams();
-  const [vista, setVista] = useState<(typeof VISTAS)[number]["id"]>("dia");
+  const [vista, setVista] = useState<Vista>("dia");
+  const categoria = CATEGORIAS.find((c) => c.vistas.includes(vista)) ?? CATEGORIAS[0];
   // ?agrupar=<vista>: os itens de relatório do menu (Total por Dia, Mapa de Imposto…) abrem a vista certa
   useEffect(() => {
     const v = VISTAS.find((x) => x.id === sp.get("agrupar"));
@@ -139,6 +150,11 @@ export default function Relatorios() {
   }, [sp]);
   const [de, setDe] = useState(inicioMesISO());
   const [ate, setAte] = useState(hojeISO());
+  function escolher(v: Vista) {
+    setVista(v);
+    // «Por mês» com um período de um só mês mostraria uma linha: passa a ser o ano até hoje
+    if (v === "mes" && de.slice(0, 7) === ate.slice(0, 7)) setDe(`${ate.slice(0, 4)}-01-01`);
+  }
   const sessao = useSession((s) => s.sessao);
   const saftParam = sp.get("saft");
   const [entidade, setEntidade] = useState<Entidade | null>(null);
@@ -266,6 +282,28 @@ export default function Relatorios() {
           </>
         }
       />
+      <div className="mb-3 flex gap-1 overflow-x-auto border-b border-line">
+        {CATEGORIAS.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => escolher(c.vistas.includes(vista) ? vista : c.vistas[c.id === "vendas" ? 1 : 0])}
+            className={cn("-mb-px whitespace-nowrap border-b-2 px-4 py-2.5", categoria.id === c.id ? "border-brand font-medium text-ink" : "border-transparent text-ink-2 hover:text-ink")}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+      <div className="mb-4 inline-flex flex-wrap gap-1 rounded-lg bg-sunken p-1">
+        {categoria.vistas.map((id) => (
+          <button
+            key={id}
+            onClick={() => escolher(id)}
+            className={cn("rounded-md px-3 py-1.5 text-[13px]", vista === id ? "bg-surface font-medium shadow-sm" : "text-ink-2 hover:text-ink")}
+          >
+            {VISTAS.find((v) => v.id === id)!.label}
+          </button>
+        ))}
+      </div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         {sintese ? (
           <>
@@ -294,21 +332,6 @@ export default function Relatorios() {
             )}
           </>
         )}
-        <div className="ml-2 flex flex-wrap gap-1 rounded-lg bg-sunken p-1">
-          {VISTAS.map((v) => (
-            <button
-              key={v.id}
-              onClick={() => {
-                setVista(v.id);
-                // «Por mês» com um período de um só mês mostraria uma linha: passa a ser o ano até hoje
-                if (v.id === "mes" && de.slice(0, 7) === ate.slice(0, 7)) setDe(`${ate.slice(0, 4)}-01-01`);
-              }}
-              className={cn("rounded-md px-3 py-1.5 text-[13px]", vista === v.id ? "bg-surface font-medium shadow-sm" : "text-ink-2 hover:text-ink")}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
       </div>
       {vista === "irt_c" && <TaxaGrupoC />}
       {sintese ? (
@@ -326,7 +349,7 @@ export default function Relatorios() {
         </Card>
       ) : (
         <Card className={cn("transition-opacity", isFetching && "opacity-60")}>
-          <Table className="max-h-[calc(100vh-250px)]">{corpo}</Table>
+          <Table className="max-h-[calc(100vh-294px)]">{corpo}</Table>
           {!linhas.length && <p className="py-12 text-center text-ink-3">Sem dados no período.</p>}
         </Card>
       )}

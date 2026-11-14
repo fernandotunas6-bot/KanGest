@@ -167,7 +167,7 @@ export default function Licenca() {
 
       <Card className="p-6">
         <div className="flex flex-wrap items-start gap-4">
-          <div className={cn("grid size-12 shrink-0 place-items-center rounded-xl", e.pode_emitir ? (e.aviso ? "bg-accent-50 text-[#9a6514]" : "bg-brand-50 text-brand") : "bg-danger-50 text-danger")}>
+          <div className={cn("grid size-12 shrink-0 place-items-center rounded-xl", e.pode_emitir ? (e.aviso ? "bg-accent-50 text-accent-ink" : "bg-brand-50 text-brand") : "bg-danger-50 text-danger")}>
             <Icone className="size-6" />
           </div>
           <div className="min-w-0 flex-1">

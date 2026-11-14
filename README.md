@@ -76,6 +76,16 @@ npm run typecheck
 
 Operações sem permissão (preço, desconto acima do limite, apagar linha…) pedem o **PIN de um supervisor**.
 A matriz de cobertura face ao KIGEST original está em [docs/COBERTURA.md](docs/COBERTURA.md).
+A comparação com o Primavera, o Odoo e outros sistemas (interface, lacunas e roteiro) está em
+[docs/ANALISE-ERP-REFERENCIA.md](docs/ANALISE-ERP-REFERENCIA.md).
+
+## Atalhos da gestão
+
+| Tecla | Acção |
+|---|---|
+| Ctrl+K (⌘K no Mac) | Pesquisar ou ir para: ecrãs, documentos, clientes, NIF e artigos |
+| ↑ / ↓ e Enter | Escolher e abrir um resultado da pesquisa |
+| Esc | Fechar a pesquisa, menus e janelas |
 
 ## Estrutura
 

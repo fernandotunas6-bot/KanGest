@@ -82,7 +82,7 @@ export default function Series() {
             Sem série por defeito, cada posto usa a série automática do ano (ex.: {new Date().getFullYear()}). As séries manuais servem para recuperar documentos emitidos à mão.
           </p>
         </div>
-        <Table className="max-h-[calc(100vh-270px)]">
+        <Table className="max-h-[calc(100vh-314px)]">
           <thead>
             <tr>
               <Th>Documento</Th>

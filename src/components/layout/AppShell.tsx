@@ -1,26 +1,60 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { ChevronDown, KeyRound, LayoutDashboard, Lock, LogOut, ShoppingCart } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  KeyRound,
+  Keyboard,
+  LayoutDashboard,
+  Lock,
+  LogOut,
+  Monitor,
+  Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Search,
+  ShoppingCart,
+  Star,
+  Sun,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { call } from "@/lib/api";
-import { MENU, type ItemMenu } from "@/lib/menu";
+import { MENU, type GrupoMenu, type ItemMenu } from "@/lib/menu";
+import { destinoActual, destinoPorEndereco, useNavegacao, type Destino } from "@/lib/navegacao";
+import { useAparencia, type Densidade, type Tema } from "@/lib/aparencia";
 import { useSession } from "@/store/session";
-import { Button, Field, Input, Modal, cn } from "@/components/ui";
+import { Button, Field, Input, MenuItem, Modal, Popover, Segmentado, cn } from "@/components/ui";
 import { Logo } from "@/components/Logo";
 import { bloquearSessao } from "@/components/Sessao";
 import { AvisoLicenca } from "@/components/AvisoLicenca";
+import { PaletaComandos } from "@/components/Comandos";
+import DocumentoModal from "@/components/DocumentoModal";
 import type { Sessao } from "@/lib/types";
 
-const CHAVE_ABERTOS = "kigest.menu.abertos";
+const CHAVE_ABERTO = "kangest.menu.aberto";
+const CHAVE_RECOLHIDO = "kangest.menu.recolhido";
 
-function lerAbertos(): string[] {
+function lerLocal(chave: string, omissao: string): string {
   try {
-    return JSON.parse(localStorage.getItem(CHAVE_ABERTOS) ?? '["vendas"]');
+    return localStorage.getItem(chave) ?? omissao;
   } catch {
-    return ["vendas"];
+    return omissao;
   }
 }
+function gravarLocal(chave: string, valor: string) {
+  try {
+    localStorage.setItem(chave, valor);
+  } catch {
+    /* armazenamento indisponível */
+  }
+}
+
+/** Documentos que se criam a partir do botão «Novo» da barra superior (os mais usados, como no Odoo e no Primavera). */
+const NOVOS = ["/documentos/novo/FT", "/documentos/novo/FR", "/documentos/novo/PP", "/documentos/novo/OR", "/recibos/novo", "/documentos/novo/FC", "/pagamentos/novo", "/documentos/novo/ES"];
+
+const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
 export default function AppShell() {
   const { sessao, setSessao, pode, tem } = useSession();
@@ -28,29 +62,41 @@ export default function AppShell() {
   const loc = useLocation();
   const qc = useQueryClient();
   const [senha, setSenha] = useState(false);
-  const [abertos, setAbertos] = useState<string[]>(lerAbertos);
+  const [paleta, setPaleta] = useState(false);
+  const [docAberto, setDocAberto] = useState<number | null>(null);
+  const [aberto, setAberto] = useState<string | null>(() => lerLocal(CHAVE_ABERTO, "vendas") || null);
+  const [recolhido, setRecolhido] = useState(() => lerLocal(CHAVE_RECOLHIDO, "0") === "1");
+  const { favoritos, iniciar, alternarFavorito, registarVisita } = useNavegacao();
 
-  const visivel = (i: ItemMenu) => (!i.perm || tem(i.perm)) && (!i.minPerfil || pode(i.minPerfil));
-  const atual = loc.pathname + loc.search;
-  // um item com parâmetros (ex.: Lista de Preços = /relatorios/stock?situacao=precos) que corresponde
-  // exactamente ao endereço tem prioridade sobre o item simples do mesmo ecrã
-  const exacto = MENU.some((g) => g.itens.some((i) => i.to?.includes("?") && i.to === atual));
-  const ativo = (to?: string) => !!to && (to.includes("?") ? atual === to : loc.pathname === to && !exacto);
+  const visivelItem = (i: ItemMenu) => (!i.perm || tem(i.perm)) && (!i.minPerfil || pode(i.minPerfil));
+  const visivel = (d: Destino) => (d.to === "/" ? pode("GESTOR") : !d.item || visivelItem(d.item));
+  const destino = destinoActual(loc.pathname, loc.search);
+  const ativo = (to?: string) => !!to && destino?.to === to;
 
-  // abre automaticamente o grupo da página actual
+  useEffect(() => iniciar(sessao?.login ?? null), [sessao?.login, iniciar]);
+
+  // abre o grupo da página actual e guarda a visita (para «Abertos recentemente» na pesquisa)
   useEffect(() => {
-    const g = MENU.find((g) => g.itens.some((i) => ativo(i.to)));
-    if (g && !abertos.includes(g.id)) setAbertos((a) => [...a, g.id]);
+    if (destino?.grupo) setAberto(destino.grupo.id);
+    if (destino && destinoPorEndereco(destino.to)) registarVisita(destino.to);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [atual]);
+  }, [destino?.to]);
 
+  useEffect(() => gravarLocal(CHAVE_ABERTO, aberto ?? ""), [aberto]);
+  useEffect(() => gravarLocal(CHAVE_RECOLHIDO, recolhido ? "1" : "0"), [recolhido]);
+
+  // Ctrl+K (⌘K no Mac) em qualquer ecrã: pesquisa global
   useEffect(() => {
-    try {
-      localStorage.setItem(CHAVE_ABERTOS, JSON.stringify(abertos));
-    } catch {
-      /* armazenamento indisponível */
-    }
-  }, [abertos]);
+    const h = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        if (useSession.getState().sessao?.bloqueada) return;
+        e.preventDefault();
+        setPaleta((p) => !p);
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
 
   async function sair() {
     await call("auth.logout");
@@ -58,113 +104,419 @@ export default function AppShell() {
     setSessao(null);
   }
 
+  const grupos = MENU.map((g) => ({ ...g, itens: g.itens.filter((i) => i.to && !i.emBreve && visivelItem(i)) })).filter((g) => g.itens.length);
+  const favs = favoritos.map(destinoPorEndereco).filter((d): d is Destino => !!d && visivel(d));
+
   return (
     <div className="flex h-full">
-      <aside className="flex w-[248px] shrink-0 flex-col bg-brand-700 text-white/85">
-        <div className="flex items-center gap-2.5 px-5 pb-5 pt-5">
-          <Logo className="size-9 rounded-[22%] ring-1 ring-white/15" />
-          <div className="leading-tight">
-            <div className="font-semibold text-white">KanGest</div>
-            <div className="text-[11px] text-white/55">Gestão Comercial</div>
+      {recolhido ? (
+        <MenuRecolhido grupos={grupos} favoritos={favs} ativo={ativo} painel={pode("GESTOR")} onExpandir={() => setRecolhido(false)} onPos={() => nav("/pos")} />
+      ) : (
+        <aside className="flex w-[252px] shrink-0 flex-col bg-nav text-white/85">
+          <div className="flex h-14 shrink-0 items-center gap-2.5 pl-4 pr-2">
+            <Logo className="size-8 rounded-[22%] ring-1 ring-white/15" />
+            <div className="min-w-0 flex-1 leading-tight">
+              <div className="font-semibold text-white">KanGest</div>
+              <div className="text-[11px] text-white/55">Gestão Comercial</div>
+            </div>
+            <button onClick={() => setRecolhido(true)} title="Recolher o menu (mais espaço para as tabelas)" className="rounded-md p-1.5 text-white/55 hover:bg-white/10 hover:text-white">
+              <PanelLeftClose className="size-[18px]" />
+            </button>
           </div>
-        </div>
 
-        <div className="px-3">
-          <button
-            onClick={() => nav("/pos")}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 font-semibold text-ink shadow-sm transition hover:brightness-105"
-          >
-            <ShoppingCart className="size-[18px]" /> Abrir POS
-          </button>
-        </div>
-
-        <nav className="mt-4 flex-1 overflow-y-auto px-3 pb-3">
-          {pode("GESTOR") && (
-            <NavLink
-              to="/"
-              end
-              className={({ isActive }) =>
-                cn("mb-2 flex items-center gap-3 rounded-lg px-3 py-2 transition", isActive ? "bg-white/12 font-medium text-white" : "hover:bg-white/6 hover:text-white")
-              }
+          <div className="px-3 pb-1">
+            <button
+              onClick={() => nav("/pos")}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 font-semibold text-on-accent shadow-sm transition hover:brightness-105"
             >
-              <LayoutDashboard className="size-[18px] opacity-90" /> Painel
-            </NavLink>
-          )}
-          {MENU.map((g) => {
-            const itens = g.itens.filter(visivel);
-            if (!itens.length) return null;
-            const aberto = abertos.includes(g.id);
-            const Icon = g.icon;
-            const temAtivo = itens.some((i) => ativo(i.to));
-            return (
-              <div key={g.id} className="mb-0.5">
-                <button
-                  onClick={() => setAbertos((a) => (aberto ? a.filter((x) => x !== g.id) : [...a, g.id]))}
-                  className={cn(
-                    "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-white/6 hover:text-white",
-                    temAtivo && "text-white",
-                  )}
-                >
-                  <Icon className="size-[18px] opacity-90" />
-                  <span className="flex-1 text-[13.5px] font-medium">{g.titulo}</span>
-                  <ChevronDown className={cn("size-4 opacity-60 transition-transform", aberto && "rotate-180")} />
-                </button>
-                {aberto && (
-                  <div className="mb-1 ml-[21px] border-l border-white/12 pl-2">
-                    {itens.map((i) =>
-                      i.emBreve || !i.to ? (
-                        <div key={i.label} className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-white/35" title="Disponível numa próxima versão">
-                          {i.label}
-                          <span className="rounded bg-white/8 px-1.5 text-[10px] uppercase tracking-wide">brevemente</span>
-                        </div>
-                      ) : (
-                        <NavLink
-                          key={i.label}
-                          to={i.to}
-                          className={() =>
-                            cn(
-                              "block rounded-md px-2.5 py-1.5 text-[13px] transition",
-                              ativo(i.to) ? "bg-white/12 font-medium text-white" : "text-white/70 hover:bg-white/6 hover:text-white",
-                            )
-                          }
-                        >
-                          {i.label}
-                        </NavLink>
-                      ),
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </nav>
-
-        <div className="m-3 mt-0 flex items-center gap-2 rounded-xl bg-white/6 p-3">
-          <div className="grid size-8 place-items-center rounded-full bg-white/15 text-[13px] font-semibold text-white">{sessao?.nome.slice(0, 1).toUpperCase()}</div>
-          <div className="min-w-0 flex-1 leading-tight">
-            <div className="truncate text-[13px] font-medium text-white">{sessao?.nome}</div>
-            <div className="truncate text-[11px] text-white/50">{sessao?.perfil_descricao ?? sessao?.perfil}</div>
+              <ShoppingCart className="size-[18px]" /> Abrir POS
+            </button>
           </div>
-          <button onClick={() => setSenha(true)} title="Alterar senha" className="rounded-md p-1.5 text-white/60 hover:bg-white/10 hover:text-white">
-            <KeyRound className="size-4" />
-          </button>
-          <button onClick={bloquearSessao} title="Bloquear a sessão (retoma-se com a senha ou o PIN)" className="rounded-md p-1.5 text-white/60 hover:bg-white/10 hover:text-white">
-            <Lock className="size-4" />
-          </button>
-          <button onClick={sair} title="Terminar sessão" className="rounded-md p-1.5 text-white/60 hover:bg-white/10 hover:text-white">
-            <LogOut className="size-4" />
-          </button>
-        </div>
-      </aside>
 
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1400px] px-8 py-7">
-          {loc.pathname !== "/licenca" && <AvisoLicenca />}
-          <Outlet />
-        </div>
-      </main>
+          <nav className="mt-3 flex-1 overflow-y-auto px-3 pb-4">
+            {pode("GESTOR") && (
+              <NavLink
+                to="/"
+                end
+                className={({ isActive }) =>
+                  cn("mb-1 flex items-center gap-3 rounded-lg px-3 py-2 transition", isActive ? "bg-white/12 font-medium text-white" : "hover:bg-white/6 hover:text-white")
+                }
+              >
+                <LayoutDashboard className="size-[18px] opacity-90" /> Painel
+              </NavLink>
+            )}
+
+            {favs.length > 0 && (
+              <div className="mb-2 mt-3">
+                <div className="flex items-center gap-2 px-3 pb-1 text-[10.5px] font-semibold uppercase tracking-wider text-white/40">
+                  <Star className="size-3" /> Favoritos
+                </div>
+                {favs.map((d) => (
+                  <ItemNav key={d.to} d={d} ativo={ativo(d.to)} favorito onFavorito={() => alternarFavorito(d.to)} />
+                ))}
+              </div>
+            )}
+
+            <div className="mt-3 px-3 pb-1 text-[10.5px] font-semibold uppercase tracking-wider text-white/40">Menu</div>
+            {grupos.map((g) => {
+              const estaAberto = aberto === g.id;
+              const Icon = g.icon;
+              const temAtivo = g.itens.some((i) => ativo(i.to));
+              return (
+                <div key={g.id} className="mb-0.5">
+                  <button
+                    onClick={() => setAberto(estaAberto ? null : g.id)}
+                    aria-expanded={estaAberto}
+                    className={cn("flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-white/6 hover:text-white", (temAtivo || estaAberto) && "text-white")}
+                  >
+                    <Icon className="size-[18px] opacity-90" />
+                    <span className="flex-1 text-[13.5px] font-medium">{g.titulo}</span>
+                    {temAtivo && !estaAberto && <span className="size-1.5 rounded-full bg-accent" />}
+                    <ChevronDown className={cn("size-4 opacity-60 transition-transform", estaAberto && "rotate-180")} />
+                  </button>
+                  {estaAberto && (
+                    <div className="mb-1 ml-[21px] border-l border-white/12 pl-2">
+                      {g.itens.map((i) => (
+                        <ItemNav
+                          key={i.label}
+                          d={{ to: i.to!, label: i.label, grupo: g, item: i }}
+                          ativo={ativo(i.to)}
+                          favorito={favoritos.includes(i.to!)}
+                          onFavorito={() => alternarFavorito(i.to!)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </nav>
+        </aside>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-surface px-4">
+          <nav aria-label="Localização" className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">
+            {destino?.grupo && (
+              <>
+                <span className="truncate text-ink-3">{destino.grupo.titulo}</span>
+                <ChevronRight className="size-3.5 shrink-0 text-ink-3/70" />
+              </>
+            )}
+            <span className="truncate font-medium text-ink">{destino?.label ?? "KanGest"}</span>
+            {destino && destino.to !== "/" && destinoPorEndereco(destino.to) && (
+              <button
+                onClick={() => alternarFavorito(destino.to)}
+                title={favoritos.includes(destino.to) ? "Remover dos favoritos" : "Adicionar aos favoritos (fica no topo do menu)"}
+                className="rounded-md p-1 text-ink-3 hover:bg-sunken hover:text-accent-ink"
+              >
+                <Star className={cn("size-4", favoritos.includes(destino.to) && "fill-accent text-accent")} />
+              </button>
+            )}
+          </nav>
+
+          <button
+            onClick={() => setPaleta(true)}
+            className="flex h-8 w-[300px] items-center gap-2 rounded-lg border border-line bg-bg px-2.5 text-[13px] text-ink-3 transition hover:border-line-strong hover:text-ink-2"
+            title="Pesquisar ecrãs, documentos, clientes e artigos"
+          >
+            <Search className="size-4" />
+            <span className="flex-1 text-left">Pesquisar ou ir para…</span>
+            <kbd>{mac ? "⌘" : "Ctrl"}</kbd>
+            <kbd>K</kbd>
+          </button>
+
+          <MenuNovo visivel={(to) => !!destinoPorEndereco(to) && visivel(destinoPorEndereco(to)!)} />
+          <BotaoTema />
+          <MenuUtilizador sessao={sessao} onSenha={() => setSenha(true)} onSair={sair} />
+        </header>
+
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-[1400px] px-8 py-6">
+            {loc.pathname !== "/licenca" && <AvisoLicenca />}
+            <Outlet />
+          </div>
+        </main>
+      </div>
+
+      <PaletaComandos
+        aberta={paleta}
+        onFechar={() => setPaleta(false)}
+        onAbrirDocumento={setDocAberto}
+        onAlterarSenha={() => setSenha(true)}
+        onSair={sair}
+        visivel={visivel}
+      />
+      <DocumentoModal id={docAberto} onClose={() => setDocAberto(null)} />
       {senha && <AlterarSenha onClose={() => setSenha(false)} />}
     </div>
+  );
+}
+
+/** Uma entrada do menu, com a estrela para a pôr (ou tirar) dos favoritos. */
+function ItemNav({ d, ativo, favorito, onFavorito }: { d: Destino; ativo: boolean; favorito: boolean; onFavorito: () => void }) {
+  return (
+    <div className="group/item relative">
+      <NavLink
+        to={d.to}
+        className={cn(
+          "block rounded-md py-1.5 pl-2.5 pr-8 text-[13px] transition",
+          ativo ? "bg-white/12 font-medium text-white" : "text-white/70 hover:bg-white/6 hover:text-white",
+        )}
+      >
+        {d.label}
+      </NavLink>
+      <button
+        onClick={onFavorito}
+        title={favorito ? "Remover dos favoritos" : "Adicionar aos favoritos"}
+        className={cn(
+          "absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 transition hover:bg-white/10",
+          favorito ? "text-accent opacity-90" : "text-white/50 opacity-0 group-hover/item:opacity-100 focus-visible:opacity-100",
+        )}
+      >
+        <Star className={cn("size-3.5", favorito && "fill-accent")} />
+      </button>
+    </div>
+  );
+}
+
+/** Menu recolhido: só ícones; cada grupo abre ao lado ao passar o rato (ou ao clicar). */
+function MenuRecolhido({
+  grupos,
+  favoritos,
+  ativo,
+  painel,
+  onExpandir,
+  onPos,
+}: {
+  grupos: GrupoMenu[];
+  favoritos: Destino[];
+  ativo: (to?: string) => boolean;
+  painel: boolean;
+  onExpandir: () => void;
+  onPos: () => void;
+}) {
+  const [lado, setLado] = useState<{ id: string; top: number } | null>(null);
+  const fecho = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const abrir = (id: string, el: HTMLElement) => {
+    clearTimeout(fecho.current);
+    setLado({ id, top: el.getBoundingClientRect().top });
+  };
+  const agendarFecho = () => {
+    clearTimeout(fecho.current);
+    fecho.current = setTimeout(() => setLado(null), 180);
+  };
+  useEffect(() => () => clearTimeout(fecho.current), []);
+
+  const conteudo =
+    lado?.id === "favoritos"
+      ? { titulo: "Favoritos", itens: favoritos }
+      : (() => {
+          const g = grupos.find((x) => x.id === lado?.id);
+          return g ? { titulo: g.titulo, itens: g.itens.map((i) => ({ to: i.to!, label: i.label })) } : null;
+        })();
+  const alturaEstimada = conteudo ? 44 + conteudo.itens.length * 33 : 0;
+  const top = lado ? Math.max(8, Math.min(lado.top - 6, window.innerHeight - 8 - alturaEstimada)) : 0;
+
+  const icone = "grid size-10 place-items-center rounded-lg transition";
+  return (
+    <aside className="flex w-[64px] shrink-0 flex-col items-center bg-nav text-white/80">
+      <button onClick={onExpandir} title="Expandir o menu" className="grid h-14 place-items-center">
+        <Logo className="size-8 rounded-[22%] ring-1 ring-white/15" />
+      </button>
+      <button onClick={onPos} title="Abrir POS" className="grid size-10 place-items-center rounded-xl bg-accent text-on-accent shadow-sm hover:brightness-105">
+        <ShoppingCart className="size-[18px]" />
+      </button>
+      <nav className="mt-3 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto pb-3">
+        {painel && (
+          <NavLink to="/" end title="Painel" className={({ isActive }) => cn(icone, isActive ? "bg-white/15 text-white" : "hover:bg-white/8 hover:text-white")}>
+            <LayoutDashboard className="size-[19px]" />
+          </NavLink>
+        )}
+        {favoritos.length > 0 && (
+          <button
+            title="Favoritos"
+            onMouseEnter={(e) => abrir("favoritos", e.currentTarget)}
+            onMouseLeave={agendarFecho}
+            onClick={(e) => abrir("favoritos", e.currentTarget)}
+            className={cn(icone, lado?.id === "favoritos" ? "bg-white/10 text-white" : "hover:bg-white/8 hover:text-white")}
+          >
+            <Star className="size-[19px]" />
+          </button>
+        )}
+        <div className="my-1 h-px w-8 bg-white/10" />
+        {grupos.map((g) => {
+          const Icon = g.icon;
+          const temAtivo = g.itens.some((i) => ativo(i.to));
+          return (
+            <button
+              key={g.id}
+              title={g.titulo}
+              aria-label={g.titulo}
+              onMouseEnter={(e) => abrir(g.id, e.currentTarget)}
+              onMouseLeave={agendarFecho}
+              onClick={(e) => abrir(g.id, e.currentTarget)}
+              className={cn(icone, "relative", temAtivo ? "bg-white/15 text-white" : lado?.id === g.id ? "bg-white/10 text-white" : "hover:bg-white/8 hover:text-white")}
+            >
+              <Icon className="size-[19px]" />
+            </button>
+          );
+        })}
+      </nav>
+      <button onClick={onExpandir} title="Expandir o menu" className="mb-3 grid size-10 place-items-center rounded-lg text-white/55 hover:bg-white/8 hover:text-white">
+        <PanelLeftOpen className="size-[18px]" />
+      </button>
+
+      {lado && conteudo && (
+        <div
+          className="fixed left-[68px] z-40 max-h-[calc(100vh-16px)] w-64 overflow-y-auto rounded-xl border border-line bg-surface p-1.5 text-ink shadow-pop"
+          style={{ top }}
+          onMouseEnter={() => clearTimeout(fecho.current)}
+          onMouseLeave={agendarFecho}
+        >
+          <div className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-3">{conteudo.titulo}</div>
+          {conteudo.itens.map((i) => (
+            <NavLink
+              key={i.to}
+              to={i.to}
+              onClick={() => setLado(null)}
+              className={cn("block rounded-lg px-3 py-1.5 text-[13px] transition", ativo(i.to) ? "bg-brand-50 font-medium text-brand-700" : "hover:bg-sunken")}
+            >
+              {i.label}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </aside>
+  );
+}
+
+/** «Novo»: criar os documentos mais usados sem procurar no menu. */
+function MenuNovo({ visivel }: { visivel: (to: string) => boolean }) {
+  const nav = useNavigate();
+  const itens = NOVOS.filter(visivel).map((to) => destinoPorEndereco(to)!);
+  if (!itens.length) return null;
+  return (
+    <Popover
+      className="w-64"
+      botao={({ alternar }) => (
+        <Button size="sm" onClick={alternar} className="h-8">
+          <Plus className="size-4" /> Novo <ChevronDown className="size-3.5 opacity-80" />
+        </Button>
+      )}
+    >
+      {(fechar) =>
+        itens.map((d, k) => (
+          <div key={d.to}>
+            {(k === 0 || itens[k - 1].grupo?.id !== d.grupo?.id) && (
+              <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-ink-3">{d.grupo?.titulo}</div>
+            )}
+            <MenuItem
+              icon={d.grupo?.icon}
+              onClick={() => {
+                fechar();
+                nav(d.to);
+              }}
+            >
+              {d.label}
+            </MenuItem>
+          </div>
+        ))
+      }
+    </Popover>
+  );
+}
+
+function BotaoTema() {
+  const { temaEfectivo, setTema } = useAparencia();
+  const escuro = temaEfectivo === "escuro";
+  return (
+    <button
+      onClick={() => setTema(escuro ? "claro" : "escuro")}
+      title={escuro ? "Tema claro" : "Tema escuro"}
+      className="grid size-8 place-items-center rounded-lg text-ink-2 transition hover:bg-sunken hover:text-ink"
+    >
+      {escuro ? <Sun className="size-[18px]" /> : <Moon className="size-[18px]" />}
+    </button>
+  );
+}
+
+const TEMAS: { id: Tema; label: string; icon: typeof Sun }[] = [
+  { id: "claro", label: "Claro", icon: Sun },
+  { id: "escuro", label: "Escuro", icon: Moon },
+  { id: "sistema", label: "Sistema", icon: Monitor },
+];
+const DENSIDADES: { id: Densidade; label: string }[] = [
+  { id: "confortavel", label: "Confortável" },
+  { id: "compacta", label: "Compacta" },
+];
+
+function MenuUtilizador({ sessao, onSenha, onSair }: { sessao: Sessao | null; onSenha: () => void; onSair: () => void }) {
+  const nav = useNavigate();
+  const { tema, setTema, densidade, setDensidade } = useAparencia();
+  const inicial = sessao?.nome.slice(0, 1).toUpperCase();
+  return (
+    <Popover
+      className="w-72"
+      botao={({ alternar, aberto }) => (
+        <button onClick={alternar} className={cn("flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 transition hover:bg-sunken", aberto && "bg-sunken")} title="Conta e aparência">
+          <span className="grid size-7 place-items-center rounded-full bg-brand text-[12px] font-semibold text-white">{inicial}</span>
+          <span className="max-w-[150px] truncate text-[13px] font-medium text-ink">{sessao?.nome}</span>
+          <ChevronDown className="size-3.5 text-ink-3" />
+        </button>
+      )}
+    >
+      {(fechar) => (
+        <>
+          <div className="flex items-center gap-3 px-3 pb-3 pt-2">
+            <span className="grid size-10 place-items-center rounded-full bg-brand text-[15px] font-semibold text-white">{inicial}</span>
+            <div className="min-w-0 leading-tight">
+              <div className="truncate font-medium">{sessao?.nome}</div>
+              <div className="truncate text-[12px] text-ink-3">
+                {sessao?.perfil_descricao ?? sessao?.perfil} · {sessao?.login}
+              </div>
+            </div>
+          </div>
+          <div className="my-1 h-px bg-line" />
+          <MenuItem
+            icon={KeyRound}
+            onClick={() => {
+              fechar();
+              onSenha();
+            }}
+          >
+            Alterar senha
+          </MenuItem>
+          <MenuItem
+            icon={Lock}
+            onClick={() => {
+              fechar();
+              bloquearSessao();
+            }}
+          >
+            Bloquear sessão
+          </MenuItem>
+          <MenuItem
+            icon={Keyboard}
+            onClick={() => {
+              fechar();
+              nav("/sobre?vista=manual");
+            }}
+          >
+            Manual e atalhos
+          </MenuItem>
+          <div className="my-1 h-px bg-line" />
+          <div className="px-3 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-wide text-ink-3">Tema</div>
+          <Segmentado className="mx-2" valor={tema} opcoes={TEMAS} onChange={setTema} />
+          <div className="px-3 pb-1.5 pt-3 text-[11px] font-medium uppercase tracking-wide text-ink-3">Tabelas</div>
+          <Segmentado className="mx-2 mb-2" valor={densidade} opcoes={DENSIDADES} onChange={setDensidade} />
+          <div className="my-1 h-px bg-line" />
+          <MenuItem icon={LogOut} perigo onClick={onSair}>
+            Terminar sessão
+          </MenuItem>
+        </>
+      )}
+    </Popover>
   );
 }
 

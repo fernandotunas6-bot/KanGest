@@ -81,7 +81,7 @@ export default function Stock() {
         {lista.data?.length === 0 ? (
           <Empty icon={<Boxes className="size-6" />} title="Sem artigos" />
         ) : (
-          <Table className="tabela-compacta max-h-[calc(100vh-300px)]">
+          <Table className="tabela-compacta max-h-[calc(100vh-344px)]">
             <thead>
               <tr>
                 <Th>Artigo</Th>

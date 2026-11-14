@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Copy, Layers, Package, Plus, Search, Tags, Trash2 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { call } from "@/lib/api";
 import { useDebounce, useTabelas } from "@/lib/hooks";
 import { comIva, kz, parseKz, qtd, semIva, toInputKz } from "@/lib/format";
@@ -19,6 +19,21 @@ export default function Artigos() {
   const dq = useDebounce(q);
   const tabelas = useTabelas();
   const tem = useSession((s) => s.tem);
+  const [sp, setSp] = useSearchParams();
+  // ?id=… (pesquisa global, Ctrl+K): abre logo a ficha do artigo
+  useEffect(() => {
+    const id = Number(sp.get("id"));
+    if (!id) return;
+    setSp({}, { replace: true });
+    if (!tem("artigos.editar")) return;
+    call<Artigo>("artigos.obter", { id }).then(
+      (a) => {
+        setOrigem(undefined);
+        setEditar(a);
+      },
+      (e: Error) => toast.error(e.message),
+    );
+  }, [sp, setSp, tem]);
   const lista = useQuery({
     queryKey: ["artigos", dq, familia],
     queryFn: () => call<Artigo[]>("artigos.listar", { q: dq, familia_id: familia ? Number(familia) : null, inativos: true }),
@@ -67,7 +82,7 @@ export default function Artigos() {
         {lista.data?.length === 0 ? (
           <Empty icon={<Package className="size-6" />} title="Sem artigos" text="Crie o primeiro artigo para começar a vender." />
         ) : (
-          <Table className="max-h-[calc(100vh-260px)]">
+          <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
                 <Th>Referência</Th>

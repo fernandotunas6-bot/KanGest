@@ -31,9 +31,69 @@
   --color-ok: #2f855a;
   --color-ok-50: #e7f4ec;
 
+  /* Cores semânticas (iguais nos dois temas onde o fundo também não muda). */
+  --color-accent-ink: #9a6514;   /* texto sobre accent-50 (avisos, valores em dívida) */
+  --color-on-accent: #1d2422;    /* texto sobre os botões âmbar (Abrir POS, Pagar) */
+  --color-nav: #0c4a44;          /* menu lateral */
+  --color-scrim: rgb(29 36 34 / 0.4); /* fundo por trás das janelas */
+
   --radius-xl: 14px;
   --shadow-card: 0 1px 2px rgb(29 36 34 / 0.05), 0 1px 1px rgb(29 36 34 / 0.03);
   --shadow-pop: 0 18px 50px -12px rgb(29 36 34 / 0.35);
+}
+
+/* Densidade das tabelas (Utilizador → Aparência): «Compacta» mostra mais linhas, como as grelhas do Primavera. */
+:root {
+  --kg-celula-y: 0.625rem;
+  --kg-cab-y: 0.625rem;
+  color-scheme: light;
+}
+:root[data-densidade="compacta"] {
+  --kg-celula-y: 0.3125rem;
+  --kg-cab-y: 0.4375rem;
+}
+
+/*
+ * Tema escuro (Utilizador → Aparência). Só no ecrã: na impressão valem sempre as cores claras.
+ * Os fundos com o nome de uma cor (bg-brand, bg-danger, bg-ok) mantêm texto branco legível;
+ * o texto com essas cores precisa de tons mais claros, daí as regras .text-* a seguir.
+ */
+@media screen {
+  :root[data-tema="escuro"] {
+    color-scheme: dark;
+    --color-bg: #101513;
+    --color-surface: #171d1b;
+    --color-sunken: #222a27;
+    --color-line: #2a3330;
+    --color-line-strong: #3a4541;
+    --color-ink: #e7ece9;
+    --color-ink-2: #b4bfba;
+    --color-ink-3: #85918c;
+
+    --color-brand: #1d8073;
+    --color-brand-600: #22907f;
+    --color-brand-700: #0f3b36;
+    --color-brand-50: #15302c;
+    --color-brand-100: #1c3f3a;
+
+    --color-chart: #24a596;
+    --color-grid: #26302d;
+
+    --color-accent-50: #2d2416;
+    --color-danger-50: #34201c;
+    --color-ok-50: #16301f;
+
+    --color-accent-ink: #f0b54f;
+    --color-nav: #0c1715;
+    --color-scrim: rgb(0 0 0 / 0.6);
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.35);
+    --shadow-pop: 0 18px 50px -12px rgb(0 0 0 / 0.7);
+  }
+  :root[data-tema="escuro"] :is(.text-brand, .hover\:text-brand:hover) { color: #5cc3b5; }
+  :root[data-tema="escuro"] .text-brand-700 { color: #7fd1c6; }
+  :root[data-tema="escuro"] :is(.text-danger, .hover\:text-danger:hover) { color: #ef7a63; }
+  :root[data-tema="escuro"] .text-ok { color: #4cc18a; }
 }
 
 html, body, #root { height: 100%; }
@@ -46,6 +106,18 @@ body {
   -webkit-font-smoothing: antialiased;
   user-select: none;
   -webkit-user-select: none;
+}
+/* Teclas nos atalhos (Ctrl K, F12…) */
+kbd {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--color-line-strong);
+  border-bottom-width: 2px;
+  background: var(--color-surface);
+  color: var(--color-ink-2);
 }
 input, textarea, select, [data-selectable] { user-select: text; -webkit-user-select: text; }
 .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -63,7 +135,10 @@ input, textarea, select, [data-selectable] { user-select: text; -webkit-user-sel
   background-size: 14px 14px;
   text-overflow: ellipsis;
 }
-:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
+/* Na camada base para que as classes (ex.: outline-none das caixas de texto, que usam o anel) a possam substituir. */
+@layer base {
+  :focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
+}
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--color-line-strong); border-radius: 10px; border: 2px solid var(--color-bg); }

@@ -79,7 +79,7 @@ export default function Ordens() {
         {lista.data?.length === 0 ? (
           <Empty icon={<ClipboardList className="size-6" />} title="Sem ordens de serviço" text="Abra uma OS quando a viatura dá entrada na oficina." />
         ) : (
-          <Table className="max-h-[calc(100vh-260px)]">
+          <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
                 <Th>N.º</Th>

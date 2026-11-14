@@ -1432,6 +1432,23 @@ pub async fn obter(st: &AppState, i: IdIn) -> AppResult<Value> {
     .bind(i.id)
     .fetch_all(p)
     .await?;
+    // Documentos ligados a este (como os «smart buttons» do Odoo): recibos que o liquidaram
+    // e documentos emitidos a partir dele (factura de uma proforma, nota de crédito…).
+    let recibos = sqlx::query(
+        "SELECT r.valor, d.id, d.numero_doc, d.tipo_codigo, t.descricao AS tipo_desc, d.data_emissao, d.estado FROM recibo_documentos r
+         JOIN documentos d ON d.id = r.recibo_id JOIN tipos_documento t ON t.codigo = d.tipo_codigo
+         WHERE r.documento_id = ? ORDER BY d.data_emissao, d.id",
+    )
+    .bind(i.id)
+    .fetch_all(p)
+    .await?;
+    let derivados = sqlx::query(
+        "SELECT d.id, d.numero_doc, d.tipo_codigo, t.descricao AS tipo_desc, d.data_emissao, d.total, d.estado
+         FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo WHERE d.doc_origem_id = ? ORDER BY d.data_hora, d.id",
+    )
+    .bind(i.id)
+    .fetch_all(p)
+    .await?;
     let ret = sqlx::query("SELECT codigo, descricao, percentagem, base, valor FROM documento_retencoes WHERE documento_id = ? ORDER BY id")
         .bind(i.id)
         .fetch_all(p)
@@ -1467,6 +1484,8 @@ pub async fn obter(st: &AppState, i: IdIn) -> AppResult<Value> {
         "linhas": db::rows_json(&linhas),
         "pagamentos": db::rows_json(&pags),
         "liquidacoes": db::rows_json(&liq),
+        "recibos": db::rows_json(&recibos),
+        "derivados": db::rows_json(&derivados),
         "retencoes": db::rows_json(&ret),
         "custos": db::rows_json(&custos),
         "resumo_iva": db::rows_json(&iva),

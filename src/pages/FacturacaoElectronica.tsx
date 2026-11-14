@@ -149,7 +149,7 @@ export default function FacturacaoElectronica() {
               text={e?.ativo ? "As facturas e recibos emitidos entram aqui e são enviados à AGT automaticamente." : "Ligue a facturação electrónica no painel ao lado."}
             />
           ) : (
-            <Table className="max-h-[calc(100vh-330px)]">
+            <Table className="max-h-[calc(100vh-374px)]">
               <thead>
                 <tr>
                   <Th>Documento</Th>

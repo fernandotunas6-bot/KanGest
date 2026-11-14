@@ -42,7 +42,14 @@ const ATALHOS_POS: [string, string][] = [
   ["Ctrl+G", "Abrir a gaveta (impressora térmica)"],
 ];
 
+const ATALHOS_GESTAO: [string, string][] = [
+  ["Ctrl+K", "Pesquisar ou ir para: ecrãs, documentos, clientes, NIF e artigos (⌘K no Mac)"],
+  ["↑ / ↓", "Escolher um resultado da pesquisa; Enter abre"],
+  ["Esc", "Fechar a pesquisa, menus e janelas"],
+];
+
 const MANUAL: { titulo: string; texto: string }[] = [
+  { titulo: "Navegação", texto: "Prima Ctrl+K (⌘K no Mac) em qualquer ecrã para ir para um ecrã ou encontrar um documento, cliente ou artigo. Marque com a estrela os ecrãs que mais usa: ficam em Favoritos, no topo do menu. O menu pode recolher-se (fica só com os ícones) e, no menu do utilizador (canto superior direito), escolhe o tema claro ou escuro e tabelas compactas." },
   { titulo: "Primeiros passos", texto: "Preencha a empresa (Configurações), crie os utilizadores e as permissões, configure o posto e a impressora e, se vem do KIGEST antigo, use «Importar dados do KIGEST» antes de começar a facturar." },
   { titulo: "Documentos", texto: "Todos os documentos (facturas, recibos, notas de crédito, guias, compras e stock) usam o mesmo ecrã. As séries são automáticas por posto e ano. Um documento emitido não se altera: anula-se com motivo ou corrige-se com nota de crédito." },
   { titulo: "POS", texto: "O caixa tem de estar aberto para vender. No fecho conte o dinheiro: o sistema mostra a diferença para o valor esperado. Os talões podem sair na impressora térmica (ESC/POS) ou pelo diálogo de impressão." },
@@ -162,21 +169,30 @@ export default function Sobre() {
             </div>
           </Card>
           <Card className="h-fit p-6">
-            <div className="mb-4 flex items-center gap-2 font-medium">
-              <Keyboard className="size-4 text-brand" /> Atalhos do POS
-            </div>
-            <table className="w-full text-[13.5px]">
-              <tbody>
-                {ATALHOS_POS.map(([k, d]) => (
-                  <tr key={k} className="border-b border-line last:border-0">
-                    <td className="w-20 py-1.5">
-                      <kbd className="rounded border border-line bg-sunken px-1.5 py-0.5 font-mono text-[12px]">{k}</kbd>
-                    </td>
-                    <td className="py-1.5 text-ink-2">{d}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {(
+              [
+                ["Atalhos da gestão", ATALHOS_GESTAO],
+                ["Atalhos do POS", ATALHOS_POS],
+              ] as const
+            ).map(([titulo, lista], n) => (
+              <div key={titulo} className={n > 0 ? "mt-6" : ""}>
+                <div className="mb-4 flex items-center gap-2 font-medium">
+                  <Keyboard className="size-4 text-brand" /> {titulo}
+                </div>
+                <table className="w-full text-[13.5px]">
+                  <tbody>
+                    {lista.map(([k, d]) => (
+                      <tr key={k} className="border-b border-line last:border-0">
+                        <td className="w-20 py-1.5 align-top">
+                          <kbd className="rounded border border-line bg-sunken px-1.5 py-0.5 font-mono text-[12px]">{k}</kbd>
+                        </td>
+                        <td className="py-1.5 text-ink-2">{d}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
           </Card>
         </div>
       )}

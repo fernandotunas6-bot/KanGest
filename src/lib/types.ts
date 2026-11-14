@@ -275,6 +275,7 @@ export interface DocCompleto {
     observacoes: string | null;
     motivo_anulacao: string | null;
     doc_origem: string | null;
+    doc_origem_id: number | null;
     armazem: string | null;
     armazem_destino: string | null;
     vias: number;
@@ -307,6 +308,10 @@ export interface DocCompleto {
   linhas: DocLinha[];
   pagamentos: { modo_codigo: string; descricao: string; valor: number }[];
   liquidacoes: { id: number; numero_doc: string; data_emissao: string; total: number; valor: number }[];
+  /** recibos que liquidaram este documento (servidores anteriores à 1.2 não os enviam) */
+  recibos?: { id: number; numero_doc: string; tipo_codigo: string; tipo_desc: string; data_emissao: string; valor: number; estado: string }[];
+  /** documentos emitidos a partir deste: factura de uma proforma, nota de crédito… */
+  derivados?: { id: number; numero_doc: string; tipo_codigo: string; tipo_desc: string; data_emissao: string; total: number; estado: string }[];
   resumo_iva: { taxa: number; motivo_isencao: string | null; base: number; iva: number }[];
   empresa: Empresa;
 }

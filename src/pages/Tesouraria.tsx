@@ -179,7 +179,7 @@ export default function Tesouraria() {
             ))}
           </div>
           {aba === "Fluxo de Caixa" && (
-            <Table className="max-h-[calc(100vh-430px)]">
+            <Table className="max-h-[calc(100vh-474px)]">
               <thead>
                 <tr>
                   <Th>Data</Th>
@@ -307,7 +307,7 @@ export default function Tesouraria() {
             <ul className="space-y-2.5">
               {contas.data?.map((c) => (
                 <li key={c.id} className="flex items-center gap-3">
-                  <span className={cn("rounded-lg p-1.5", c.tipo === "CAIXA" ? "bg-accent-50 text-[#9a6514]" : "bg-brand-50 text-brand")}>
+                  <span className={cn("rounded-lg p-1.5", c.tipo === "CAIXA" ? "bg-accent-50 text-accent-ink" : "bg-brand-50 text-brand")}>
                     {c.tipo === "CAIXA" ? <Banknote className="size-4" /> : <Building2 className="size-4" />}
                   </span>
                   <span className="flex-1 text-[13.5px]">{c.descricao}</span>

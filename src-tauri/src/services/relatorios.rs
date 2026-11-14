@@ -66,11 +66,96 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
     )
     .fetch_all(p)
     .await?;
+
+    // Comparação com o período anterior: ontem e o mês passado até ao mesmo dia
+    // (até ao último dia, quando o mês passado é mais curto: 31/03 compara com 01/02–28/02).
+    let vendas_ontem: i64 = sqlx::query_scalar(&format!(
+        "SELECT COALESCE(SUM({SINAL} * d.total), 0) FROM documentos d WHERE {VENDAS} AND d.data_emissao = date(?, '-1 day')"
+    ))
+    .bind(&hoje)
+    .fetch_one(p)
+    .await?;
+    let vendas_mes_anterior: i64 = sqlx::query_scalar(&format!(
+        "SELECT COALESCE(SUM({SINAL} * d.total), 0) FROM documentos d WHERE {VENDAS}
+           AND d.data_emissao >= date(?1, 'start of month', '-1 month')
+           AND d.data_emissao <= min(date(?1, '-1 month'), date(?1, 'start of month', '-1 day'))"
+    ))
+    .bind(&hoje)
+    .fetch_one(p)
+    .await?;
+
+    // Antiguidade dos saldos de clientes (dias desde o vencimento), como o «Aged Receivable» do Odoo
+    // e os mapas de antiguidade do Primavera. A soma das faixas é o «A receber».
+    let antiguidade = sqlx::query(
+        "SELECT COALESCE(SUM(CASE WHEN dias <= 0 THEN v END), 0) AS por_vencer,
+                COALESCE(SUM(CASE WHEN dias BETWEEN 1 AND 30 THEN v END), 0) AS d1_30,
+                COALESCE(SUM(CASE WHEN dias BETWEEN 31 AND 60 THEN v END), 0) AS d31_60,
+                COALESCE(SUM(CASE WHEN dias BETWEEN 61 AND 90 THEN v END), 0) AS d61_90,
+                COALESCE(SUM(CASE WHEN dias > 90 THEN v END), 0) AS mais_90,
+                COUNT(CASE WHEN dias > 0 THEN 1 END) AS docs_vencidos
+         FROM (SELECT d.valor_pendente AS v,
+                      CAST(julianday(?) - julianday(COALESCE(d.data_vencimento, d.data_emissao)) AS INTEGER) AS dias
+               FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo
+               WHERE d.estado = 'N' AND d.valor_pendente > 0 AND t.grupo = 'VENDAS')",
+    )
+    .bind(&hoje)
+    .fetch_one(p)
+    .await?;
+    let (compras_vencidas, valor_compras_vencidas): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(d.valor_pendente), 0) FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo
+         WHERE d.estado = 'N' AND d.valor_pendente > 0 AND t.grupo = 'COMPRAS' AND COALESCE(d.data_vencimento, d.data_emissao) < ?",
+    )
+    .bind(&hoje)
+    .fetch_one(p)
+    .await?;
+
+    // Alertas («A sua atenção»): o que precisa de acção hoje
+    let proformas_a_expirar: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo
+         WHERE t.classe = 'PROFORMA' AND d.estado = 'N' AND d.data_vencimento BETWEEN ?1 AND date(?1, '+7 day')",
+    )
+    .bind(&hoje)
+    .fetch_one(p)
+    .await?;
+    let (lotes_expirados, lotes_a_expirar): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(CASE WHEN l.validade < ?1 THEN 1 END),
+                COUNT(CASE WHEN l.validade >= ?1 AND l.validade <= date(?1, '+' || a.aviso_validade_dias || ' day') THEN 1 END)
+         FROM lotes l JOIN artigos a ON a.id = l.artigo_id
+         WHERE l.ativo = 1 AND l.quantidade > 0 AND COALESCE(l.validade, '') <> ''",
+    )
+    .bind(&hoje)
+    .fetch_one(p)
+    .await?;
+    let (fe_pendentes, fe_rejeitadas): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(CASE WHEN estado IN ('PENDENTE','ENVIADO') THEN 1 END), COUNT(CASE WHEN estado = 'INVALIDO' THEN 1 END) FROM fe_envios",
+    )
+    .fetch_one(p)
+    .await?;
+
+    // Recebimentos do mês por meio de pagamento (facturas/recibo, recibos e adiantamentos)
+    let por_modo = sqlx::query(
+        "SELECT m.descricao, SUM(dp.valor) AS total FROM documento_pagamentos dp
+         JOIN documentos d ON d.id = dp.documento_id JOIN modos_pagamento m ON m.codigo = dp.modo_codigo
+         WHERE d.estado = 'N' AND d.tipo_codigo IN ('FR','RC','RA') AND d.data_emissao >= ?
+         GROUP BY m.codigo ORDER BY total DESC",
+    )
+    .bind(&mes)
+    .fetch_all(p)
+    .await?;
+
     Ok(json!({
         "vendas_hoje": vendas_hoje, "docs_hoje": docs_hoje,
         "vendas_mes": vendas_mes, "docs_mes": docs_mes, "iva_mes": iva_mes,
         "ticket_medio": if docs_mes > 0 { vendas_mes / docs_mes } else { 0 },
         "a_receber": a_receber, "a_pagar": a_pagar, "stock_baixo": stock_baixo,
+        "vendas_ontem": vendas_ontem, "vendas_mes_anterior": vendas_mes_anterior,
+        "antiguidade": db::row_json(&antiguidade),
+        "alertas": {
+            "proformas_a_expirar": proformas_a_expirar, "lotes_expirados": lotes_expirados, "lotes_a_expirar": lotes_a_expirar,
+            "fe_pendentes": fe_pendentes, "fe_rejeitadas": fe_rejeitadas,
+            "compras_vencidas": compras_vencidas, "valor_compras_vencidas": valor_compras_vencidas,
+        },
+        "por_modo": db::rows_json(&por_modo),
         "serie": db::rows_json(&serie), "top_artigos": db::rows_json(&top), "ultimos": db::rows_json(&ultimos),
     }))
 }

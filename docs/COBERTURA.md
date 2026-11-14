@@ -111,6 +111,7 @@ Legenda: ✅ feito · 🟡 parcial · ❌ falta
 | Exportar SAF-T (Vendas) | ✅ |
 | Exportar SAF-T (Compras) | ✅ (TaxAccountingBasis A: fornecedores, PurchaseInvoices, IVA dedutível, moeda estrangeira, retenções; validado contra o XSD) |
 | Exportar SAF-T (Estado) | ✅ (TaxAccountingBasis E: só documentos de entidades públicas; validado contra o XSD) |
+| SAF-T de inventários (anual, todos os contribuintes desde 2026) | ❌ (estrutura na Circular n.º 05/GACA/GJ/DSF/AGT/2026; os dados já existem — ver [ANALISE-ERP-REFERENCIA.md](ANALISE-ERP-REFERENCIA.md)) |
 
 ### Recursos Humanos
 | Menu original | Novo |

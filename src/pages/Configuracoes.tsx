@@ -877,7 +877,7 @@ function Agt() {
           pedido de certificação.
           {data?.chave_importada && <span className="ml-1 text-ink-3">Chave do produtor carregada em {data.chave_importada.replace("T", " ")}.</span>}
         </p>
-        <pre data-selectable className="overflow-x-auto rounded-xl bg-ink p-4 font-mono text-[12px] leading-relaxed text-white/90">
+        <pre data-selectable className="overflow-x-auto rounded-xl bg-[#1d2422] p-4 font-mono text-[12px] leading-relaxed text-white/90">
           {data?.chave_publica ?? "…"}
         </pre>
       </Card>

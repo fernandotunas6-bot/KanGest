@@ -149,7 +149,7 @@ export default function Lotes() {
             text="Os lotes são criados nas entradas de artigos com controlo de lotes (compras, documentos de stock e inventário)."
           />
         ) : (
-          <Table className="max-h-[calc(100vh-330px)]">{corpo}</Table>
+          <Table className="max-h-[calc(100vh-374px)]">{corpo}</Table>
         )}
       </Card>
       <PrintPortal>

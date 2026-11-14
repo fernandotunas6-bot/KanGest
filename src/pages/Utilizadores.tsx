@@ -523,7 +523,7 @@ function Registo({ tipo }: { tipo: "acessos" | "auditoria" }) {
       {q.data?.length === 0 ? (
         <Empty icon={<ShieldCheck className="size-6" />} title="Sem registos no período" />
       ) : (
-        <Table className="tabela-compacta max-h-[calc(100vh-300px)]">
+        <Table className="tabela-compacta max-h-[calc(100vh-344px)]">
           <thead>
             <tr>
               <Th>Data e hora</Th>

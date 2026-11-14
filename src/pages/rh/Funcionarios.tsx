@@ -106,7 +106,7 @@ export default function Funcionarios() {
         {lista.data?.length === 0 ? (
           <Empty icon={<UserRound className="size-6" />} title="Sem funcionários" text="Crie as fichas do pessoal para processar salários." />
         ) : (
-          <Table className="max-h-[calc(100vh-260px)]">
+          <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
                 <Th>N.º</Th>

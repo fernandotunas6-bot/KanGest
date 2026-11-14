@@ -690,7 +690,7 @@ export default function Pos() {
                       <span className="line-clamp-2 text-[13.5px] font-medium leading-snug">{a.descricao}</span>
                       <span className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink-3">
                         {a.referencia}
-                        {!!a.promo_atual && <span className="rounded bg-accent-50 px-1.5 py-px font-medium text-[#9a6514]">−{numero(a.promo_atual, 2)}%</span>}
+                        {!!a.promo_atual && <span className="rounded bg-accent-50 px-1.5 py-px font-medium text-accent-ink">−{numero(a.promo_atual, 2)}%</span>}
                       </span>
                       <div className="mt-auto flex items-end justify-between">
                         <span className="num text-[15px] font-semibold text-brand-700">{kzNum(comIvaArt(precoNivel(a, cliente.nivel_preco), a))}</span>

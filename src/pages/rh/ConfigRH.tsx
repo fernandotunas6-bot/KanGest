@@ -111,7 +111,7 @@ export default function ConfigRH() {
       />
       {!admin && <p className="mb-4 rounded-lg bg-sunken px-4 py-2.5 text-ink-2">Só um administrador pode alterar estes valores.</p>}
       <div className={`mb-4 flex items-start gap-3 rounded-xl border px-4 py-3 text-[13px] ${confirmada ? "border-ok/30 bg-ok-50" : "border-accent/40 bg-accent-50"}`}>
-        {confirmada ? <ShieldCheck className="mt-0.5 size-4 shrink-0 text-ok" /> : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[#9a6514]" />}
+        {confirmada ? <ShieldCheck className="mt-0.5 size-4 shrink-0 text-ok" /> : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-accent-ink" />}
         <div className="flex-1">
           Valores pré-carregados: tabela de IRT do Grupo A da Lei n.º 14/25 (em vigor desde 2026, isenção até 150 000 Kz), INSS de 3% (trabalhador) e 8% (empresa), e subsídios de alimentação e de transporte isentos de IRT
           até 30 000 Kz cada. Confirme-os com a AGT, o INSS ou o seu contabilista; a lei muda com o Orçamento Geral do Estado.

@@ -518,7 +518,7 @@ export default function NovoDocumento() {
               <div className={cn("mt-4 rounded-xl border px-4 py-3", manual ? "border-accent/50 bg-accent-50" : "border-line")}>
                 <label className="flex items-center gap-2 font-medium">
                   <input type="checkbox" checked={manual} onChange={(e) => setManual(e.target.checked)} />
-                  <NotebookPen className="size-4 text-[#9a6514]" /> Recuperar documento emitido à mão
+                  <NotebookPen className="size-4 text-accent-ink" /> Recuperar documento emitido à mão
                 </label>
                 {manual && (
                   <div className="mt-3 grid grid-cols-3 gap-4">
@@ -539,7 +539,7 @@ export default function NovoDocumento() {
                       <Input type="date" max={hojeISO()} value={manualData} onChange={(e) => setManualData(e.target.value)} />
                     </Field>
                     {!seriesManuais.length && (
-                      <p className="col-span-3 text-[12.5px] text-[#9a6514]">Crie primeiro uma «série de documentos manuais» para {tipo.codigo} em Sistema → Séries de Documentos.</p>
+                      <p className="col-span-3 text-[12.5px] text-accent-ink">Crie primeiro uma «série de documentos manuais» para {tipo.codigo} em Sistema → Séries de Documentos.</p>
                     )}
                   </div>
                 )}

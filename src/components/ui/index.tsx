@@ -1,7 +1,8 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { X } from "lucide-react";
-import { forwardRef, useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TdHTMLAttributes } from "react";
+import { ArrowDownRight, ArrowUpRight, X, type LucideIcon } from "lucide-react";
+import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TdHTMLAttributes } from "react";
+import { numero } from "@/lib/format";
 
 export const cn = (...c: ClassValue[]) => twMerge(clsx(c));
 
@@ -12,7 +13,7 @@ const variants: Record<Variant, string> = {
   secondary: "bg-surface text-ink border border-line-strong hover:bg-sunken",
   ghost: "text-ink-2 hover:bg-sunken hover:text-ink",
   danger: "bg-danger text-white hover:brightness-95",
-  accent: "bg-accent text-ink hover:brightness-95 shadow-sm",
+  accent: "bg-accent text-on-accent hover:brightness-95 shadow-sm",
 };
 const sizes = { sm: "h-8 px-3 text-[13px] gap-1.5", md: "h-10 px-4 gap-2", lg: "h-12 px-5 text-base gap-2", xl: "h-16 px-6 text-lg gap-3" };
 
@@ -70,7 +71,7 @@ const tones = {
   brand: "bg-brand-50 text-brand-700",
   ok: "bg-ok-50 text-ok",
   danger: "bg-danger-50 text-danger",
-  accent: "bg-accent-50 text-[#9a6514]",
+  accent: "bg-accent-50 text-accent-ink",
 };
 export function Badge({ tone = "neutral", children, className }: { tone?: keyof typeof tones; children: ReactNode; className?: string }) {
   return <span className={cn("inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-[12px] font-medium", tones[tone], className)}>{children}</span>;
@@ -113,8 +114,8 @@ export function Modal({
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/40 p-6 pt-[6vh] backdrop-blur-[2px]" onMouseDown={onClose}>
-      <div className={cn("w-full rounded-2xl bg-surface shadow-pop", width)} onMouseDown={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim p-6 pt-[6vh] backdrop-blur-[2px]" onMouseDown={onClose}>
+      <div role="dialog" aria-modal="true" aria-label={title} className={cn("w-full rounded-2xl border border-line bg-surface shadow-pop", width)} onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <h2 className="text-[17px] font-semibold">{title}</h2>
           <button onClick={onClose} className="rounded-md p-1 text-ink-3 hover:bg-sunken hover:text-ink" aria-label="Fechar">
@@ -138,14 +139,14 @@ export function Table({ children, className }: { children: ReactNode; className?
 }
 export function Th({ children, className }: { children?: ReactNode; className?: string }) {
   return (
-    <th className={cn("sticky top-0 z-[1] border-b border-line bg-surface px-4 py-2.5 text-[12px] font-medium uppercase tracking-wide text-ink-3", className)}>
+    <th className={cn("sticky top-0 z-[1] border-b border-line bg-surface px-4 py-[var(--kg-cab-y)] text-[12px] font-medium uppercase tracking-wide text-ink-3", className)}>
       {children}
     </th>
   );
 }
 export function Td({ children, className, ...rest }: TdHTMLAttributes<HTMLTableCellElement>) {
   return (
-    <td {...rest} className={cn("border-b border-line/70 px-4 py-2.5", className)}>
+    <td {...rest} className={cn("border-b border-line/70 px-4 py-[var(--kg-celula-y)]", className)}>
       {children}
     </td>
   );
@@ -162,16 +163,141 @@ export function Empty({ icon, title, text, action }: { icon: ReactNode; title: s
   );
 }
 
-export function Stat({ label, value, hint, icon, tone = "brand" }: { label: string; value: ReactNode; hint?: ReactNode; icon?: ReactNode; tone?: "brand" | "accent" | "danger" | "ok" }) {
-  const t = { brand: "bg-brand-50 text-brand", accent: "bg-accent-50 text-[#9a6514]", danger: "bg-danger-50 text-danger", ok: "bg-ok-50 text-ok" }[tone];
+export function Stat({
+  label,
+  value,
+  hint,
+  icon,
+  tone = "brand",
+  delta,
+}: {
+  label: string;
+  value: ReactNode;
+  hint?: ReactNode;
+  icon?: ReactNode;
+  tone?: "brand" | "accent" | "danger" | "ok";
+  /** variação face ao período anterior (ver Delta) */
+  delta?: ReactNode;
+}) {
+  const t = { brand: "bg-brand-50 text-brand", accent: "bg-accent-50 text-accent-ink", danger: "bg-danger-50 text-danger", ok: "bg-ok-50 text-ok" }[tone];
   return (
     <Card className="p-5">
       <div className="flex items-start justify-between">
         <span className="text-[13px] text-ink-2">{label}</span>
         {icon && <span className={cn("rounded-lg p-1.5", t)}>{icon}</span>}
       </div>
-      <div className="mt-2 text-[24px] font-semibold tracking-tight">{value}</div>
+      <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-[24px] font-semibold tracking-tight">{value}</span>
+        {delta}
+      </div>
       {hint && <div className="mt-1 text-[12px] text-ink-3">{hint}</div>}
     </Card>
+  );
+}
+
+/**
+ * Variação de um valor face a um período anterior com nome («vs ontem»): seta e percentagem,
+ * verde quando sobe e vermelho quando desce (nunca só a cor). Sem valor anterior não se mostra.
+ */
+export function Delta({ atual, anterior, periodo }: { atual: number; anterior: number; periodo: string }) {
+  if (!anterior) return null;
+  const v = ((atual - anterior) / Math.abs(anterior)) * 100;
+  const sobe = v >= 0;
+  const Icon = sobe ? ArrowUpRight : ArrowDownRight;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={cn("num inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium", sobe ? "bg-ok-50 text-ok" : "bg-danger-50 text-danger")}>
+        <Icon className="size-3.5" aria-label={sobe ? "subiu" : "desceu"} />
+        {numero(Math.abs(v), 1)}%
+      </span>
+      <span className="text-[12px] text-ink-3">{periodo}</span>
+    </span>
+  );
+}
+
+// ---------------- Menus suspensos ----------------
+/** Botão com um menu suspenso; fecha ao clicar fora ou com Esc. */
+export function Popover({
+  botao,
+  children,
+  alinhar = "direita",
+  className,
+}: {
+  botao: (p: { aberto: boolean; alternar: () => void }) => ReactNode;
+  children: (fechar: () => void) => ReactNode;
+  alinhar?: "direita" | "esquerda";
+  className?: string;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const raiz = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!aberto) return;
+    const fora = (e: MouseEvent) => {
+      if (!raiz.current?.contains(e.target as Node)) setAberto(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setAberto(false);
+    document.addEventListener("mousedown", fora);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", fora);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [aberto]);
+  return (
+    <div ref={raiz} className="relative">
+      {botao({ aberto, alternar: () => setAberto((a) => !a) })}
+      {aberto && (
+        <div className={cn("absolute top-full z-40 mt-1.5 rounded-xl border border-line bg-surface p-1.5 text-ink shadow-pop", alinhar === "direita" ? "right-0" : "left-0", className)}>
+          {children(() => setAberto(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function MenuItem({ icon: Icon, children, onClick, perigo, atalho }: { icon?: LucideIcon; children: ReactNode; onClick: () => void; perigo?: boolean; atalho?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn("flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13.5px] transition hover:bg-sunken", perigo ? "text-danger" : "text-ink")}
+    >
+      {Icon && <Icon className={cn("size-4 shrink-0", perigo ? "" : "text-ink-3")} />}
+      <span className="flex-1">{children}</span>
+      {atalho && <kbd>{atalho}</kbd>}
+    </button>
+  );
+}
+
+/** Escolha entre poucas opções lado a lado (ex.: tema Claro / Escuro / Sistema). */
+export function Segmentado<T extends string>({
+  valor,
+  opcoes,
+  onChange,
+  className,
+}: {
+  valor: T;
+  opcoes: { id: T; label: string; icon?: LucideIcon }[];
+  onChange: (v: T) => void;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex rounded-lg bg-sunken p-0.5", className)}>
+      {opcoes.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          aria-pressed={valor === o.id}
+          onClick={() => onChange(o.id)}
+          className={cn(
+            "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 py-1 text-[12.5px] transition",
+            valor === o.id ? "bg-surface font-medium text-ink shadow-sm ring-1 ring-line" : "text-ink-2 hover:text-ink",
+          )}
+        >
+          {o.icon && <o.icon className="size-3.5" />}
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }

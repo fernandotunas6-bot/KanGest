@@ -111,7 +111,7 @@ export default function Documentos() {
         {lista.data?.length === 0 ? (
           <Empty icon={<FileText className="size-6" />} title="Sem documentos no período" />
         ) : (
-          <Table className="max-h-[calc(100vh-330px)]">
+          <Table className="max-h-[calc(100vh-374px)]">
             <thead>
               <tr>
                 <Th>Documento</Th>

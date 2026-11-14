@@ -98,7 +98,7 @@ export default function AvisoVencimento() {
           {!lista.length ? (
             <Empty icon={<BellRing className="size-6" />} title="Sem documentos vencidos" />
           ) : (
-            <Table className="max-h-[calc(100vh-270px)]">
+            <Table className="max-h-[calc(100vh-314px)]">
               <thead>
                 <tr>
                   <Th>Entidade</Th>

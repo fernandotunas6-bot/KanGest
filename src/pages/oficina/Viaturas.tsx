@@ -51,7 +51,7 @@ export default function Viaturas() {
         {lista.data?.length === 0 ? (
           <Empty icon={<Car className="size-6" />} title="Sem viaturas" text="Registe a viatura do cliente para abrir ordens de serviço." />
         ) : (
-          <Table className="max-h-[calc(100vh-260px)]">
+          <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
                 <Th>Matrícula</Th>

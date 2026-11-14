@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { FileSpreadsheet, HandCoins, Plus, Printer, Search, Users } from "lucide-react";
 import { call } from "@/lib/api";
@@ -18,6 +18,14 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
   const [editar, setEditar] = useState<Partial<Entidade> | null>(null);
   const dq = useDebounce(q);
   const nav = useNavigate();
+  const [sp, setSp] = useSearchParams();
+  // ?id=… (pesquisa global, Ctrl+K): abre logo a ficha
+  useEffect(() => {
+    const id = Number(sp.get("id"));
+    if (!id) return;
+    setSp({}, { replace: true });
+    if (id !== 1) call<Entidade>("entidades.obter", { id }).then(setEditar, (e: Error) => toast.error(e.message));
+  }, [sp, setSp]);
   const nome = tipo === "C" ? "Clientes" : "Fornecedores";
   const lista = useQuery({ queryKey: ["entidades", tipo, dq], queryFn: () => call<Entidade[]>("entidades.listar", { tipo, q: dq }) });
   const empresa = useEmpresa();
@@ -64,7 +72,7 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
         {lista.data?.length === 0 ? (
           <Empty icon={<Users className="size-6" />} title={`Sem ${nome.toLowerCase()}`} />
         ) : (
-          <Table className="max-h-[calc(100vh-260px)]">
+          <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
                 <Th>Nome</Th>
@@ -83,7 +91,7 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
                   <Td className="font-mono text-[12.5px]">{e.nif}</Td>
                   <Td className="text-ink-2">{[e.telefone, e.email].filter(Boolean).join(" · ") || "—"}</Td>
                   <Td className="text-ink-2">{e.localidade ?? "—"}</Td>
-                  <Td className="num text-right">{(e.saldo ?? 0) > 0 ? <span className="font-medium text-[#9a6514]">{kz(e.saldo)}</span> : <span className="text-ink-3">—</span>}</Td>
+                  <Td className="num text-right">{(e.saldo ?? 0) > 0 ? <span className="font-medium text-accent-ink">{kz(e.saldo)}</span> : <span className="text-ink-3">—</span>}</Td>
                 </tr>
               ))}
             </tbody>

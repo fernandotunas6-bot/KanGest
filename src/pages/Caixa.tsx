@@ -244,7 +244,7 @@ function Fechar({ esperado, onClose, onDone }: { esperado: number; onClose: () =
           <span>Total do sistema (numerário)</span>
           <span className="num">{kz(esperado)}</span>
         </div>
-        <div className={cn("flex justify-between font-medium", dif < 0 ? "text-danger" : dif > 0 ? "text-[#9a6514]" : "text-ok")}>
+        <div className={cn("flex justify-between font-medium", dif < 0 ? "text-danger" : dif > 0 ? "text-accent-ink" : "text-ok")}>
           <span>Diferença</span>
           <span className="num">{kz(dif)}</span>
         </div>
