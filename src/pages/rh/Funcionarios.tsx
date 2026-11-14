@@ -7,6 +7,7 @@ import { useDebounce } from "@/lib/hooks";
 import { data, kz, parseKz, toInputKz } from "@/lib/format";
 import type { Funcionario, TabelasRH } from "@/lib/types";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 import { imprimir } from "@/lib/print";
 import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
 import { PrintPortal } from "@/components/DocumentoPrint";
@@ -466,7 +467,7 @@ function FuncionarioForm({ id, onClose }: { id: number | null; onClose: () => vo
                     <option key={p}>{p}</option>
                   ))}
                 </Select>
-                <Input type="date" value={a.data_nascimento} onChange={(e) => setAgregado((xs) => xs.map((x) => (x.key === a.key ? { ...x, data_nascimento: e.target.value } : x)))} />
+                <InputData value={a.data_nascimento} onChange={(e) => setAgregado((xs) => xs.map((x) => (x.key === a.key ? { ...x, data_nascimento: e.target.value } : x)))} />
                 <button className="rounded-md p-1.5 text-ink-3 hover:bg-danger-50 hover:text-danger" onClick={() => setAgregado((xs) => xs.filter((x) => x.key !== a.key))}>
                   <Trash2 className="size-4" />
                 </button>

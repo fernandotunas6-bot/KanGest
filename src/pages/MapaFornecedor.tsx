@@ -10,7 +10,8 @@ import { imprimir } from "@/components/DocumentoModal";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Empty, Input, PageHeader, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, PageHeader, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 
 interface LinhaFornecedor {
   id: number;
@@ -163,9 +164,9 @@ export default function MapaFornecedor() {
         }
       />
       <div className="mb-4 flex flex-wrap items-end gap-3">
-        <Input type="date" className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
+        <InputData className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
         <span className="pb-2 text-ink-3">até</span>
-        <Input type="date" className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
+        <InputData className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
         <div className="w-72">
           <EntidadePicker tipo="F" label="Fornecedor (opcional)" valor={forn} onChange={setForn} />
         </div>

@@ -7,6 +7,7 @@ import { useTabelas } from "@/lib/hooks";
 import { data } from "@/lib/format";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 
 export interface Serie {
   id: number;
@@ -209,10 +210,10 @@ function SerieForm({ inicial, onClose }: { inicial: Partial<Serie>; onClose: () 
           <Input value={s.descricao ?? ""} onChange={(e) => setS({ ...s, descricao: e.target.value })} />
         </Field>
         <Field label="Data inicial">
-          <Input type="date" value={s.data_inicio ?? ""} onChange={(e) => setS({ ...s, data_inicio: e.target.value })} />
+          <InputData value={s.data_inicio ?? ""} onChange={(e) => setS({ ...s, data_inicio: e.target.value })} />
         </Field>
         <Field label="Data final">
-          <Input type="date" value={s.data_fim ?? ""} onChange={(e) => setS({ ...s, data_fim: e.target.value })} />
+          <InputData value={s.data_fim ?? ""} onChange={(e) => setS({ ...s, data_fim: e.target.value })} />
         </Field>
         {postos.length > 1 && (
           <Field label="Posto" className="col-span-2">

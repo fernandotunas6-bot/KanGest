@@ -7,6 +7,7 @@ import { call } from "@/lib/api";
 import { data, hojeISO, inicioMesISO, kz, parseKz } from "@/lib/format";
 import { imprimir } from "@/lib/print";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Stat, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 import { PrintPortal } from "@/components/DocumentoPrint";
 
 export interface Conta {
@@ -126,10 +127,10 @@ export default function Tesouraria() {
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <Field label="Data inicial">
-          <Input type="date" className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
+          <InputData className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
         </Field>
         <Field label="Data final">
-          <Input type="date" className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
+          <InputData className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
         </Field>
         <Field label="Conta">
           <Select className="w-52" value={conta} onChange={(e) => setConta(e.target.value)}>
@@ -441,7 +442,7 @@ function MovimentoModal({ acao, contas, onClose, onDone }: { acao: "ENTRADA" | "
           </Field>
         ) : (
           <Field label="Data">
-            <Input type="date" value={dataMov} onChange={(e) => setDataMov(e.target.value)} />
+            <InputData value={dataMov} onChange={(e) => setDataMov(e.target.value)} />
           </Field>
         )}
         <Field label="Valor (Kz)">

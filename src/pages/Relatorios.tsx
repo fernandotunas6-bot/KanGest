@@ -9,6 +9,7 @@ import { useSession } from "@/store/session";
 import type { Entidade } from "@/lib/types";
 import { EntidadePicker } from "@/components/Pickers";
 import { Badge, Button, Card, Input, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { imprimir } from "@/components/DocumentoModal";
 
@@ -319,9 +320,9 @@ export default function Relatorios() {
           </>
         ) : (
           <>
-            <Input type="date" className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
+            <InputData className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
             <span className="text-ink-3">até</span>
-            <Input type="date" className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
+            <InputData className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
             <div className="w-64">
               <EntidadePicker tipo="C" label="Cliente (opcional)" valor={entidade} onChange={setEntidade} />
             </div>

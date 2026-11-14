@@ -8,6 +8,7 @@ import { dataHora, hojeISO } from "@/lib/format";
 import { GRUPOS_PERMISSOES, TODAS_PERMISSOES } from "@/lib/permissoes";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 
 interface Utilizador {
   id: number;
@@ -488,9 +489,9 @@ function Registo({ tipo }: { tipo: "acessos" | "auditoria" }) {
   return (
     <Card className={cn("transition-opacity", q.isFetching && "opacity-70")}>
       <div className="flex flex-wrap items-center gap-3 border-b border-line p-4">
-        <Input type="date" className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
+        <InputData className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
         <span className="text-ink-3">até</span>
-        <Input type="date" className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
+        <InputData className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
         {podeVerUtilizadores && (
           <Select className="w-52" value={quem} onChange={(e) => setQuem(e.target.value ? Number(e.target.value) : "")}>
             <option value="">Todos os utilizadores</option>

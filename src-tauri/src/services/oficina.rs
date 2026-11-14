@@ -162,6 +162,34 @@ pub async fn ordem(st: &AppState, i: IdIn) -> AppResult<Value> {
 }
 
 #[derive(Deserialize)]
+pub struct EstadoIn {
+    id: i64,
+    estado: String,
+}
+
+/// Muda só o estado de uma OS (quadro kanban): as mesmas regras do guardar — uma OS facturada não muda
+/// e «Facturada» só se chega pela factura. Ao concluir regista a data de conclusão (se ainda não tinha).
+pub async fn ordem_estado(st: &AppState, e: EstadoIn) -> AppResult<Value> {
+    st.exigir_perm("oficina")?;
+    if !["ABERTA", "EM_CURSO", "CONCLUIDA", "CANCELADA"].contains(&e.estado.as_str()) {
+        return Err(AppError::msg("Estado inválido."));
+    }
+    let atual: String = sqlx::query_scalar("SELECT estado FROM of_ordens WHERE id = ?").bind(e.id).fetch_optional(&st.pool).await?.ok_or(AppError::NaoEncontrado)?;
+    if atual == "FACTURADA" {
+        return Err(AppError::msg("A ordem de serviço já foi facturada e não pode ser alterada."));
+    }
+    sqlx::query(
+        "UPDATE of_ordens SET estado = ?1, data_conclusao = CASE WHEN ?1 = 'CONCLUIDA' THEN COALESCE(data_conclusao, ?2) ELSE data_conclusao END WHERE id = ?3",
+    )
+    .bind(&e.estado)
+    .bind(db::agora())
+    .bind(e.id)
+    .execute(&st.pool)
+    .await?;
+    Ok(json!({ "id": e.id, "estado": e.estado }))
+}
+
+#[derive(Deserialize)]
 pub struct LinhaIn {
     artigo_id: Option<i64>,
     descricao: String,

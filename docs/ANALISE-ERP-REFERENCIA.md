@@ -62,6 +62,10 @@ o que já foi trazido para o KanGest, o que falta e se é possível aproveitar o
 | Barra de estado e documentos ligados | `src/components/EstadoDocumento.tsx`, `DocumentoModal.tsx`; `recibos` e `derivados` em `documentos.obter` |
 | Relatórios por assunto | `src/pages/Relatorios.tsx` |
 | Atalhos e navegação no manual | `src/pages/Sobre.tsx` |
+| **2.ª ronda** — campo de data próprio (sempre dd/mm/aaaa, calendário em português, ↑/↓ mudam o dia, data e hora na Guia de Transporte) nos 28 campos de data | `src/components/InputData.tsx` |
+| **2.ª ronda** — ordenar por coluna (clique no cabeçalho) em Documentos, Clientes/Fornecedores, Artigos e Stock | `useOrdenacao` e `Th` em `src/components/ui` |
+| **2.ª ronda** — quadro kanban das Ordens de Serviço: arrastar entre estados, OS paradas há mais de 7 dias assinaladas | `src/pages/oficina/Ordens.tsx`; `oficina.ordemEstado` |
+| **2.ª ronda** — rótulos dos formulários em letra normal; linhas da factura cabem a 1366 px (o botão de apagar já não fica escondido) | `src/components/ui`, `src/pages/NovoDocumento.tsx` |
 
 Os testes do backend cobrem as novidades (`fluxo_completo`: recibos e documentos derivados, faixas de antiguidade que
 somam o «A receber», recebimentos por meio). Um servidor de rede de uma versão anterior continua a funcionar com o
@@ -89,14 +93,14 @@ Esforço: **P** pequeno (dias), **M** médio (1–3 semanas), **G** grande (mese
 | 7 | **Integração contabilística** | Primavera e PHC têm contabilidade certificada e SAF-T de contabilidade | O SAF-T de contabilidade é obrigatório a partir do exercício de 2026 (entrega em 2027). Primeiro passo: gerar os lançamentos dos documentos (vendas, compras, recibos, pagamentos, salários) com um plano de contas configurável e exportá-los para o programa do contabilista | M |
 | 8 | **Anexos e notas** nos documentos, clientes e artigos | Odoo: *chatter* com anexos e histórico | Anexar a V/Factura digitalizada, o comprovativo da transferência ao recibo, o contrato ao cliente | M |
 | 9 | **Actividades e lembretes** | Odoo: actividades com data e responsável | «Ligar ao cliente», «cobrar factura» com data e utilizador; aparecem em «A sua atenção» | M |
-| 10 | **Vista kanban** onde há estados | Odoo: kanban arrastável | Ordens de serviço (Aberta → Em curso → Concluída → Facturada), proformas e encomendas | P/M |
-| 11 | **Listas configuráveis** | Primavera: Listas. Odoo: filtros, agrupar por e favoritos | Escolher e ordenar colunas, ordenar por clique no cabeçalho, agrupar, guardar filtros | M/G |
+| 10 | **Vista kanban** onde há estados | Odoo: kanban arrastável | ✅ Ordens de serviço (2.ª ronda). Falta: proformas e encomendas | P/M |
+| 11 | **Listas configuráveis** | Primavera: Listas. Odoo: filtros, agrupar por e favoritos | 🟡 Ordenar por clique no cabeçalho feito nas listas principais (2.ª ronda). Falta: escolher colunas, agrupar, guardar filtros | M/G |
 | 12 | **Tabela dinâmica** sobre vendas e compras | Odoo: vista pivot. Primavera: Business Analytics | Linhas × colunas × medida (ex.: família × mês × total) com exportação | M |
 | 13 | **Conciliação bancária** | Odoo: importa extractos e concilia. Cegid PHC Bancos: importação de extractos e reconciliação | Importar o extracto do banco (CSV/Excel) e marcar os movimentos de tesouraria correspondentes | M |
 | 14 | **Listas de preços** | Odoo: tabelas por cliente, quantidade, período e família | Já há 4 PVP, desconto por cliente e promoções por artigo; faltam preços por quantidade, por família e por período | M |
 | 15 | **Unidades alternativas e variantes** | Odoo: unidades com conversão e variantes (tamanho/cor) | Caixa de 12 = 12 unidades na compra e na venda; variantes para vestuário e calçado | M/G |
 | 16 | **Fidelização e vales** | Odoo: pontos, cartões oferta e códigos de desconto | Pontos por compra e vales no POS | M |
-| 17 | **Selector de data próprio** | — | Os campos de data seguem o idioma do Windows (num Windows em inglês aparece mm/dd/aaaa ao lado de datas em dd/mm/aaaa); um selector próprio mostra sempre dd/mm/aaaa | P |
+| 17 | **Selector de data próprio** | — | ✅ Feito (2.ª ronda): os campos seguiam o idioma do Windows (mm/dd/aaaa num Windows em inglês); agora mostram sempre dd/mm/aaaa | P |
 
 ### Prioridade 3 — médio e longo prazo
 
@@ -132,9 +136,9 @@ preços, pivot).
 
 | Fase | Quando | O quê |
 |---|---|---|
-| 1 | Até 15 de Fevereiro de 2027 | SAF-T de inventários (2), homologação da Facturação Electrónica (1), exportação .xlsx (6), selector de data (17) |
+| 1 | Até 15 de Fevereiro de 2027 | SAF-T de inventários (2), homologação da Facturação Electrónica (1), exportação .xlsx (6); selector de data (17) já feito |
 | 2 | Até ao fim do 1.º trimestre de 2027 | PDF e envio por e-mail/WhatsApp (3), importação de Excel (4), sugestão de encomenda (5), integração contabilística (7) |
-| 3 | 2.º e 3.º trimestres de 2027 | Anexos e actividades (8, 9), kanban (10), listas configuráveis (11), tabela dinâmica (12), conciliação bancária (13), listas de preços (14) |
+| 3 | 2.º e 3.º trimestres de 2027 | Anexos e actividades (8, 9), kanban nas proformas e encomendas (10), resto das listas configuráveis (11), tabela dinâmica (12), conciliação bancária (13), listas de preços (14) |
 | 4 | A partir do 4.º trimestre de 2027 | Contabilidade (18), consulta no telemóvel (19), unidades e variantes (15), fidelização (16), multi-empresa (20) |
 
 ## Como ver os ecrãs

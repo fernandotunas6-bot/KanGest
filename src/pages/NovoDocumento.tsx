@@ -8,6 +8,7 @@ import { useTabelas } from "@/lib/hooks";
 import { data, hojeISO, kz, kzNum, parseKz, qtd, toInputKz } from "@/lib/format";
 import type { Artigo, DocCompleto, DocResumo, Entidade, Lote, Moeda, TipoDocumento, Transporte } from "@/lib/types";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 import DocumentoModal from "@/components/DocumentoModal";
 import { ArtigoPicker, EntidadePicker } from "@/components/Pickers";
 import { useSession } from "@/store/session";
@@ -374,7 +375,7 @@ export default function NovoDocumento() {
         }
       />
 
-      <div className="grid grid-cols-[minmax(0,1fr)_330px] gap-4">
+      <div className="grid grid-cols-[minmax(0,1fr)_300px] gap-4">
         <div className="space-y-4">
           {/* Cabeçalho do documento */}
           <Card className="p-5">
@@ -427,7 +428,7 @@ export default function NovoDocumento() {
                     </Select>
                   </Field>
                   <Field label={["PP", "OR", "VOR"].includes(codigo) ? "Válido até" : "Data de vencimento"}>
-                    <Input type="date" value={venc} onChange={(e) => setVenc(e.target.value)} />
+                    <InputData value={venc} onChange={(e) => setVenc(e.target.value)} />
                   </Field>
                 </>
               )}
@@ -485,7 +486,7 @@ export default function NovoDocumento() {
               {!!tipo.externo && eCompra && (
                 <>
                   <Field label="Data do documento" hint="Vazio = data de hoje">
-                    <Input type="date" max={hojeISO()} value={docData} onChange={(e) => setDocData(e.target.value)} />
+                    <InputData max={hojeISO()} value={docData} onChange={(e) => setDocData(e.target.value)} />
                   </Field>
                   <Field label="Assinatura" hint="4 caracteres impressos no documento (SAF-T)">
                     <Input
@@ -536,7 +537,7 @@ export default function NovoDocumento() {
                       <Input value={manualNumero} placeholder="N.º impresso no livro" onChange={(e) => setManualNumero(e.target.value)} />
                     </Field>
                     <Field label="Data do documento manual">
-                      <Input type="date" max={hojeISO()} value={manualData} onChange={(e) => setManualData(e.target.value)} />
+                      <InputData max={hojeISO()} value={manualData} onChange={(e) => setManualData(e.target.value)} />
                     </Field>
                     {!seriesManuais.length && (
                       <p className="col-span-3 text-[12.5px] text-accent-ink">Crie primeiro uma «série de documentos manuais» para {tipo.codigo} em Sistema → Séries de Documentos.</p>
@@ -589,18 +590,18 @@ export default function NovoDocumento() {
                 <tr>
                   <Th className="min-w-[160px]">Referência / Descrição</Th>
                   {inventario && <Th className="w-24 text-right">Existência</Th>}
-                  <Th className="w-24 text-right">{inventario ? "Contado" : "Quantidade"}</Th>
+                  <Th className="w-20 text-right">{inventario ? "Contado" : "Quant."}</Th>
                   {inventario ? (
                     <Th className="w-24 text-right">Diferença</Th>
                   ) : (
                     <>
-                      <Th className="w-32 text-right">{eCompra || eStock ? `Custo unit.${estrangeira ? ` (${moeda})` : ""}` : "Preço unit."}</Th>
-                      {!eStock && <Th className="w-16 text-right">Desc. %</Th>}
-                      {!eStock && <Th className="w-14 text-right">Taxa</Th>}
+                      <Th className="w-28 text-right">{eCompra || eStock ? `Custo unit.${estrangeira ? ` (${moeda})` : ""}` : "Preço unit."}</Th>
+                      {!eStock && <Th className="w-14 text-right">Desc. %</Th>}
+                      {!eStock && <Th className="w-12 text-right">Taxa</Th>}
                       <Th className="w-28 text-right">Valor total</Th>
                     </>
                   )}
-                  <Th className="w-10" />
+                  <Th className="w-9" />
                 </tr>
               </thead>
               <tbody>
@@ -615,7 +616,7 @@ export default function NovoDocumento() {
                     </Td>
                     {inventario && <Td className="num text-right text-ink-2">{qtd(l.existencia)}</Td>}
                     <Td>
-                      <Input className="num h-8 min-w-[64px] text-right" type="number" min={0} step="any" value={l.quantidade} onChange={(e) => upd(l.key, { quantidade: Number(e.target.value) })} />
+                      <Input className="num h-8 min-w-[56px] text-right" type="number" min={0} step="any" value={l.quantidade} onChange={(e) => upd(l.key, { quantidade: Number(e.target.value) })} />
                     </Td>
                     {inventario ? (
                       <Td className={cn("num text-right font-medium", l.quantidade - l.existencia < 0 ? "text-danger" : l.quantidade - l.existencia > 0 ? "text-ok" : "text-ink-3")}>
@@ -624,11 +625,11 @@ export default function NovoDocumento() {
                     ) : (
                       <>
                         <Td>
-                          <Input className="num h-8 min-w-[96px] text-right" value={l.preco} onChange={(e) => upd(l.key, { preco: e.target.value })} disabled={!!tipo.credito && !!origemId} />
+                          <Input className="num h-8 min-w-[88px] px-2 text-right" value={l.preco} onChange={(e) => upd(l.key, { preco: e.target.value })} disabled={!!tipo.credito && !!origemId} />
                         </Td>
                         {!eStock && (
                           <Td>
-                            <Input className="num h-8 min-w-[52px] text-right" type="number" min={0} max={100} value={l.desconto} onChange={(e) => upd(l.key, { desconto: Number(e.target.value) })} />
+                            <Input className="num h-8 min-w-[48px] px-2 text-right" type="number" min={0} max={100} value={l.desconto} onChange={(e) => upd(l.key, { desconto: Number(e.target.value) })} />
                           </Td>
                         )}
                         {!eStock && <Td className="num text-right text-ink-2">{l.taxa}%</Td>}
@@ -739,13 +740,13 @@ export default function NovoDocumento() {
                   <Input value={transp.carga_local ?? ""} onChange={(e) => setTransp({ ...transp, carga_local: e.target.value })} />
                 </Field>
                 <Field label="Data e hora de carga" className="col-span-2">
-                  <Input type="datetime-local" value={transp.carga_data ?? ""} onChange={(e) => setTransp({ ...transp, carga_data: e.target.value })} />
+                  <InputData comHora value={transp.carga_data ?? ""} onChange={(e) => setTransp({ ...transp, carga_data: e.target.value })} />
                 </Field>
                 <Field label="Local de descarga" className="col-span-2">
                   <Input value={transp.descarga_local ?? ""} onChange={(e) => setTransp({ ...transp, descarga_local: e.target.value })} />
                 </Field>
                 <Field label="Data e hora de descarga" className="col-span-2">
-                  <Input type="datetime-local" value={transp.descarga_data ?? ""} onChange={(e) => setTransp({ ...transp, descarga_data: e.target.value })} />
+                  <InputData comHora value={transp.descarga_data ?? ""} onChange={(e) => setTransp({ ...transp, descarga_data: e.target.value })} />
                 </Field>
                 <Field label="Matrícula da viatura" className="col-span-2">
                   <Input value={transp.matricula ?? ""} placeholder="LD-00-00-AA" onChange={(e) => setTransp({ ...transp, matricula: e.target.value.toUpperCase() })} />
@@ -967,13 +968,7 @@ function LoteCampos({ linha, entrada, armazem, onChange }: { linha: L; entrada: 
             <option key={l.id} value={l.lote} />
           ))}
         </datalist>
-        <input
-          type="date"
-          className="select-kg h-7 max-w-full rounded-md border border-line-strong bg-surface pl-2 pr-7 text-[12.5px] outline-none focus:border-brand"
-          title="Validade"
-          value={linha.validade}
-          onChange={(e) => onChange({ validade: e.target.value })}
-        />
+        <InputData tamanho="sm" title="Validade" value={linha.validade} onChange={(e) => onChange({ validade: e.target.value })} />
       </div>
     );
   }

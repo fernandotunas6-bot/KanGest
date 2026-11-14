@@ -6,6 +6,7 @@ import { data, hojeISO, kz } from "@/lib/format";
 import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
 import { imprimir } from "@/lib/print";
 import { Badge, Button, Card, Empty, Input, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 
@@ -82,9 +83,9 @@ export default function AvisoVencimento() {
           <option value="F">Fornecedores</option>
         </Select>
         <span className="text-ink-3">Vencidos de</span>
-        <Input type="date" className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
+        <InputData className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
         <span className="text-ink-3">até</span>
-        <Input type="date" className="w-40" value={ate} max={hojeISO()} onChange={(e) => setAte(e.target.value)} />
+        <InputData className="w-40" value={ate} max={hojeISO()} onChange={(e) => setAte(e.target.value)} />
         <div className="relative min-w-56 flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
           <Input className="pl-9" placeholder="Pesquisar entidade…" value={q} onChange={(e) => setQ(e.target.value)} />

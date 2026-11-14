@@ -8,6 +8,7 @@ import { data, hojeISO, kz, parseKz, qtd, toInputKz } from "@/lib/format";
 import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
 import { MESES, type Funcionario } from "@/lib/types";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 import { periodo } from "./Salarios";
 
 interface Independente {
@@ -554,10 +555,10 @@ function PrestacaoModal({ p, onClose }: { p: Partial<Prestacao>; onClose: () => 
           <Input className="num text-right" type="number" min={1} value={f.meses ?? 1} onChange={(e) => set("meses", Number(e.target.value))} />
         </Field>
         <Field label="Início">
-          <Input type="date" value={f.data_inicio ?? ""} onChange={(e) => set("data_inicio", e.target.value)} />
+          <InputData value={f.data_inicio ?? ""} onChange={(e) => set("data_inicio", e.target.value)} />
         </Field>
         <Field label="Fim">
-          <Input type="date" value={f.data_fim ?? ""} onChange={(e) => set("data_fim", e.target.value)} />
+          <InputData value={f.data_fim ?? ""} onChange={(e) => set("data_fim", e.target.value)} />
         </Field>
         <Field label="Líquido mensal da prestação (Kz)">
           <Input className="num text-right" value={liquido} onChange={(e) => setLiquido(e.target.value)} />

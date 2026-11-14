@@ -5,7 +5,7 @@ import { ArrowDownToLine, ArrowRightLeft, ArrowUpFromLine, Boxes, History, Searc
 import { call } from "@/lib/api";
 import { useDebounce, useTabelas } from "@/lib/hooks";
 import { dataHora, kz, qtd } from "@/lib/format";
-import { Badge, Button, Card, Empty, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 
 interface LinhaStock {
   id: number;
@@ -38,6 +38,9 @@ export default function Stock() {
     queryFn: () => call<LinhaStock[]>("stock.listar", { armazem_id: armazem, q: dq, abaixo_minimo: baixo }),
   });
   const valor = lista.data?.reduce((s, l) => s + l.valor_custo, 0) ?? 0;
+  const { ordenados, cab } = useOrdenacao(lista.data, (l, k: "artigo" | "qtd" | "reservado" | "disponivel" | "encomendado" | "minimo" | "custo" | "valor" | "entrada" | "saida") =>
+    ({ artigo: l.descricao, qtd: l.quantidade, reservado: l.reservado, disponivel: l.disponivel, encomendado: l.encomendado, minimo: l.qtd_minima, custo: l.custo_medio, valor: l.valor_custo, entrada: l.ultima_entrada, saida: l.ultima_saida })[k],
+  );
   // as colunas de encomendas só aparecem quando há encomendas pendentes
   const temReservas = !!lista.data?.some((l) => l.reservado);
   const temEncomendas = !!lista.data?.some((l) => l.encomendado);
@@ -84,21 +87,41 @@ export default function Stock() {
           <Table className="tabela-compacta max-h-[calc(100vh-344px)]">
             <thead>
               <tr>
-                <Th>Artigo</Th>
-                <Th className="text-right">Existência</Th>
-                {temReservas && <Th className="text-right">Reservado</Th>}
-                {temReservas && <Th className="text-right">Disponível</Th>}
-                {temEncomendas && <Th className="text-right">Encomendado</Th>}
-                <Th className="text-right">Mínimo</Th>
-                <Th className="text-right">Custo médio</Th>
-                <Th className="text-right">Valor</Th>
-                <Th>Última entrada</Th>
-                <Th>Última saída</Th>
+                <Th {...cab("artigo")}>Artigo</Th>
+                <Th className="text-right" {...cab("qtd")}>
+                  Existência
+                </Th>
+                {temReservas && (
+                  <Th className="text-right" {...cab("reservado")}>
+                    Reservado
+                  </Th>
+                )}
+                {temReservas && (
+                  <Th className="text-right" {...cab("disponivel")}>
+                    Disponível
+                  </Th>
+                )}
+                {temEncomendas && (
+                  <Th className="text-right" {...cab("encomendado")}>
+                    Encomendado
+                  </Th>
+                )}
+                <Th className="text-right" {...cab("minimo")}>
+                  Mínimo
+                </Th>
+                <Th className="text-right" {...cab("custo")}>
+                  Custo médio
+                </Th>
+                <Th className="text-right" {...cab("valor")}>
+                  Valor
+                </Th>
+                <Th {...cab("entrada")}>Última entrada</Th>
+                <Th {...cab("saida")}>Última saída</Th>
                 <Th />
               </tr>
             </thead>
             <tbody>
-              {lista.data?.map((l) => (
+              {ordenados?.map((l) => (
                 <tr key={l.id} className="hover:bg-sunken/60">
                   <Td>
                     <div className="font-medium">{l.descricao}</div>

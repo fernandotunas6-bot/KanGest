@@ -228,6 +228,7 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "oficina.ordens" => oficina::ordens(st, p(params)?).await,
         "oficina.ordem" => oficina::ordem(st, p(params)?).await,
         "oficina.ordemGuardar" => oficina::ordem_guardar(st, p(params)?).await,
+        "oficina.ordemEstado" => oficina::ordem_estado(st, p(params)?).await,
         "oficina.associar" => oficina::associar(st, p(params)?).await,
 
         // ---- relatórios / sistema ----

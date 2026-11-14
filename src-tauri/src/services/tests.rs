@@ -906,6 +906,13 @@ async fn rh_oficina_lotes_moedas() {
     assert!(rpc_err(&st, "oficina.ordemGuardar", json!({ "id": os, "viatura_id": viat })).await.contains("facturada"));
     let os2 = rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat })).await["id"].as_i64().unwrap();
     assert_eq!(rpc(&st, "oficina.ordem", json!({ "id": os2 })).await["numero"], format!("OS {ano}/2"));
+    // quadro kanban: muda só o estado; concluir regista a data; facturada só pela factura e depois não muda
+    rpc(&st, "oficina.ordemEstado", json!({ "id": os2, "estado": "EM_CURSO" })).await;
+    let o2 = rpc(&st, "oficina.ordemEstado", json!({ "id": os2, "estado": "CONCLUIDA" })).await;
+    assert_eq!(o2["estado"], "CONCLUIDA");
+    assert!(rpc(&st, "oficina.ordem", json!({ "id": os2 })).await["data_conclusao"].is_string());
+    assert!(rpc_err(&st, "oficina.ordemEstado", json!({ "id": os2, "estado": "FACTURADA" })).await.contains("inválido"));
+    assert!(rpc_err(&st, "oficina.ordemEstado", json!({ "id": os, "estado": "ABERTA" })).await.contains("facturada"));
 
     // =========================== moedas e custos de importação ===========================
     assert!(rpc_err(&st, "moedas.guardar", json!({ "codigo": "AOA", "descricao": "Kwanza", "simbolo": "Kz", "cambio": 2.0 })).await.contains("Kwanza"));
@@ -1861,7 +1868,14 @@ async fn servidor_demo() {
 
     // oficina e tesouraria
     let viat = rpc(&st, "oficina.viaturaGuardar", json!({ "entidade_id": cli2, "matricula": "LD-45-12-AB", "marca": "Toyota", "modelo": "Hilux", "cor": "Branco", "ano": 2019, "km": 84500 })).await["id"].as_i64().unwrap();
-    rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat, "entidade_id": cli2, "avaria": "Ruído na travagem", "diagnostico": "Pastilhas gastas", "estado": "EM_CURSO", "linhas": [{ "descricao": "Substituição de pastilhas", "quantidade": 1 }] })).await;
+    rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat, "entidade_id": cli2, "avaria": "Ruído na travagem", "diagnostico": "Pastilhas gastas", "estado": "EM_CURSO", "tecnico": "Mário", "linhas": [{ "descricao": "Substituição de pastilhas", "quantidade": 1 }] })).await;
+    // mais ordens para o quadro: uma aberta há 10 dias (parada), outra aberta hoje e uma concluída
+    let viat2 = rpc(&st, "oficina.viaturaGuardar", json!({ "entidade_id": cli1, "matricula": "LD-12-34-CD", "marca": "Nissan", "modelo": "Navara", "cor": "Cinzento", "ano": 2021, "km": 61200 })).await["id"].as_i64().unwrap();
+    let viat3 = rpc(&st, "oficina.viaturaGuardar", json!({ "entidade_id": cli2, "matricula": "LA-77-90-EF", "marca": "Hyundai", "modelo": "Tucson", "cor": "Preto", "ano": 2022, "km": 30400 })).await["id"].as_i64().unwrap();
+    let parada = rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat2, "avaria": "Aguarda peça: bomba de água", "estado": "ABERTA" })).await["id"].as_i64().unwrap();
+    sqlx::query("UPDATE of_ordens SET data_entrada = datetime('now', 'localtime', '-10 day') WHERE id = ?").bind(parada).execute(&st.pool).await.unwrap();
+    rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat3, "avaria": "Revisão dos 30 000 km", "estado": "ABERTA" })).await;
+    rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat3, "avaria": "Troca de óleo e filtros", "diagnostico": "Feito", "estado": "CONCLUIDA", "tecnico": "Domingos" })).await;
     rpc(&st, "tesouraria.movimento", json!({ "conta_id": 1, "tipo": "SAIDA", "valor": 15000000, "descricao": "Renda da loja", "centro_custo_id": 4 })).await;
 
     // utilizadores, perfis e registo de acessos

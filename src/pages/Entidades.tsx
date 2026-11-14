@@ -11,7 +11,7 @@ import { imprimir } from "@/lib/print";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import type { Entidade } from "@/lib/types";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, useOrdenacao } from "@/components/ui";
 
 export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
   const [q, setQ] = useState("");
@@ -28,6 +28,9 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
   }, [sp, setSp]);
   const nome = tipo === "C" ? "Clientes" : "Fornecedores";
   const lista = useQuery({ queryKey: ["entidades", tipo, dq], queryFn: () => call<Entidade[]>("entidades.listar", { tipo, q: dq }) });
+  const { ordenados, cab } = useOrdenacao(lista.data, (e, k: "nome" | "nif" | "localidade" | "saldo") =>
+    k === "nome" ? e.nome : k === "nif" ? e.nif : k === "localidade" ? e.localidade : (e.saldo ?? 0),
+  );
   const empresa = useEmpresa();
   const linhas = lista.data ?? [];
   const totalDivida = linhas.reduce((s, e) => s + Math.max(0, e.saldo ?? 0), 0);
@@ -75,15 +78,17 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
           <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
-                <Th>Nome</Th>
-                <Th>NIF</Th>
+                <Th {...cab("nome")}>Nome</Th>
+                <Th {...cab("nif")}>NIF</Th>
                 <Th>Contacto</Th>
-                <Th>Localidade</Th>
-                <Th className="text-right">Saldo em dívida</Th>
+                <Th {...cab("localidade")}>Localidade</Th>
+                <Th className="text-right" {...cab("saldo")}>
+                  Saldo em dívida
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {lista.data?.map((e) => (
+              {ordenados?.map((e) => (
                 <tr key={e.id} className="cursor-pointer hover:bg-sunken/60" onClick={() => e.id !== 1 && setEditar(e)}>
                   <Td className="font-medium">
                     {e.nome} {e.id === 1 && <Badge className="ml-2">Sistema</Badge>}

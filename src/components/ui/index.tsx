@@ -1,7 +1,7 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { ArrowDownRight, ArrowUpRight, X, type LucideIcon } from "lucide-react";
-import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TdHTMLAttributes } from "react";
+import { ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, ChevronsUpDown, X, type LucideIcon } from "lucide-react";
+import { forwardRef, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TdHTMLAttributes } from "react";
 import { numero } from "@/lib/format";
 
 export const cn = (...c: ClassValue[]) => twMerge(clsx(c));
@@ -54,7 +54,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
 export function Field({ label, hint, children, className }: { label: string; hint?: string; children: ReactNode; className?: string }) {
   return (
     <label className={cn("flex flex-col gap-1.5", className)}>
-      <span className="text-[12px] font-medium uppercase tracking-wide text-ink-2">{label}</span>
+      <span className="text-[13px] font-medium text-ink-2">{label}</span>
       {children}
       {hint && <span className="text-[12px] text-ink-3">{hint}</span>}
     </label>
@@ -137,12 +137,68 @@ export function Table({ children, className }: { children: ReactNode; className?
     </div>
   );
 }
-export function Th({ children, className }: { children?: ReactNode; className?: string }) {
+export function Th({
+  children,
+  className,
+  direccao,
+  onOrdenar,
+}: {
+  children?: ReactNode;
+  className?: string;
+  /** coluna ordenável (ver useOrdenacao): sentido actual e o clique que muda a ordem */
+  direccao?: Direccao | null;
+  onOrdenar?: () => void;
+}) {
+  const Seta = direccao === "asc" ? ArrowUp : direccao === "desc" ? ArrowDown : ChevronsUpDown;
   return (
-    <th className={cn("sticky top-0 z-[1] border-b border-line bg-surface px-4 py-[var(--kg-cab-y)] text-[12px] font-medium uppercase tracking-wide text-ink-3", className)}>
-      {children}
+    <th
+      aria-sort={direccao === "asc" ? "ascending" : direccao === "desc" ? "descending" : undefined}
+      className={cn("sticky top-0 z-[1] border-b border-line bg-surface px-4 py-[var(--kg-cab-y)] text-[12px] font-medium uppercase tracking-wide text-ink-3", className)}
+    >
+      {onOrdenar ? (
+        <button
+          type="button"
+          onClick={onOrdenar}
+          title="Ordenar por esta coluna"
+          className={cn("group/ord inline-flex items-center gap-1 uppercase tracking-wide transition hover:text-ink", direccao && "text-ink")}
+        >
+          {children}
+          <Seta className={cn("size-3.5 shrink-0", direccao ? "text-brand" : "opacity-0 group-hover/ord:opacity-60")} />
+        </button>
+      ) : (
+        children
+      )}
     </th>
   );
+}
+
+export type Direccao = "asc" | "desc";
+const colador = new Intl.Collator("pt", { sensitivity: "base", numeric: true });
+
+/**
+ * Ordenar uma lista pelo clique nos cabeçalhos (1.º clique crescente, 2.º decrescente, 3.º volta à ordem original).
+ * Os vazios ficam sempre no fim; o texto compara sem acentos e com os números no sítio («FT 2026/9» antes de «/10»).
+ *   const { ordenados, cab } = useOrdenacao(lista, (x, k) => …);   <Th {...cab("total")}>Total</Th>
+ */
+export function useOrdenacao<T, K extends string>(lista: T[] | undefined, valor: (x: T, chave: K) => string | number | null | undefined) {
+  const [ordem, setOrdem] = useState<{ chave: K; dir: Direccao } | null>(null);
+  const ordenados = useMemo(() => {
+    if (!lista || !ordem) return lista;
+    const f = ordem.dir === "asc" ? 1 : -1;
+    const vazio = (v: unknown) => v === null || v === undefined || v === "";
+    return [...lista].sort((a, b) => {
+      const va = valor(a, ordem.chave);
+      const vb = valor(b, ordem.chave);
+      if (vazio(va) || vazio(vb)) return vazio(va) === vazio(vb) ? 0 : vazio(va) ? 1 : -1;
+      return (typeof va === "number" && typeof vb === "number" ? va - vb : colador.compare(String(va), String(vb))) * f;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lista, ordem]);
+  const cab = (chave: K) => ({
+    direccao: ordem?.chave === chave ? ordem.dir : null,
+    onOrdenar: () => setOrdem((o) => (!o || o.chave !== chave ? { chave, dir: "asc" } : o.dir === "asc" ? { chave, dir: "desc" } : null)),
+  });
+  return { ordenados, cab };
 }
 export function Td({ children, className, ...rest }: TdHTMLAttributes<HTMLTableCellElement>) {
   return (

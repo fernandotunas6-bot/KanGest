@@ -9,7 +9,8 @@ import { comIva, kz, parseKz, qtd, semIva, toInputKz } from "@/lib/format";
 import type { Artigo, Componente } from "@/lib/types";
 import { ArtigoPicker } from "@/components/Pickers";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 
 export default function Artigos() {
   const [q, setQ] = useState("");
@@ -38,6 +39,9 @@ export default function Artigos() {
     queryKey: ["artigos", dq, familia],
     queryFn: () => call<Artigo[]>("artigos.listar", { q: dq, familia_id: familia ? Number(familia) : null, inativos: true }),
   });
+  const { ordenados, cab } = useOrdenacao(lista.data, (a, k: "ref" | "desc" | "familia" | "iva" | "custo" | "pvp" | "stock") =>
+    k === "ref" ? a.referencia : k === "desc" ? a.descricao : k === "familia" ? a.familia : k === "iva" ? a.taxa_pct : k === "custo" ? a.custo_medio : k === "pvp" ? a.preco1_iva : a.tipo === "S" ? null : a.stock,
+  );
 
   return (
     <>
@@ -85,17 +89,25 @@ export default function Artigos() {
           <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
-                <Th>Referência</Th>
-                <Th>Descrição</Th>
-                <Th>Família</Th>
-                <Th className="text-right">IVA</Th>
-                <Th className="text-right">Custo médio</Th>
-                <Th className="text-right">PVP (c/ IVA)</Th>
-                <Th className="text-right">Stock</Th>
+                <Th {...cab("ref")}>Referência</Th>
+                <Th {...cab("desc")}>Descrição</Th>
+                <Th {...cab("familia")}>Família</Th>
+                <Th className="text-right" {...cab("iva")}>
+                  IVA
+                </Th>
+                <Th className="text-right" {...cab("custo")}>
+                  Custo médio
+                </Th>
+                <Th className="text-right" {...cab("pvp")}>
+                  PVP (c/ IVA)
+                </Th>
+                <Th className="text-right" {...cab("stock")}>
+                  Stock
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {lista.data?.map((a) => (
+              {ordenados?.map((a) => (
                 <tr key={a.id} className={cn("cursor-pointer hover:bg-sunken/60", !a.ativo && "opacity-50")} onClick={() => {
                     if (!tem("artigos.editar")) return;
                     setOrigem(undefined);
@@ -388,10 +400,10 @@ function ArtigoForm({
             />
           </Field>
           <Field label="De" hint="Vazio = desde já">
-            <Input type="date" value={a.promo_inicio ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_inicio", e.target.value || null)} />
+            <InputData value={a.promo_inicio ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_inicio", e.target.value || null)} />
           </Field>
           <Field label="Até" hint="Vazio = sem fim">
-            <Input type="date" value={a.promo_fim ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_fim", e.target.value || null)} />
+            <InputData value={a.promo_fim ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_fim", e.target.value || null)} />
           </Field>
         </div>
       </div>
