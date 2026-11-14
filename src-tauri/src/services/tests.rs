@@ -2753,3 +2753,35 @@ async fn chave_embutida_quando_existe() {
     assert_eq!(rpc(&st, "agt.verificarIntegridade", Value::Null).await["ok"], true);
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+#[tokio::test]
+async fn segredos_cifrados_na_configuracao() {
+    let (st, pasta) = base_com_admin("segredos").await;
+    let pem = {
+        use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+        rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap().to_pkcs8_pem(LineEnding::LF).unwrap().to_string()
+    };
+    rpc(&st, "fe.guardar", json!({ "ativo": false, "ambiente": "HML", "utilizador": "produtor", "senha": "senha-secreta", "numero_validacao": "C_1",
+        "estabelecimento": "SEDE", "chave_contribuinte": pem })).await;
+    let bruto = |k: &'static str| {
+        let pool = st.pool.clone();
+        async move { sqlx::query_scalar::<_, String>("SELECT valor FROM config WHERE chave = ?").bind(k).fetch_one(&pool).await.unwrap() }
+    };
+    for k in ["fe.senha", "fe.chave_contribuinte"] {
+        let v = bruto(k).await;
+        assert!(v.starts_with("kgs1:") && !v.contains("BEGIN") && !v.contains("senha-secreta"), "{k} fica cifrado: {v}");
+    }
+    // o programa continua a ler os valores
+    let estado = rpc(&st, "fe.estado", Value::Null).await;
+    assert_eq!((estado["senha"].as_bool(), estado["chave_contribuinte"].as_bool()), (Some(true), Some(true)));
+    // segredos gravados em texto por versões anteriores são cifrados no arranque
+    sqlx::query("UPDATE config SET valor = 'antiga' WHERE chave = 'fe.senha'").execute(&st.pool).await.unwrap();
+    assert_eq!(crate::segredos::cifrar_existentes(&st.pool).await.unwrap(), 1);
+    assert!(bruto("fe.senha").await.starts_with("kgs1:"));
+    assert_eq!(crate::segredos::ler(&st.pool, "fe.senha").await.unwrap().as_deref(), Some("antiga"));
+    // a chave de desenvolvimento também fica cifrada
+    if crate::produtor::chave_agt().unwrap().is_none() {
+        assert!(bruto("agt.chave_privada").await.starts_with("kgs1:"));
+    }
+    let _ = std::fs::remove_dir_all(&pasta);
+}

@@ -4,6 +4,7 @@ mod error;
 pub mod http;
 mod produtor;
 mod rede;
+mod segredos;
 mod services;
 mod state;
 
@@ -44,7 +45,12 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let caminho = dir.join("kigest.db");
+            // chave mestra dos segredos da configuração (fora da base de dados)
+            segredos::iniciar(&dir)?;
             let pool = tauri::async_runtime::block_on(db::abrir(&caminho))?;
+            if let Err(e) = tauri::async_runtime::block_on(segredos::cifrar_existentes(&pool)) {
+                eprintln!("Não foi possível cifrar os segredos guardados: {e}");
+            }
             let mut estado = AppState::new(pool);
             estado.pasta_dados = dir.clone();
             estado.pasta_exportacao = app.path().download_dir().unwrap_or_else(|_| dir.clone());

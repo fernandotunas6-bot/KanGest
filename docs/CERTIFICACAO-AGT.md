@@ -70,3 +70,14 @@ Se a chave do produtor for comprometida: gera-se outra, entrega-se a pública à
 `KANGEST_AGT_CHAVE`, sobe-se `KANGEST_AGT_VERSAO_CHAVE` (ex.: `2`) e publica-se uma versão nova. As instalações passam a
 assinar com a chave nova; a pública de cada chave do produtor usada fica registada em `agt_chaves` logo no primeiro
 documento, por isso a verificação de integridade continua a confirmar os documentos antigos.
+
+## Segredos na instalação do cliente
+
+O que é mesmo do cliente fica na configuração da instalação, mas **cifrado** (AES-256-GCM): a chave do contribuinte e,
+numa compilação de desenvolvimento, as credenciais da FE e a chave de assinatura (`src-tauri/src/segredos.rs`).
+
+- A chave mestra está no ficheiro `kangest.chave`, na pasta de dados da aplicação, **fora da base de dados**. Uma cópia
+  de segurança da base, sozinha, não revela os segredos.
+- As versões anteriores gravavam estes valores em texto; ao arrancar, a versão nova cifra-os.
+- Restaurar a base noutra máquina (ou depois de apagar `kangest.chave`) obriga a introduzir de novo esses segredos:
+  o KanGest avisa qual não consegue ler.

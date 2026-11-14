@@ -74,7 +74,7 @@ pub async fn cfg(p: &SqlitePool) -> AppResult<Cfg> {
         },
         senha: match pr::fe_senha() {
             Some(x) => x,
-            None => g("fe.senha").await?,
+            None => crate::segredos::ler(p, "fe.senha").await?.unwrap_or_default(),
         },
         numero_validacao: match pr::fe_numero_validacao() {
             Some(x) => x,
@@ -84,9 +84,9 @@ pub async fn cfg(p: &SqlitePool) -> AppResult<Cfg> {
         estabelecimento: Some(g("fe.estabelecimento").await?).filter(|x| !x.is_empty()).unwrap_or_else(|| "SEDE".into()),
         chave_software: match pr::fe_chave_software() {
             Some(x) => Some(x),
-            None => valor(p, "fe.chave_software").await?.filter(|x| !x.is_empty()),
+            None => crate::segredos::ler(p, "fe.chave_software").await?.filter(|x| !x.is_empty()),
         },
-        chave_contribuinte: valor(p, "fe.chave_contribuinte").await?.filter(|x| !x.is_empty()),
+        chave_contribuinte: crate::segredos::ler(p, "fe.chave_contribuinte").await?.filter(|x| !x.is_empty()),
         nif: nif.unwrap_or_default(),
         endereco: g("fe.endereco").await?,
     })
@@ -678,7 +678,11 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
     pares.push(("fe.ativo", if g.ativo { "1".into() } else { "0".into() }));
     let mut tx = st.pool.begin().await?;
     for (k, v) in &pares {
-        sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").bind(k).bind(v).execute(&mut *tx).await?;
+        if crate::segredos::CHAVES.contains(k) {
+            crate::segredos::gravar(&mut *tx, k, v).await?;
+        } else {
+            sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").bind(k).bind(v).execute(&mut *tx).await?;
+        }
     }
     sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'FE_CONFIG', ?)")
         .bind(s.id)

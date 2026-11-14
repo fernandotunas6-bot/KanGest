@@ -37,11 +37,8 @@ pub async fn chave(pool: &SqlitePool) -> AppResult<RsaPrivateKey> {
             .await?;
         return Ok(k.clone());
     }
-    let pem: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?")
-        .bind(CHAVE_CONFIG)
-        .fetch_optional(pool)
-        .await?;
-    if let Some(pem) = pem {
+    // compilação de desenvolvimento: chave guardada (cifrada) na configuração
+    if let Some(pem) = crate::segredos::ler(pool, CHAVE_CONFIG).await? {
         return RsaPrivateKey::from_pkcs8_pem(&pem).map_err(|e| AppError::msg(format!("Chave AGT inválida: {e}")));
     }
     let chave = tokio::task::spawn_blocking(|| RsaPrivateKey::new(&mut rand::thread_rng(), 1024))
@@ -52,18 +49,15 @@ pub async fn chave(pool: &SqlitePool) -> AppResult<RsaPrivateKey> {
         .to_pkcs8_pem(LineEnding::LF)
         .map_err(|e| AppError::msg(e.to_string()))?
         .to_string();
-    sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?)")
-        .bind(CHAVE_CONFIG)
-        .bind(pem)
-        .execute(pool)
-        .await?;
+    crate::segredos::gravar(pool, CHAVE_CONFIG, &pem).await?;
     Ok(chave)
 }
 
 /// Com a chave do produtor embutida, a privada que esteja na base de dados sai de lá (fica a pública).
 pub(crate) async fn retirar_chave_da_base(pool: &SqlitePool, produtor: &RsaPrivateKey) -> AppResult<()> {
-    let pem: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(CHAVE_CONFIG).fetch_optional(pool).await?;
-    let Some(pem) = pem else { return Ok(()) };
+    let bruto: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(CHAVE_CONFIG).fetch_optional(pool).await?;
+    let Some(bruto) = bruto else { return Ok(()) };
+    let pem = crate::segredos::decifrar(&bruto).unwrap_or_default();
     let mut tx = pool.begin().await?;
     if RsaPrivateKey::from_pkcs8_pem(&pem).map(|k| k.to_public_key() != produtor.to_public_key()).unwrap_or(false) {
         let importada: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'agt.chave_importada_em'").fetch_optional(&mut *tx).await?;
@@ -134,7 +128,7 @@ pub async fn chaves_publicas(pool: &SqlitePool) -> AppResult<Vec<RsaPublicKey>> 
     if let Ok(Some(k)) = crate::produtor::chave_agt() {
         v.push(k.to_public_key());
     }
-    let pem: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(CHAVE_CONFIG).fetch_optional(pool).await?;
+    let pem = crate::segredos::ler(pool, CHAVE_CONFIG).await.ok().flatten();
     if let Some(k) = pem.and_then(|p| RsaPrivateKey::from_pkcs8_pem(&p).ok()) {
         if !v.contains(&k.to_public_key()) {
             v.push(k.to_public_key());
@@ -159,7 +153,7 @@ pub fn confere(chaves: &[RsaPublicKey], msg: &str, hash: &str) -> bool {
 /// Guarda a chave pública da chave em uso antes de a substituir: os documentos que ela assinou
 /// continuam verificáveis na verificação de integridade.
 pub async fn arquivar_chave(tx: &mut Transaction<'_, Sqlite>, origem: &str) -> AppResult<()> {
-    let pem: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(CHAVE_CONFIG).fetch_optional(&mut **tx).await?;
+    let pem = crate::segredos::ler(&mut **tx, CHAVE_CONFIG).await.ok().flatten();
     if let Some(k) = pem.and_then(|p| RsaPrivateKey::from_pkcs8_pem(&p).ok()) {
         sqlx::query("INSERT OR IGNORE INTO agt_chaves (chave_publica, origem) VALUES (?, ?)")
             .bind(chave_publica_pem(&k)?)
