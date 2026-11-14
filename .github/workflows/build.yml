@@ -58,11 +58,10 @@ jobs:
 
       - run: npm ci
 
-      # os testes correm no Windows (código só de Windows: impressão, consola, instalador) e no Apple Silicon
+      # os testes correm no Windows (código só de Windows: impressão, consola, instalador) e no Apple Silicon;
+      # um teste a falhar trava a publicação (o CI em cada push corre-os também no Linux)
       - name: Testes
         if: matrix.nome != 'macos-intel'
-        # um teste que falhe só num sistema não deve impedir o instalador; o resultado fica no registo da execução
-        continue-on-error: true
         working-directory: src-tauri
         run: cargo test --locked
 

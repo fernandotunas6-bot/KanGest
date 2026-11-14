@@ -189,6 +189,7 @@ fn software_info(c: &Cfg, a: &Assinador) -> Value {
 }
 
 /// Campos assinados do documento, pela ordem da especificação.
+#[allow(clippy::too_many_arguments)]
 pub fn payload_documento(doc_no: &str, nif: &str, tipo: &str, data: &str, cliente_nif: &str, pais: &str, nome: &str, iva: i64, liquido: i64, total: i64) -> String {
     format!(
         "{{\"documentNo\":{},\"taxRegistrationNumber\":{},\"documentType\":{},\"documentDate\":{},\"customerTaxID\":{},\"customerCountry\":{},\"companyName\":{},\"documentTotals\":{{\"taxPayable\":{},\"netTotal\":{},\"grossTotal\":{}}}}}",

@@ -4,7 +4,7 @@
 //! nem abre a gaveta. Aqui o talão é montado em bytes e enviado em modo "raw" à impressora:
 //!
 //! - `fila`     — fila de impressão local (`lp -o raw` no macOS/Linux; `copy /b` para a partilha
-//!                `\\localhost\<nome>` no Windows, por ser a forma de enviar raw sem drivers);
+//!   `\\localhost\<nome>` no Windows, por ser a forma de enviar raw sem drivers);
 //! - `rede`     — impressora de rede directa em TCP (porta 9100 por omissão);
 //! - `ficheiro` — porta ou dispositivo (ex.: `/dev/usb/lp0`, `\\.\COM3`) ou ficheiro para teste.
 //!

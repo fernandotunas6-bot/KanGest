@@ -48,12 +48,7 @@ fn gravar_cfg(dir: &Path, c: &Config) -> AppResult<()> {
 }
 
 pub fn plataforma() -> String {
-    let os = match std::env::consts::OS {
-        "macos" => "macos",
-        "windows" => "windows",
-        o => o,
-    };
-    format!("{os}-{}", std::env::consts::ARCH)
+    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
 /// Compara versões "a.b.c" (partes em falta valem 0; sufixos como "-beta" são ignorados).

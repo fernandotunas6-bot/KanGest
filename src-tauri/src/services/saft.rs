@@ -3,6 +3,7 @@
 //!   SourceDocuments (SalesInvoices, MovementOfGoods, WorkingDocuments, Payments).
 //! * Aquisição (TaxAccountingBasis = A): Header, MasterFiles (Supplier, TaxTable) e
 //!   SourceDocuments/PurchaseInvoices.
+//!
 //! Validar no validador da AGT antes de submeter.
 
 use std::collections::BTreeSet;
@@ -376,7 +377,7 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
         status(&mut x, 8, "InvoiceStatus", d, "SourceBilling");
         el(&mut x, 8, "Hash", &d.hash);
         el(&mut x, 8, "HashControl", d.hash_versao.as_deref().unwrap_or(hc));
-        el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+        el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
         el(&mut x, 8, "InvoiceDate", &d.data);
         el(&mut x, 8, "InvoiceType", &d.tipo);
         x.push_str("        <SpecialRegimes>\n");
@@ -425,7 +426,7 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
             status(&mut x, 8, "MovementStatus", d, "SourceBilling");
             el(&mut x, 8, "Hash", &d.hash);
             el(&mut x, 8, "HashControl", d.hash_versao.as_deref().unwrap_or(hc));
-            el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+            el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
             el(&mut x, 8, "MovementDate", &d.data);
             el(&mut x, 8, "MovementType", "GT");
             el(&mut x, 8, "SystemEntryDate", &d.data_hora);
@@ -461,7 +462,7 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
         status(&mut x, 8, "WorkStatus", d, "SourceBilling");
         el(&mut x, 8, "Hash", &d.hash);
         el(&mut x, 8, "HashControl", d.hash_versao.as_deref().unwrap_or(hc));
-        el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+        el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
         el(&mut x, 8, "WorkDate", &d.data);
         el(&mut x, 8, "WorkType", &d.tipo);
         el(&mut x, 8, "SourceID", &d.login);
@@ -482,7 +483,7 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
     for d in &recibos {
         x.push_str("      <Payment>\n");
         el(&mut x, 8, "PaymentRefNo", &d.numero);
-        el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+        el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
         el(&mut x, 8, "TransactionDate", &d.data);
         el(&mut x, 8, "PaymentType", "RC");
         status(&mut x, 8, "PaymentStatus", d, "SourcePayment");

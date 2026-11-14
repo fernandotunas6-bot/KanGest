@@ -1553,7 +1553,9 @@ async fn parametrizacao_documentos() {
 }
 
 /// Servidor local que imita os serviços `sigt/fe/v1` da AGT e guarda os pedidos recebidos.
-fn agt_simulada() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<(String, String, Value)>>>) {
+type PedidosAgt = std::sync::Arc<std::sync::Mutex<Vec<(String, String, Value)>>>;
+
+fn agt_simulada() -> (u16, PedidosAgt) {
     use std::io::{Read, Write};
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let porta = l.local_addr().unwrap().port();
@@ -1726,7 +1728,7 @@ async fn facturacao_electronica() {
     let ft2 = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
     rpc(&st, "fe.corrigir", json!({ "rejeitado_id": ft_id, "numero_novo": ft2["documento"]["numero_doc"] })).await;
     rpc(&st, "fe.processar", Value::Null).await;
-    let ultimo = pedidos.lock().unwrap().iter().filter(|p| p.0.ends_with("/registarFactura")).last().cloned().unwrap();
+    let ultimo = pedidos.lock().unwrap().iter().rfind(|p| p.0.ends_with("/registarFactura")).cloned().unwrap();
     let dc = &ultimo.2["documents"][0];
     assert_eq!(dc["documentStatus"], "C");
     assert_eq!(dc["rejectedDocumentNo"], ft["documento"]["numero_doc"]);

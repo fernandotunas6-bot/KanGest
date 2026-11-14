@@ -143,7 +143,8 @@ mod cifra {
     pub fn derivar(chave: &str, sal: &str) -> [u8; 32] {
         use std::collections::HashMap;
         use std::sync::{Mutex, OnceLock};
-        static CACHE: OnceLock<Mutex<HashMap<(String, String), [u8; 32]>>> = OnceLock::new();
+        type Cache = Mutex<HashMap<(String, String), [u8; 32]>>;
+        static CACHE: OnceLock<Cache> = OnceLock::new();
         let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
         let k = (chave.to_string(), sal.to_string());
         if let Some(v) = cache.lock().unwrap().get(&k) {
@@ -186,8 +187,10 @@ fn agora_ms() -> i64 {
 }
 
 /// Endereços que erraram a chave: (falhas, primeira falha, bloqueado até).
-fn tentativas() -> &'static Mutex<HashMap<String, (u32, std::time::Instant, Option<std::time::Instant>)>> {
-    static T: OnceLock<Mutex<HashMap<String, (u32, std::time::Instant, Option<std::time::Instant>)>>> = OnceLock::new();
+type Tentativas = Mutex<HashMap<String, (u32, std::time::Instant, Option<std::time::Instant>)>>;
+
+fn tentativas() -> &'static Tentativas {
+    static T: OnceLock<Tentativas> = OnceLock::new();
     T.get_or_init(|| Mutex::new(HashMap::new()))
 }
 

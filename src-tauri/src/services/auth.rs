@@ -258,7 +258,8 @@ pub async fn login(st: &AppState, i: LoginIn) -> AppResult<Value> {
 }
 
 /// Falhas seguidas de entrada por PIN em cada posto (um PIN de 4 dígitos não pode ser adivinhado à força).
-static FALHAS_PIN: std::sync::Mutex<Option<std::collections::HashMap<i64, (u32, chrono::DateTime<chrono::Local>)>>> = std::sync::Mutex::new(None);
+type FalhasPin = std::sync::Mutex<Option<std::collections::HashMap<i64, (u32, chrono::DateTime<chrono::Local>)>>>;
+static FALHAS_PIN: FalhasPin = std::sync::Mutex::new(None);
 
 #[derive(Deserialize)]
 pub struct PinIn {

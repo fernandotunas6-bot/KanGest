@@ -56,6 +56,10 @@ cd src-tauri && cargo test     # inclui a verificação da assinatura AGT
 npm run typecheck
 ```
 
+O CI (`.github/workflows/ci.yml`) corre em cada push e pull request: `npm run typecheck`, `cargo clippy -- -D warnings`
+e `cargo test`, também numa compilação com uma chave de produtor de teste. No `build.yml`, um teste a falhar trava a
+publicação dos instaladores.
+
 ## Atalhos do POS (iguais ao KIGEST POS)
 
 | Tecla | Acção |
