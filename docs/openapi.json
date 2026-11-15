@@ -3,7 +3,7 @@
   "info": {
     "title": "API do KanGest",
     "version": "1.0",
-    "description": "API de integração do KanGest: lojas online, contabilidade, BI e outras aplicações ligam-se ao KanGest com **chaves de acesso**.\n\n- **Chave:** `Authorization: Bearer kg_…` (ou `X-API-Key: kg_…`). Cria-se em *Sistema → API e Integrações*; o segredo só aparece uma vez.\n- **Permissões:** cada chave tem as suas e age em nome de um utilizador: nunca faz mais do que ele.\n- **Valores monetários** em cêntimos de Kz (inteiros): 1 140,00 Kz = `114000`. Datas `AAAA-MM-DD`; data e hora `AAAA-MM-DDTHH:MM:SS` (hora local).\n- **Listas** ordenadas por `id`, em páginas: `?desde_id=<seguinte>&limite=…` até `mais` ser `false`. `alterado_desde` traz só o que mudou (artigos e entidades).\n- **Emissão:** os documentos seguem as regras do programa (série do posto da chave, assinatura AGT, stock, Facturação Electrónica). Envie `Idempotency-Key` para poder repetir o pedido sem emitir outro documento.\n- **Erros:** `{\"erro\": {\"codigo\": \"...\", \"mensagem\": \"...\"}}` com 400, 401, 403, 404, 405, 413, 422, 429 ou 500.\n- **Limite:** pedidos por minuto definidos em cada chave (cabeçalhos `X-RateLimit-*`; `Retry-After` quando passa)."
+    "description": "API de integração do KanGest: lojas online, contabilidade, BI e outras aplicações ligam-se ao KanGest com **chaves de acesso**.\n\n- **Chave:** `Authorization: Bearer kg_…` (ou `X-API-Key: kg_…`). Cria-se em *Sistema → API e Integrações*; o segredo só aparece uma vez.\n- **Permissões:** cada chave tem as suas e age em nome de um utilizador: nunca faz mais do que ele.\n- **Valores monetários** em cêntimos de Kz (inteiros): 1 140,00 Kz = `114000`. Datas `AAAA-MM-DD`; data e hora `AAAA-MM-DDTHH:MM:SS` (hora local).\n- **Listas** ordenadas por `id`, em páginas: `?desde_id=<seguinte>&limite=…` até `mais` ser `false`. `alterado_desde` traz só o que mudou (artigos e entidades).\n- **Emissão:** os documentos seguem as regras do programa (série do posto da chave, assinatura AGT, stock, Facturação Electrónica). Envie `Idempotency-Key` para poder repetir o pedido sem emitir outro documento.\n- **Erros:** `{\"erro\": {\"codigo\": \"...\", \"mensagem\": \"...\"}}` com 400, 401, 403, 404, 405, 413, 422, 429 ou 500.\n- **Limite:** pedidos por minuto definidos em cada chave (cabeçalhos `X-RateLimit-*`; `Retry-After` quando passa).\n- **Cloudflare Access** (opcional): atrás de um túnel da Cloudflare, os pedidos têm também de trazer a autorização do Access (`CF-Access-Client-Id` e `CF-Access-Client-Secret` de um token de serviço)."
   },
   "servers": [
     {
@@ -69,7 +69,7 @@
               "codigo": {
                 "type": "string",
                 "example": "sem_permissao",
-                "description": "nao_autenticado, chave_invalida, chave_revogada, chave_inactiva, chave_expirada, ip_nao_autorizado, utilizador_inactivo, sem_permissao, nao_encontrado, metodo_nao_permitido, pedido_invalido, campo_desconhecido, validacao, limite_pedidos, demasiadas_falhas, pedido_grande, erro_interno, ocupado"
+                "description": "nao_autenticado, chave_invalida, chave_revogada, chave_inactiva, chave_expirada, ip_nao_autorizado, utilizador_inactivo, plano_sem_api, cloudflare_access, sem_permissao, nao_encontrado, metodo_nao_permitido, pedido_invalido, campo_desconhecido, validacao, limite_pedidos, demasiadas_falhas, pedido_grande, erro_interno, ocupado"
               },
               "mensagem": {
                 "type": "string",

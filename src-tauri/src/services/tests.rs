@@ -2967,6 +2967,30 @@ async fn api_integracao() {
         assert_eq!(rpc(&arc, "api.estado", Value::Null).await["licenca"]["incluida"], true);
     }
 
+    // ---- Cloudflare Access: o que chega pela Cloudflare tem de trazer o JWT do Access ----
+    {
+        use crate::api::teste_cf::{chave, jwks, jwt};
+        let equipa = "kangest-teste.cloudflareaccess.com";
+        let aud = "a".repeat(64);
+        crate::api::cf_chaves_teste(equipa, &jwks(chave(), "k1"));
+        assert!(rpc_err(&arc, "api.guardar", json!({ "ativo": true, "porta": porta, "rede": false, "cf_equipa": equipa })).await.contains("AUD"));
+        assert!(rpc_err(&arc, "api.guardar", json!({ "ativo": true, "porta": porta, "rede": false, "cf_equipa": "exemplo.com", "cf_aud": aud })).await.contains("cloudflareaccess.com"));
+        let e = rpc(&arc, "api.guardar", json!({ "ativo": true, "porta": porta, "rede": false, "cf_equipa": format!("https://{equipa}/"), "cf_aud": aud })).await;
+        assert_eq!(e["cf_equipa"], equipa);
+        assert_eq!(http("GET", "/api/v1", Some(&k4), None).0, 200, "da rede local basta a chave de API");
+        let pela_cf = [("CF-Connecting-IP", "41.63.1.2")];
+        let (s, _, v) = api_http(porta, "GET", "/api/v1", Some(&k4), None, &pela_cf);
+        assert_eq!((s, v["erro"]["codigo"].as_str()), (403, Some("cloudflare_access")), "{v}");
+        let agora = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let bom = jwt(chave(), "k1", &json!({ "aud": [aud], "iss": format!("https://{equipa}"), "exp": agora + 300, "iat": agora }));
+        assert_eq!(api_http(porta, "GET", "/api/v1", Some(&k4), None, &[pela_cf[0], ("Cf-Access-Jwt-Assertion", &bom)]).0, 200);
+        let outro = jwt(chave(), "k1", &json!({ "aud": ["b".repeat(64)], "iss": format!("https://{equipa}"), "exp": agora + 300 }));
+        assert_eq!(api_http(porta, "GET", "/api/v1", Some(&k4), None, &[pela_cf[0], ("Cf-Access-Jwt-Assertion", &outro)]).0, 403);
+        // o JWT não dispensa a chave de API
+        assert_eq!(api_http(porta, "GET", "/api/v1", None, None, &[pela_cf[0], ("Cf-Access-Jwt-Assertion", &bom)]).0, 401);
+        rpc(&arc, "api.guardar", json!({ "ativo": true, "porta": porta, "rede": false })).await;
+    }
+
     // ---- desligar: a porta fecha ----
     let e = rpc(&arc, "api.guardar", json!({ "ativo": false, "porta": porta, "rede": false })).await;
     assert!(e["a_servir"].is_null());

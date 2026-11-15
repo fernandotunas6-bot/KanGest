@@ -50,7 +50,7 @@ kz = {"type": "integer", "description": "Valor em cêntimos de Kz (1 Kz = 100)."
 
 schemas = {
     "Erro": {"type": "object", "properties": {"erro": {"type": "object", "properties": {
-        "codigo": {"type": "string", "example": "sem_permissao", "description": "nao_autenticado, chave_invalida, chave_revogada, chave_inactiva, chave_expirada, ip_nao_autorizado, utilizador_inactivo, sem_permissao, nao_encontrado, metodo_nao_permitido, pedido_invalido, campo_desconhecido, validacao, limite_pedidos, demasiadas_falhas, pedido_grande, erro_interno, ocupado"},
+        "codigo": {"type": "string", "example": "sem_permissao", "description": "nao_autenticado, chave_invalida, chave_revogada, chave_inactiva, chave_expirada, ip_nao_autorizado, utilizador_inactivo, plano_sem_api, cloudflare_access, sem_permissao, nao_encontrado, metodo_nao_permitido, pedido_invalido, campo_desconhecido, validacao, limite_pedidos, demasiadas_falhas, pedido_grande, erro_interno, ocupado"},
         "mensagem": {"type": "string", "example": "Sem permissão: «Emitir Factura (FT) e Guia de Transporte (GT)» (vendas.fatura)."}}}}},
     "Pagina": {"type": "object", "properties": {
         "dados": {"type": "array", "items": {"type": "object"}},
@@ -172,7 +172,8 @@ info_desc = """API de integração do KanGest: lojas online, contabilidade, BI e
 - **Listas** ordenadas por `id`, em páginas: `?desde_id=<seguinte>&limite=…` até `mais` ser `false`. `alterado_desde` traz só o que mudou (artigos e entidades).
 - **Emissão:** os documentos seguem as regras do programa (série do posto da chave, assinatura AGT, stock, Facturação Electrónica). Envie `Idempotency-Key` para poder repetir o pedido sem emitir outro documento.
 - **Erros:** `{"erro": {"codigo": "...", "mensagem": "..."}}` com 400, 401, 403, 404, 405, 413, 422, 429 ou 500.
-- **Limite:** pedidos por minuto definidos em cada chave (cabeçalhos `X-RateLimit-*`; `Retry-After` quando passa)."""
+- **Limite:** pedidos por minuto definidos em cada chave (cabeçalhos `X-RateLimit-*`; `Retry-After` quando passa).
+- **Cloudflare Access** (opcional): atrás de um túnel da Cloudflare, os pedidos têm também de trazer a autorização do Access (`CF-Access-Client-Id` e `CF-Access-Client-Secret` de um token de serviço)."""
 
 spec = {
     "openapi": "3.0.3",

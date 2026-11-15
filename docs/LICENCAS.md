@@ -92,6 +92,9 @@ uma versão nova do KanGest; as licenças antigas continuam válidas enquanto a 
   faz-se também no servidor (é o computador dele que fica registado).
 - Ao receber uma licença do servidor, o KanGest nunca troca uma licença válida que dure mais (por exemplo, emitida à
   mão) por uma mais curta.
+- O servidor limita os pedidos por IP e por hora (registo, confirmação, renovação e falhas no painel) e pode ter o
+  painel atrás do Cloudflare Access (`--access-equipa` e `--access-aud` no `publicar-licencas.py`): ver
+  [CLOUDFLARE.md](CLOUDFLARE.md).
 
 ## Próximos passos
 

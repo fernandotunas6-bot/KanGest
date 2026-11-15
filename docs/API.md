@@ -84,6 +84,10 @@ chave se perder, **Renovar segredo** gera outra (a antiga deixa logo de funciona
   [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) instalado no mesmo
   computador. Para experimentar: `cloudflared tunnel --url http://127.0.0.1:7800` (dá um endereço `https://….trycloudflare.com`);
   para uso permanente, um túnel com nome no domínio da empresa. **Não encaminhe a porta no router.**
+- **Cloudflare Access** (opcional, recomendado na Internet): com o domínio da equipa e o AUD da aplicação em
+  **API e Integrações**, os pedidos que chegam pela Cloudflare só passam com o JWT do Access (por exemplo, de um token
+  de serviço de cada integração), além da chave de API; sem ele, `403 cloudflare_access`. Passo a passo em
+  [CLOUDFLARE.md](CLOUDFLARE.md).
 - Atrás de um túnel ou proxy **na própria máquina**, o KanGest usa o IP indicado em `CF-Connecting-IP`, `X-Real-IP`
   ou `X-Forwarded-For` (para os IPs permitidos e o registo). Vindos de outros computadores, estes cabeçalhos são ignorados.
 - 20 chaves inválidas do mesmo IP em 10 minutos bloqueiam esse IP durante 10 minutos.
@@ -113,7 +117,7 @@ Corpo:      Content-Type: application/json
 |---|---|---|
 | 400 | `pedido_invalido`, `campo_desconhecido` | JSON inválido, parâmetro mal escrito, campo que não existe |
 | 401 | `nao_autenticado`, `chave_invalida`, `chave_revogada`, `chave_inactiva`, `chave_expirada` | Problema com a chave |
-| 403 | `sem_permissao`, `ip_nao_autorizado`, `utilizador_inactivo`, `plano_sem_api` | A chave não pode fazer isto, ou a licença não inclui a API |
+| 403 | `sem_permissao`, `ip_nao_autorizado`, `utilizador_inactivo`, `plano_sem_api`, `cloudflare_access` | A chave não pode fazer isto, a licença não inclui a API, ou falta a autorização do Cloudflare Access |
 | 404 | `nao_encontrado` | Registo ou rota inexistente |
 | 405 | `metodo_nao_permitido` | Ex.: `DELETE` numa rota que não o aceita |
 | 413 | `pedido_grande` | Corpo acima de 2 MB |

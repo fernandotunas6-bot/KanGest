@@ -111,6 +111,10 @@ pub struct Config {
     pub porta: u16,
     /// true: aceita ligações da rede (0.0.0.0); false: só desta máquina (127.0.0.1), ex.: atrás de um túnel.
     pub rede: bool,
+    /// Cloudflare Access (opcional): domínio da equipa (ex.: «empresa.cloudflareaccess.com») e AUD da aplicação.
+    /// Com os dois, os pedidos que chegam pela Cloudflare têm de trazer o JWT do Access.
+    pub cf_equipa: String,
+    pub cf_aud: String,
 }
 
 async fn ler_config(p: &SqlitePool) -> AppResult<Config> {
@@ -120,6 +124,8 @@ async fn ler_config(p: &SqlitePool) -> AppResult<Config> {
         ativo: v("api.ativo").as_deref() == Some("1"),
         porta: v("api.porta").and_then(|x| x.trim().parse().ok()).filter(|p: &u16| *p > 0).unwrap_or(PORTA_PADRAO),
         rede: v("api.rede").as_deref() != Some("0"),
+        cf_equipa: v("api.cf_equipa").unwrap_or_default(),
+        cf_aud: v("api.cf_aud").unwrap_or_default(),
     })
 }
 
@@ -566,6 +572,134 @@ fn falha_ip(ip: IpAddr) {
     e.1 += 1;
 }
 
+// ============================== Cloudflare Access ==============================
+
+type ChavesCf = Vec<(String, rsa::RsaPublicKey)>;
+
+/// Chaves públicas do Cloudflare Access da equipa, guardadas uma hora (a Cloudflare roda-as de tempos a tempos).
+static CF_CHAVES: Mutex<Option<(String, Instant, ChavesCf)>> = Mutex::new(None);
+
+fn b64url(s: &str) -> Option<Vec<u8>> {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s.trim_end_matches('=')).ok()
+}
+
+/// Chaves RSA de um JWKS (`{"keys": [{kid, kty, n, e}]}`).
+fn chaves_de_jwks(v: &Value) -> ChavesCf {
+    v["keys"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|k| k["kty"] == "RSA")
+        .filter_map(|k| {
+            let n = rsa::BigUint::from_bytes_be(&b64url(k["n"].as_str()?)?);
+            let e = rsa::BigUint::from_bytes_be(&b64url(k["e"].as_str()?)?);
+            Some((k["kid"].as_str().unwrap_or("").to_string(), rsa::RsaPublicKey::new(n, e).ok()?))
+        })
+        .collect()
+}
+
+/// Chaves da equipa: da cache ou de `https://<equipa>/cdn-cgi/access/certs`.
+fn chaves_cf(equipa: &str, renovar: bool) -> Result<ChavesCf, String> {
+    if let Some((e, quando, k)) = CF_CHAVES.lock().unwrap().as_ref() {
+        if e == equipa && !renovar && quando.elapsed() < Duration::from_secs(3600) {
+            return Ok(k.clone());
+        }
+    }
+    let r = crate::http::get(&format!("https://{equipa}/cdn-cgi/access/certs")).map_err(|e| e.to_string())?;
+    if r.estado != 200 {
+        return Err(format!("o Cloudflare Access respondeu {}", r.estado));
+    }
+    let v: Value = serde_json::from_slice(&r.corpo).map_err(|_| "resposta ilegível do Cloudflare Access".to_string())?;
+    let k = chaves_de_jwks(&v);
+    if k.is_empty() {
+        return Err("o Cloudflare Access não devolveu chaves".into());
+    }
+    *CF_CHAVES.lock().unwrap() = Some((equipa.to_string(), Instant::now(), k.clone()));
+    Ok(k)
+}
+
+/// Para os testes: chaves da equipa sem ir à rede.
+#[cfg(test)]
+pub fn cf_chaves_teste(equipa: &str, jwks: &Value) {
+    *CF_CHAVES.lock().unwrap() = Some((equipa.to_string(), Instant::now(), chaves_de_jwks(jwks)));
+}
+
+/// Confirma o JWT que o Cloudflare Access junta aos pedidos que autorizou: assinatura RS256 de uma chave da
+/// equipa, AUD da aplicação, emissor `https://<equipa>` e validade (com 60 s de folga no relógio).
+fn verificar_jwt_cf(token: &str, chaves: &ChavesCf, equipa: &str, aud: &str, agora: u64) -> Result<(), String> {
+    use rsa::signature::Verifier;
+    let mut partes = token.split('.');
+    let (Some(h), Some(p), Some(s), None) = (partes.next(), partes.next(), partes.next(), partes.next()) else {
+        return Err("JWT malformado".into());
+    };
+    let cab: Value = b64url(h).and_then(|b| serde_json::from_slice(&b).ok()).ok_or("JWT malformado")?;
+    if cab["alg"] != "RS256" {
+        return Err("algoritmo do JWT não aceite".into());
+    }
+    let kid = cab["kid"].as_str().unwrap_or("");
+    let assinatura = b64url(s).and_then(|b| rsa::pkcs1v15::Signature::try_from(b.as_slice()).ok()).ok_or("assinatura malformada")?;
+    let dados = format!("{h}.{p}");
+    let confere = chaves
+        .iter()
+        .filter(|(k, _)| kid.is_empty() || k == kid)
+        .any(|(_, chave)| rsa::pkcs1v15::VerifyingKey::<Sha256>::new(chave.clone()).verify(dados.as_bytes(), &assinatura).is_ok());
+    if !confere {
+        return Err("assinatura do JWT não confere".into());
+    }
+    let c: Value = b64url(p).and_then(|b| serde_json::from_slice(&b).ok()).ok_or("JWT malformado")?;
+    let aud_ok = match &c["aud"] {
+        Value::String(a) => a == aud,
+        Value::Array(v) => v.iter().any(|x| x == aud),
+        _ => false,
+    };
+    if !aud_ok {
+        return Err("o JWT é de outra aplicação (AUD)".into());
+    }
+    if c["iss"].as_str() != Some(format!("https://{equipa}").as_str()) {
+        return Err("o JWT é de outra equipa".into());
+    }
+    let exp = c["exp"].as_u64().ok_or("JWT sem validade")?;
+    if exp + 60 < agora {
+        return Err("JWT expirado".into());
+    }
+    if c["nbf"].as_u64().is_some_and(|nbf| nbf > agora + 60) {
+        return Err("JWT ainda não válido".into());
+    }
+    Ok(())
+}
+
+/// Pedidos que chegam pela Cloudflare (trazem CF-Ray ou CF-Connecting-IP) têm de trazer o JWT do Access,
+/// quando ele está configurado. Os pedidos da rede local (sem esses cabeçalhos) só precisam da chave de API.
+fn exigir_access(cfg: &Config, p: &Pedido) -> Result<(), Resposta> {
+    if cfg.cf_equipa.is_empty() || cfg.cf_aud.is_empty() {
+        return Ok(());
+    }
+    let pela_cloudflare = p.cabecalhos.contains_key("cf-ray") || p.cabecalhos.contains_key("cf-connecting-ip");
+    if !pela_cloudflare {
+        return Ok(());
+    }
+    let recusa = |m: String| Resposta::erro(403, "cloudflare_access", format!("Pedido sem a autorização do Cloudflare Access: {m}."));
+    let token = p.cabecalhos.get("cf-access-jwt-assertion").cloned().or_else(|| {
+        p.cabecalhos.get("cookie").and_then(|c| c.split(';').find_map(|x| x.trim().strip_prefix("CF_Authorization=").map(String::from)))
+    });
+    let Some(token) = token else { return Err(recusa("falta o JWT".into())) };
+    let indisponivel = |e: String| Resposta::erro(503, "cloudflare_access", format!("Não foi possível confirmar o Cloudflare Access: {e}."));
+    let mut chaves = chaves_cf(&cfg.cf_equipa, false).map_err(indisponivel)?;
+    // chave que ainda não conhecemos (a Cloudflare roda-as): volta a buscá-las, no máximo uma vez a cada 5 minutos,
+    // para um JWT inventado não pôr o KanGest a ir à Cloudflare a cada pedido
+    let kid = token.split('.').next().and_then(b64url).and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|h| h["kid"].as_str().map(String::from)).unwrap_or_default();
+    if !kid.is_empty() && !chaves.iter().any(|(k, _)| *k == kid) {
+        static ULTIMA: AtomicI64 = AtomicI64::new(0);
+        let s = agora_s() as i64;
+        if s - ULTIMA.load(Ordering::SeqCst) >= 300 {
+            ULTIMA.store(s, Ordering::SeqCst);
+            chaves = chaves_cf(&cfg.cf_equipa, true).map_err(indisponivel)?;
+        }
+    }
+    verificar_jwt_cf(&token, &chaves, &cfg.cf_equipa, &cfg.cf_aud, agora_s()).map_err(recusa)
+}
+
 // ============================== chaves ==============================
 
 fn gerar_chave() -> String {
@@ -822,6 +956,16 @@ async fn processar(st: &AppState, p: &Pedido, ip: IpAddr) -> (Resposta, Option<i
     }
     if !rota_existe(&segs) {
         return (Resposta::erro(404, "nao_encontrado", format!("Rota desconhecida: {} {}.", p.metodo, p.caminho)), None, false);
+    }
+    // Cloudflare Access (opcional): o que chega pela Cloudflare tem de vir autorizado por ela
+    match ler_config(&st.pool).await {
+        Ok(cfg) => {
+            if let Err(r) = exigir_access(&cfg, p) {
+                falha_ip(ip);
+                return (r, None, false);
+            }
+        }
+        Err(e) => return (Resposta::from(e), None, false),
     }
     if let Some(espera) = ip_bloqueado(ip) {
         return (
@@ -1956,6 +2100,8 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
         "ativo": cfg.ativo,
         "porta": cfg.porta,
         "rede": cfg.rede,
+        "cf_equipa": cfg.cf_equipa,
+        "cf_aud": cfg.cf_aud,
         "a_servir": servir.map(|s| s.0),
         "licenca": {
             "incluida": incluida.is_ok(),
@@ -1978,6 +2124,9 @@ pub struct GuardarIn {
     ativo: bool,
     porta: Option<u16>,
     rede: Option<bool>,
+    /// Cloudflare Access: domínio da equipa e AUD da aplicação (vazios = sem Access).
+    cf_equipa: Option<String>,
+    cf_aud: Option<String>,
 }
 
 /// Liga, desliga ou muda a porta da API (só o administrador).
@@ -1994,6 +2143,17 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
         return Err(AppError::msg("Esta máquina é um posto em rede: a API liga-se no servidor, onde está a base de dados."));
     }
     let rede = g.rede.unwrap_or(true);
+    let cf_equipa = g.cf_equipa.as_deref().unwrap_or("").trim().trim_start_matches("https://").trim_end_matches('/').to_lowercase();
+    let cf_aud = g.cf_aud.as_deref().unwrap_or("").trim().to_string();
+    if cf_equipa.is_empty() != cf_aud.is_empty() {
+        return Err(AppError::msg("Para o Cloudflare Access indique o domínio da equipa e o AUD da aplicação (ou deixe os dois vazios)."));
+    }
+    if !cf_equipa.is_empty() && (!cf_equipa.ends_with(".cloudflareaccess.com") || cf_equipa.contains('/') || cf_equipa.contains(' ')) {
+        return Err(AppError::msg("O domínio da equipa do Cloudflare Access acaba em «.cloudflareaccess.com» (ex.: empresa.cloudflareaccess.com)."));
+    }
+    if !cf_aud.is_empty() && (cf_aud.len() < 32 || !cf_aud.bytes().all(|b| b.is_ascii_hexdigit())) {
+        return Err(AppError::msg("O AUD da aplicação do Cloudflare Access é um código hexadecimal longo (Application Audience Tag)."));
+    }
     if g.ativo {
         services::licenca::api_incluida(&services::licenca::calcular(st).await?).map_err(AppError::msg)?;
         let app = APP.get().cloned().ok_or_else(|| AppError::msg("Feche e reabra o KanGest para ligar a API."))?;
@@ -2006,7 +2166,13 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
         *ERRO.lock().unwrap() = None;
     }
     let mut tx = st.pool.begin().await?;
-    for (k, v) in [("api.ativo", if g.ativo { "1" } else { "0" }.to_string()), ("api.porta", porta.to_string()), ("api.rede", if rede { "1" } else { "0" }.to_string())] {
+    for (k, v) in [
+        ("api.ativo", if g.ativo { "1" } else { "0" }.to_string()),
+        ("api.porta", porta.to_string()),
+        ("api.rede", if rede { "1" } else { "0" }.to_string()),
+        ("api.cf_equipa", cf_equipa.clone()),
+        ("api.cf_aud", cf_aud.clone()),
+    ] {
         sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").bind(k).bind(v).execute(&mut *tx).await?;
     }
     let detalhe = if g.ativo { format!("API ligada na porta {porta} ({})", if rede { "rede" } else { "só esta máquina" }) } else { "API desligada".to_string() };
@@ -2229,9 +2395,68 @@ pub async fn pedidos(st: &AppState, f: PedidosIn) -> AppResult<Value> {
     Ok(db::rows_json(&rows))
 }
 
+/// Para os testes: chave RSA, JWKS e JWT como os do Cloudflare Access.
+#[cfg(test)]
+pub mod teste_cf {
+    use super::*;
+    use base64::Engine;
+    use rsa::signature::{SignatureEncoding, Signer};
+    use rsa::traits::PublicKeyParts;
+
+    fn b64(b: &[u8]) -> String {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
+    }
+
+    /// Uma só chave para todos os testes (gerar RSA demora).
+    pub fn chave() -> &'static rsa::RsaPrivateKey {
+        static K: OnceLock<rsa::RsaPrivateKey> = OnceLock::new();
+        K.get_or_init(|| rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048).expect("chave RSA de teste"))
+    }
+
+    pub fn jwks(chave: &rsa::RsaPrivateKey, kid: &str) -> Value {
+        let pk = chave.to_public_key();
+        json!({ "keys": [{ "kid": kid, "kty": "RSA", "alg": "RS256", "n": b64(&pk.n().to_bytes_be()), "e": b64(&pk.e().to_bytes_be()) }] })
+    }
+
+    pub fn jwt(chave: &rsa::RsaPrivateKey, kid: &str, claims: &Value) -> String {
+        let h = b64(json!({ "alg": "RS256", "kid": kid, "typ": "JWT" }).to_string().as_bytes());
+        let p = b64(claims.to_string().as_bytes());
+        let assinatura = rsa::pkcs1v15::SigningKey::<Sha256>::new(chave.clone()).sign(format!("{h}.{p}").as_bytes());
+        format!("{h}.{p}.{}", b64(&assinatura.to_bytes()))
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn jwt_do_cloudflare_access() {
+        use super::teste_cf::{chave, jwks, jwt};
+        let equipa = "empresa.cloudflareaccess.com";
+        let aud = "f".repeat(64);
+        let chaves = chaves_de_jwks(&jwks(chave(), "k1"));
+        assert_eq!(chaves.len(), 1);
+        let agora = 1_800_000_000u64;
+        let claims = |aud: &str, iss: &str, exp: u64| json!({ "aud": [aud], "iss": iss, "exp": exp, "iat": agora, "sub": "", "common_name": "integracao.access" });
+        let iss = format!("https://{equipa}");
+        let bom = jwt(chave(), "k1", &claims(&aud, &iss, agora + 300));
+        assert!(verificar_jwt_cf(&bom, &chaves, equipa, &aud, agora).is_ok());
+        // aud como texto também serve
+        let aud_txt = jwt(chave(), "k1", &json!({ "aud": aud, "iss": iss, "exp": agora + 300 }));
+        assert!(verificar_jwt_cf(&aud_txt, &chaves, equipa, &aud, agora).is_ok());
+        // recusados: outra aplicação, outra equipa, expirado, alterado, outra chave, sem assinatura
+        assert!(verificar_jwt_cf(&jwt(chave(), "k1", &claims(&"0".repeat(64), &iss, agora + 300)), &chaves, equipa, &aud, agora).unwrap_err().contains("AUD"));
+        assert!(verificar_jwt_cf(&jwt(chave(), "k1", &claims(&aud, "https://outra.cloudflareaccess.com", agora + 300)), &chaves, equipa, &aud, agora).unwrap_err().contains("equipa"));
+        assert!(verificar_jwt_cf(&jwt(chave(), "k1", &claims(&aud, &iss, agora - 120)), &chaves, equipa, &aud, agora).unwrap_err().contains("expirado"));
+        let mut partes: Vec<String> = bom.split('.').map(String::from).collect();
+        partes[1] = super::teste_cf::jwt(chave(), "k1", &claims(&aud, &iss, agora + 9999)).split('.').nth(1).unwrap().to_string();
+        assert!(verificar_jwt_cf(&partes.join("."), &chaves, equipa, &aud, agora).unwrap_err().contains("assinatura"));
+        assert!(verificar_jwt_cf(&jwt(chave(), "k2", &claims(&aud, &iss, agora + 300)), &chaves, equipa, &aud, agora).is_err(), "kid desconhecido");
+        let sem = format!("{}.{}.", bom.split('.').next().unwrap(), bom.split('.').nth(1).unwrap());
+        assert!(verificar_jwt_cf(&sem, &chaves, equipa, &aud, agora).is_err());
+        assert!(verificar_jwt_cf("isto.nao.e.jwt", &chaves, equipa, &aud, agora).is_err());
+    }
 
     #[test]
     fn redes_e_ips() {

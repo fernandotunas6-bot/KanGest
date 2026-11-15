@@ -173,5 +173,77 @@ assert.equal(r.estado, 429);
 assert.equal((await pedir("POST", "/v1/registo", [1, 2])).estado, 400);
 assert.equal((await pedir("GET", "/nada")).estado, 404);
 
+// ------------------------------------------------------------------ protecção
+
+// cabeçalhos de segurança em todas as respostas
+{
+  const resp = await worker.fetch(new Request("https://licencas.teste/v1/planos"), env);
+  assert.equal(resp.headers.get("x-content-type-options"), "nosniff");
+  assert.match(resp.headers.get("strict-transport-security") ?? "", /max-age=/);
+  assert.equal(resp.headers.get("access-control-allow-origin"), "*", "os cabeçalhos próprios ficam");
+}
+
+// limite por IP: a confirmação aceita LIMITES.confirmar pedidos por hora do mesmo IP
+{
+  const { LIMITES } = await import("../src/worker.js");
+  const deIp = (ip, caminho, corpo) =>
+    worker.fetch(new Request("https://licencas.teste" + caminho, { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip }, body: JSON.stringify(corpo) }), env);
+  for (let i = 0; i < LIMITES.confirmar; i++) {
+    const x = await deIp("41.63.9.9", "/v1/confirmar", { nif: NIF, maquina: "9999-9999-9999", codigo: "000000" });
+    assert.notEqual(x.status, 429, `pedido ${i + 1}`);
+  }
+  assert.equal((await deIp("41.63.9.9", "/v1/confirmar", { nif: NIF, maquina: "9999-9999-9999", codigo: "000000" })).status, 429);
+  assert.notEqual((await deIp("41.63.9.10", "/v1/confirmar", { nif: NIF, maquina: "9999-9999-9999", codigo: "000000" })).status, 429, "outro IP não é afectado");
+
+  // painel: tokens errados contam; ao fim de LIMITES.admin, o IP fica bloqueado (mesmo com o token certo)
+  const painel = (ip, token) => worker.fetch(new Request("https://licencas.teste/admin/api/resumo", { headers: { "cf-connecting-ip": ip, authorization: "Bearer " + token } }), env);
+  for (let i = 0; i < LIMITES.admin; i++) assert.equal((await painel("41.63.7.7", "errado")).status, 401);
+  assert.equal((await painel("41.63.7.7", ADMIN)).status, 429);
+  assert.equal((await painel("41.63.7.8", ADMIN)).status, 200);
+}
+
+// Cloudflare Access à frente do painel: sem o JWT da equipa (ou com o de outra aplicação), nem com o token se entra
+{
+  const { generateKeyPairSync, sign } = await import("node:crypto");
+  const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const jwk = { ...publicKey.export({ format: "jwk" }), kid: "k1", alg: "RS256" };
+  const EQUIPA = "kangest.cloudflareaccess.com", AUD = "c".repeat(64);
+  const fetchOriginal = globalThis.fetch;
+  let buscas = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url) === `https://${EQUIPA}/cdn-cgi/access/certs`) {
+      buscas++;
+      return new Response(JSON.stringify({ keys: [jwk] }), { headers: { "content-type": "application/json" } });
+    }
+    return fetchOriginal(url);
+  };
+  const b64u = (x) => Buffer.from(x).toString("base64url");
+  const jwt = (claims, kid = "k1") => {
+    const h = b64u(JSON.stringify({ alg: "RS256", kid, typ: "JWT" }));
+    const p = b64u(JSON.stringify(claims));
+    return `${h}.${p}.${sign("RSA-SHA256", Buffer.from(`${h}.${p}`), privateKey).toString("base64url")}`;
+  };
+  const agoraS = Math.floor(Date.now() / 1000);
+  const envAccess = { ...env, ACCESS_EQUIPA: EQUIPA, ACCESS_AUD: AUD };
+  const painel = (extra) => worker.fetch(new Request("https://licencas.teste/admin/api/resumo", { headers: { authorization: "Bearer " + ADMIN, ...extra } }), envAccess);
+  assert.equal((await painel({})).status, 403, "sem o JWT do Access");
+  const bom = jwt({ aud: [AUD], iss: `https://${EQUIPA}`, exp: agoraS + 300, iat: agoraS, email: "dono@kangest.ao" });
+  assert.equal((await painel({ "cf-access-jwt-assertion": bom })).status, 200);
+  assert.equal((await painel({ cookie: `outro=1; CF_Authorization=${bom}` })).status, 200, "também pelo cookie do browser");
+  assert.equal((await painel({ "cf-access-jwt-assertion": jwt({ aud: ["d".repeat(64)], iss: `https://${EQUIPA}`, exp: agoraS + 300 }) })).status, 403, "outra aplicação");
+  assert.equal((await painel({ "cf-access-jwt-assertion": jwt({ aud: [AUD], iss: `https://${EQUIPA}`, exp: agoraS - 300 }) })).status, 403, "expirado");
+  assert.equal((await painel({ "cf-access-jwt-assertion": bom.slice(0, -4) + "AAAA" })).status, 403, "assinatura alterada");
+  assert.equal((await worker.fetch(new Request("https://licencas.teste/admin", { headers: { "cf-access-jwt-assertion": bom } }), envAccess)).status, 200, "a página do painel");
+  assert.equal((await worker.fetch(new Request("https://licencas.teste/admin"), envAccess)).status, 403);
+  // um kid desconhecido só volta a buscar as chaves de 5 em 5 minutos
+  const antes = buscas;
+  await painel({ "cf-access-jwt-assertion": jwt({ aud: [AUD], iss: `https://${EQUIPA}`, exp: agoraS + 300 }, "k9") });
+  await painel({ "cf-access-jwt-assertion": jwt({ aud: [AUD], iss: `https://${EQUIPA}`, exp: agoraS + 300 }, "k9") });
+  assert.ok(buscas - antes <= 1, "não vai à Cloudflare a cada JWT inventado");
+  // as rotas públicas não pedem o Access
+  assert.equal((await worker.fetch(new Request("https://licencas.teste/v1/planos"), envAccess)).status, 200);
+  globalThis.fetch = fetchOriginal;
+}
+
 console.log("Servidor de licenças: todos os testes passaram.");
 if (process.env.KANGEST_CHAVE_SERVIDOR) console.log("Licença de exemplo:", exemplo);

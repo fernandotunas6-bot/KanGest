@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, Ban, Copy, FileJson, KeyRound, Monitor, Network, Pencil, Plug, Plus, RefreshCw } from "lucide-react";
+import { AlertTriangle, Ban, Copy, FileJson, KeyRound, Monitor, Network, Pencil, Plug, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { call } from "@/lib/api";
 import { dataHora } from "@/lib/format";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
@@ -42,6 +42,9 @@ interface EstadoApi {
   ativo: boolean;
   porta: number;
   rede: boolean;
+  /** Cloudflare Access (opcional): domínio da equipa e AUD da aplicação. */
+  cf_equipa: string;
+  cf_aud: string;
   a_servir: number | null;
   erro: string | null;
   /** A API faz parte do plano Empresa (e da experiência); nos outros planos, do módulo «api» da licença. */
@@ -368,14 +371,14 @@ export default function Integracoes() {
 // ---------------------------------------------------------------- servidor
 
 function Servidor({ e, base, onGuardado }: { e: EstadoApi; base: string; onGuardado: () => void }) {
-  const [f, setF] = useState<{ ativo: boolean; porta: number; rede: boolean } | null>(null);
+  const [f, setF] = useState<{ ativo: boolean; porta: number; rede: boolean; cf_equipa: string; cf_aud: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const v = f ?? { ativo: e.ativo, porta: e.porta, rede: e.rede };
+  const v = f ?? { ativo: e.ativo, porta: e.porta, rede: e.rede, cf_equipa: e.cf_equipa, cf_aud: e.cf_aud };
 
   async function guardar() {
     setBusy(true);
     try {
-      await call("api.guardar", { ativo: v.ativo, porta: Number(v.porta) || 7800, rede: v.rede });
+      await call("api.guardar", { ativo: v.ativo, porta: Number(v.porta) || 7800, rede: v.rede, cf_equipa: v.cf_equipa, cf_aud: v.cf_aud });
       toast.success(v.ativo ? "API ligada." : "API desligada.");
       setF(null);
       onGuardado();
@@ -435,6 +438,24 @@ function Servidor({ e, base, onGuardado }: { e: EstadoApi; base: string; onGuard
           A API fala HTTP sem cifra, como os postos em rede: na rede local está protegida pelas chaves. Para a Internet, escolha «Só desta máquina» e publique-a através de um túnel com HTTPS
           (por exemplo, Cloudflare Tunnel). Não encaminhe esta porta no router.
         </p>
+        <div className="rounded-xl border border-line p-4">
+          <div className="mb-1 flex items-center gap-2 font-medium">
+            <ShieldCheck className="size-4 text-ink-3" /> Cloudflare Access (opcional)
+            {e.cf_equipa && <Badge tone="ok">ligado</Badge>}
+          </div>
+          <p className="mb-3 text-[12.5px] text-ink-3">
+            Com a API publicada por um túnel da Cloudflare, os pedidos que chegam pela Cloudflare só passam com a autorização do Access (por exemplo, um token de serviço de cada
+            integração), além da chave de API. Os pedidos da rede local continuam só com a chave.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Domínio da equipa" hint="Zero Trust → Definições → Domínio da equipa">
+              <Input className="font-mono" placeholder="empresa.cloudflareaccess.com" value={v.cf_equipa} onChange={(x) => setF({ ...v, cf_equipa: x.target.value })} />
+            </Field>
+            <Field label="AUD da aplicação" hint="Application Audience (AUD) Tag da aplicação do Access">
+              <Input className="font-mono" value={v.cf_aud} onChange={(x) => setF({ ...v, cf_aud: x.target.value })} />
+            </Field>
+          </div>
+        </div>
         <div className="flex gap-2">
           <Button loading={busy} onClick={guardar}>
             Guardar
