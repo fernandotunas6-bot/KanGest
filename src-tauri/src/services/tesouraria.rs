@@ -13,11 +13,12 @@ use crate::state::AppState;
 pub async fn contas(st: &AppState) -> AppResult<Value> {
     st.sessao()?;
     let rows = sqlx::query(
-        "SELECT c.*,
-            c.saldo_inicial
-              + COALESCE((SELECT SUM(CASE WHEN f.tipo = 'ENTRADA' THEN f.valor ELSE -f.valor END) FROM vw_fluxo f
-                          WHERE f.conta_id = c.id AND f.anulado = 0), 0) AS saldo
-         FROM contas c ORDER BY c.id",
+        // uma só passagem pelos movimentos para todas as contas (antes, uma por conta)
+        "SELECT c.*, c.saldo_inicial + COALESCE(s.saldo, 0) AS saldo
+         FROM contas c
+         LEFT JOIN (SELECT conta_id, SUM(CASE WHEN tipo = 'ENTRADA' THEN valor ELSE -valor END) AS saldo
+                    FROM vw_fluxo WHERE anulado = 0 GROUP BY conta_id) s ON s.conta_id = c.id
+         ORDER BY c.id",
     )
     .fetch_all(&st.pool)
     .await?;

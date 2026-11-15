@@ -32,7 +32,7 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
     let (a_receber, a_pagar): (i64, i64) = sqlx::query_as(
         "SELECT COALESCE(SUM(CASE WHEN t.grupo = 'VENDAS' THEN d.valor_pendente END), 0),
                 COALESCE(SUM(CASE WHEN t.grupo = 'COMPRAS' THEN d.valor_pendente END), 0)
-         FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo WHERE d.estado = 'N'",
+         FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo WHERE d.estado = 'N' AND d.valor_pendente > 0",
     )
     .fetch_one(p)
     .await?;

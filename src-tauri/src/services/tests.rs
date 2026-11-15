@@ -4151,3 +4151,64 @@ async fn comissoes_de_vendedores() {
     assert!(rpc_err(&st, "comissoes.lancar", json!({ "ano": ano, "mes": mes })).await.contains("já foram processados"));
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Tempos das consultas mais usadas numa base com volume (para afinar os índices). Corre-se à mão sobre uma cópia:
+///   KANGEST_BASE=/caminho/kigest.db cargo test --release --lib volume_tempos -- --ignored --nocapture
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn volume_tempos() {
+    use chrono::Datelike;
+    let Ok(base) = std::env::var("KANGEST_BASE") else { return };
+    let caminho = std::path::PathBuf::from(&base);
+    let pool = db::abrir(&caminho).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = caminho.parent().unwrap().to_path_buf();
+    st.pasta_exportacao = st.pasta_dados.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let hoje = chrono::Local::now().date_naive();
+    let (mes, ano) = (format!("{}-{:02}-01", hoje.year(), hoje.month()), format!("{}-01-01", hoje.year()));
+    let h = hoje.format("%Y-%m-%d").to_string();
+    let cliente: i64 = sqlx::query_scalar("SELECT entidade_id FROM documentos WHERE entidade_id <> 1 GROUP BY entidade_id ORDER BY COUNT(*) DESC LIMIT 1").fetch_one(&st.pool).await.unwrap();
+    let artigo: i64 = sqlx::query_scalar("SELECT artigo_id FROM movimentos_stock GROUP BY artigo_id ORDER BY COUNT(*) DESC LIMIT 1").fetch_one(&st.pool).await.unwrap();
+    let casos: Vec<(&str, &str, Value)> = vec![
+        ("Painel", "dashboard", Value::Null),
+        ("Documentos do mês", "documentos.listar", json!({ "de": mes, "ate": h })),
+        ("Documentos: pesquisa", "documentos.listar", json!({ "q": "Cliente Volume 12" })),
+        ("Documentos de um cliente", "documentos.listar", json!({ "entidade_id": cliente })),
+        ("Vendas por dia (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "dia" })),
+        ("Vendas por artigo (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "artigo" })),
+        ("Vendas por família (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "familia" })),
+        ("Vendas por operador (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "operador" })),
+        ("Vendas por vendedor (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "vendedor" })),
+        ("Vendas por pagamento (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "pagamento" })),
+        ("Vendas por cliente (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "cliente" })),
+        ("Síntese do ano", "relatorios.sintese", json!({ "ano": hoje.year() })),
+        ("Tesouraria: contas e saldos", "tesouraria.contas", Value::Null),
+        ("Tesouraria: fluxo do mês", "tesouraria.fluxo", json!({ "de": mes, "ate": h })),
+        ("Tesouraria: resumo mensal", "tesouraria.resumoMensal", json!({ "ano": hoje.year().to_string() })),
+        ("Contas correntes: pendentes", "contas.pendentes", json!({ "tipo": "C" })),
+        ("Conta corrente de um cliente", "contas.extrato", json!({ "entidade_id": cliente })),
+        ("Vencidos", "contas.vencidos", json!({ "tipo": "C" })),
+        ("Clientes", "entidades.listar", json!({ "tipo": "C" })),
+        ("Clientes: pesquisa", "entidades.listar", json!({ "q": "Volume 21" })),
+        ("Stock", "stock.listar", json!({})),
+        ("Movimentos de um artigo", "stock.movimentos", json!({ "artigo_id": artigo })),
+        ("Stock parado", "relatorios.stock", json!({ "situacao": "parado", "dias": 90 })),
+        ("Caixa: estado", "caixa.estado", Value::Null),
+    ];
+    let mut total = 0.0;
+    for (nome, metodo, params) in casos {
+        let mut melhor = f64::MAX;
+        let mut tamanho = 0;
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            let r = dispatch(&st, metodo, params.clone()).await;
+            melhor = melhor.min(t.elapsed().as_secs_f64() * 1000.0);
+            tamanho = r.map(|v| v.to_string().len()).unwrap_or_else(|e| { eprintln!("  {metodo}: {e}"); 0 });
+        }
+        total += melhor;
+        eprintln!("{nome:<32} {melhor:>9.1} ms  {:>9} bytes", tamanho);
+    }
+    eprintln!("{:<32} {total:>9.1} ms", "TOTAL");
+}
