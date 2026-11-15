@@ -726,7 +726,7 @@ export default function Pos() {
         )}
         <div className="flex items-center gap-2">
           <Logo className="size-8" />
-          <span className="font-semibold">Ponto de Venda</span>
+          <span className="hidden whitespace-nowrap font-semibold xl:inline">Ponto de Venda</span>
           <Badge tone="neutral">{tabelas.data?.posto?.descricao ?? "Posto"}</Badge>
         </div>
         <div className="ml-auto flex items-center gap-3">
@@ -757,8 +757,8 @@ export default function Pos() {
             {agora.toLocaleDateString("pt-PT", { weekday: "short", day: "2-digit", month: "2-digit" })} · <b className="font-semibold text-ink">{agora.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</b>
           </span>
           <span className="flex items-center gap-2 text-[13px] text-ink-2">
-            <span className="grid size-7 place-items-center rounded-full bg-brand text-[12px] font-semibold text-white">{sessao?.nome.slice(0, 1).toUpperCase()}</span>
-            {sessao?.nome}
+            <span className="grid size-7 place-items-center rounded-full bg-brand text-[12px] font-semibold text-white" title={sessao?.nome}>{sessao?.nome.slice(0, 1).toUpperCase()}</span>
+            <span className="hidden max-w-40 truncate xl:inline">{sessao?.nome}</span>
           </span>
           <Button variant="ghost" size="sm" onClick={bloquearSessao} title="Bloquear o posto (retoma-se com a senha ou o PIN; a venda fica como está)">
             <Lock className="size-4" />
@@ -886,13 +886,13 @@ export default function Pos() {
           </div>
 
           {/* Barra de funções (teclas do KIGEST POS) */}
-          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(68px,1fr))] gap-2">
+          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(68px,1fr))] gap-2 [@media(max-height:760px)]:mt-2 [@media(max-height:760px)]:gap-1.5">
             {teclas.map((t) => (
               <button
                 key={t.label}
                 onClick={t.on}
                 title={t.k ? `${t.label} (${t.k})` : t.label}
-                className="relative flex flex-col items-center justify-center gap-1 rounded-xl border border-line bg-surface px-1 pb-2 pt-3.5 text-[11.5px] text-ink-2 shadow-card transition hover:border-brand/50 hover:text-ink active:scale-[0.97]"
+                className="relative flex flex-col items-center justify-center gap-1 rounded-xl border border-line bg-surface px-1 pb-2 pt-3.5 text-[11.5px] text-ink-2 shadow-card transition hover:border-brand/50 hover:text-ink active:scale-[0.97] [@media(max-height:760px)]:gap-0.5 [@media(max-height:760px)]:pb-1.5 [@media(max-height:760px)]:pt-3"
               >
                 {t.k && <kbd className="absolute right-1 top-1 px-1 py-px text-[9.5px] text-ink-3">{t.k}</kbd>}
                 {t.icon}
@@ -982,10 +982,10 @@ export default function Pos() {
                 {linhas.map((l, i) => {
                   const c = totais.linhas[i];
                   return (
-                    <li key={l.key} onClick={() => setSel(i)} className={cn("relative cursor-pointer border-b border-line/70 px-5 py-3", idx === i && "bg-brand-50/60")}>
+                    <li key={l.key} onClick={() => setSel(i)} className={cn("relative cursor-pointer border-b border-line/70 px-5 py-2.5", idx === i && "bg-brand-50/60")}>
                       {idx === i && <span className="absolute inset-y-0 left-0 w-1 bg-brand" />}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
+                      <div className="flex items-start gap-3">
+                        <div className="min-w-0 flex-1">
                           <div className="truncate font-medium">
                             <span className="num mr-1.5 text-[12px] font-normal text-ink-3">{i + 1}.</span>
                             {l.descricao || l.artigo.descricao}
@@ -1012,9 +1012,10 @@ export default function Pos() {
                             </button>
                           )}
                         </div>
-                        <div className="num shrink-0 font-semibold">{kzNum(c?.total)}</div>
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
+                        {/* total e quantidade à direita: cada linha ocupa duas alturas em vez de três */}
+                        <div className="flex shrink-0 flex-col items-end gap-1.5">
+                          <div className="num font-semibold">{kzNum(c?.total)}</div>
+                          <div className="flex items-center gap-1.5">
                         <button
                           className="grid size-8 place-items-center rounded-md border border-line bg-surface hover:bg-sunken"
                           aria-label="Menos uma unidade"
@@ -1026,7 +1027,8 @@ export default function Pos() {
                           <Minus className="size-3.5" />
                         </button>
                         <button
-                          className="num h-8 min-w-14 rounded-md border border-line bg-surface px-2 text-center font-medium hover:bg-sunken"
+                          className="num h-8 min-w-12 rounded-md border border-line bg-surface px-2 text-center font-medium hover:bg-sunken"
+                          aria-label="Quantidade (abre o teclado)"
                           onClick={(e) => {
                             e.stopPropagation();
                             setSel(i);
@@ -1046,7 +1048,9 @@ export default function Pos() {
                           <Plus className="size-3.5" />
                         </button>
                         <button
-                          className="ml-auto rounded-md p-1.5 text-ink-3 hover:bg-danger-50 hover:text-danger"
+                          className="ml-1 grid size-8 place-items-center rounded-md text-ink-3 hover:bg-danger-50 hover:text-danger"
+                          aria-label="Apagar esta linha"
+                          title="Apagar esta linha"
                           onClick={(e) => {
                             e.stopPropagation();
                             apagarLinha(i);
@@ -1054,6 +1058,8 @@ export default function Pos() {
                         >
                           <Trash2 className="size-4" />
                         </button>
+                          </div>
+                        </div>
                       </div>
                     </li>
                   );
@@ -1083,7 +1089,7 @@ export default function Pos() {
               <span className="num text-[30px] font-semibold tracking-tight">{kz(totais.total)}</span>
             </div>
             <div className="mt-3 grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-2">
-              <Button variant="secondary" size="lg" onClick={limpar} disabled={!linhas.length}>
+              <Button variant="secondary" size="lg" className="px-3" onClick={limpar} disabled={!linhas.length} title="Cancelar a venda em curso">
                 <XCircle className="size-4" /> Cancelar
               </Button>
               <Button size="lg" variant="accent" className="text-[16px]" onClick={abrirPagamento} disabled={!linhas.length || caixaFechado} title="Pagamento (F12)">
@@ -1468,7 +1474,7 @@ function Pagamento({
                   <label key={m.codigo} className="grid grid-cols-[minmax(0,1fr)_150px] items-center gap-3">
                     <span className="flex min-w-0 items-center gap-2 text-[13px] text-ink-2">
                       {m.codigo === "NU" ? <Banknote className="size-4 shrink-0 text-ink-3" /> : <CreditCard className="size-4 shrink-0 text-ink-3" />}
-                      <span className="truncate" title={m.descricao}>
+                      <span className="line-clamp-2 leading-tight" title={m.descricao}>
                         {m.codigo === "CS" ? `Crédito do cliente (disponível ${kz(cliente.credito ?? 0)})` : m.descricao}
                       </span>
                     </span>

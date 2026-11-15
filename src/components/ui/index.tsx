@@ -25,7 +25,8 @@ export const Button = forwardRef<
     ref={ref}
     disabled={disabled || loading}
     className={cn(
-      "inline-flex items-center justify-center rounded-lg font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap",
+      // os ícones não encolhem quando o botão é estreito (o texto é que se ajusta)
+      "inline-flex items-center justify-center rounded-lg font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap [&>svg]:shrink-0",
       variants[variant],
       sizes[size],
       className,
