@@ -1942,6 +1942,73 @@ async fn servidor_demo() {
         let total = (v as f64 * q as f64 * 1.14).round() as i64;
         rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": q }], "pagamentos": [{ "modo": if k % 2 == 0 { "NU" } else { "MB" }, "valor": total }] })).await;
     }
+    // vendas dos 29 dias anteriores como histórico importado (fora da cadeia de assinaturas, como o do KIGEST):
+    // dão corpo ao gráfico do painel, às comparações com ontem e com o mês anterior e aos mais vendidos
+    struct Ficha {
+        id: i64,
+        referencia: String,
+        descricao: String,
+        preco: i64,
+        custo: i64,
+    }
+    let admin: i64 = sqlx::query_scalar("SELECT id FROM utilizadores WHERE login = 'admin'").fetch_one(&st.pool).await.unwrap();
+    let mut fichas = Vec::new();
+    for a in &arts {
+        let (referencia, descricao, preco, custo): (String, String, i64, i64) =
+            sqlx::query_as("SELECT referencia, descricao, preco1, custo_medio FROM artigos WHERE id = ?").bind(a).fetch_one(&st.pool).await.unwrap();
+        fichas.push(Ficha { id: *a, referencia, descricao, preco, custo });
+    }
+    let mut n_hist = 0;
+    for dias in (1..=29i64).rev() {
+        let data_doc: String = sqlx::query_scalar("SELECT date('now', 'localtime', ?)").bind(format!("-{dias} day")).fetch_one(&st.pool).await.unwrap();
+        for j in 0..(2 + (dias * 7) % 3) {
+            n_hist += 1;
+            // duas linhas por venda, com artigos e quantidades que variam de dia para dia
+            let linhas: Vec<(&Ficha, f64)> = (0..2)
+                .map(|l| (&fichas[((dias * 3 + j * 2 + l) % fichas.len() as i64) as usize], (2 + (dias * 5 + j * 3 + l * 7) % 9) as f64))
+                .collect();
+            let liquido: i64 = linhas.iter().map(|(f, q)| (f.preco as f64 * q).round() as i64).sum();
+            let iva = (liquido as f64 * 0.14).round() as i64;
+            let doc: i64 = sqlx::query_scalar(
+                "INSERT INTO documentos (tipo_codigo, serie, numero, numero_doc, data_emissao, data_hora, entidade_nome, entidade_nif, utilizador_id,
+                    estado, total_bruto, total_liquido, total_iva, total, valor_entregue, importado, origem)
+                 VALUES ('FR', 'H', ?1, 'FR H/' || ?1, ?2, ?2 || 'T' || printf('%02d', 9 + ?3 * 3) || ':15:00', 'Consumidor Final', '999999999', ?4,
+                    'N', ?5, ?5, ?6, ?5 + ?6, ?5 + ?6, 1, 'I') RETURNING id",
+            )
+            .bind(n_hist)
+            .bind(&data_doc)
+            .bind(j)
+            .bind(admin)
+            .bind(liquido)
+            .bind(iva)
+            .fetch_one(&st.pool)
+            .await
+            .unwrap();
+            for (k, (f, q)) in linhas.iter().enumerate() {
+                let base = (f.preco as f64 * q).round() as i64;
+                let iva_l = (base as f64 * 0.14).round() as i64;
+                sqlx::query(
+                    "INSERT INTO documento_linhas (documento_id, linha, artigo_id, referencia, descricao, quantidade, unidade, preco_unitario, taxa_iva_id,
+                        taxa_iva_pct, valor_liquido, valor_iva, total, custo)
+                     VALUES (?, ?, ?, ?, ?, ?, 'UN', ?, 1, 14, ?, ?, ?, ?)",
+                )
+                .bind(doc)
+                .bind(k as i64 + 1)
+                .bind(f.id)
+                .bind(&f.referencia)
+                .bind(&f.descricao)
+                .bind(q)
+                .bind(f.preco)
+                .bind(base)
+                .bind(iva_l)
+                .bind(base + iva_l)
+                .bind(f.custo)
+                .execute(&st.pool)
+                .await
+                .unwrap();
+            }
+        }
+    }
     let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli1, "linhas": [{ "artigo_id": arts[2], "quantidade": 20 }, { "artigo_id": serv, "quantidade": 1 }] })).await;
     // factura vencida há muito (para os avisos e a antiguidade de saldos): o vencimento passa para Janeiro na base,
     // porque ao emitir já não se aceita um vencimento anterior à data do documento
