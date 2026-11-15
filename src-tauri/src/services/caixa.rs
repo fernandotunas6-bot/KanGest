@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 use super::catalogo::IdIn;
 use crate::db;
@@ -12,6 +12,66 @@ async fn sessao_aberta(st: &AppState) -> AppResult<Option<i64>> {
         .bind(st.posto().id)
         .fetch_optional(&st.pool)
         .await?)
+}
+
+/// Notas ou moedas em Kz («5000, 2000, …»; os cêntimos com ponto: «0.5»), em cêntimos, da maior para a menor.
+fn denominacoes(texto: &str) -> Result<Vec<i64>, String> {
+    let mut v: Vec<i64> = Vec::new();
+    for parte in texto.split(|c: char| c == ',' || c == ';' || c.is_whitespace()).filter(|x| !x.is_empty()) {
+        let n: f64 = parte.parse().map_err(|_| format!("Valor inválido: {parte} (separe com vírgulas; os cêntimos escrevem-se com ponto, ex.: 0.5)."))?;
+        if !n.is_finite() || !(0.01..=1_000_000.0).contains(&n) {
+            return Err(format!("Valor inválido: {parte}."));
+        }
+        let c = (n * 100.0).round() as i64;
+        if !v.contains(&c) {
+            v.push(c);
+        }
+    }
+    v.sort_unstable_by(|a, b| b.cmp(a));
+    Ok(v)
+}
+
+/// Opções do fecho de caixa: fecho cego e as notas e moedas da contagem (em cêntimos).
+pub async fn config_fecho(p: &SqlitePool) -> AppResult<Value> {
+    let ler = |k: &'static str| async move { sqlx::query_scalar::<_, String>("SELECT valor FROM config WHERE chave = ?").bind(k).fetch_optional(p).await };
+    let cego = ler("caixa.fecho_cego").await?.as_deref() == Some("1");
+    let notas = denominacoes(&ler("caixa.notas").await?.unwrap_or_default()).unwrap_or_default();
+    let moedas = denominacoes(&ler("caixa.moedas").await?.unwrap_or_default()).unwrap_or_default();
+    Ok(json!({ "fecho_cego": cego, "notas": notas, "moedas": moedas }))
+}
+
+pub async fn config(st: &AppState) -> AppResult<Value> {
+    st.sessao()?;
+    config_fecho(&st.pool).await
+}
+
+#[derive(Deserialize)]
+pub struct ConfigIn {
+    fecho_cego: bool,
+    notas: String,
+    moedas: String,
+}
+
+/// Opções de Venda → Fecho de caixa.
+pub async fn config_guardar(st: &AppState, c: ConfigIn) -> AppResult<Value> {
+    let s = st.exigir_perm("sistema.parametrizacao")?;
+    let notas = denominacoes(&c.notas).map_err(AppError::msg)?;
+    let moedas = denominacoes(&c.moedas).map_err(AppError::msg)?;
+    if notas.is_empty() && moedas.is_empty() {
+        return Err(AppError::msg("Indique pelo menos uma nota ou moeda."));
+    }
+    let kz = |v: &[i64]| v.iter().map(|c| if c % 100 == 0 { (c / 100).to_string() } else { format!("{}.{:02}", c / 100, c % 100).trim_end_matches('0').to_string() }).collect::<Vec<_>>().join(",");
+    let mut tx = st.pool.begin().await?;
+    for (k, v) in [("caixa.fecho_cego", if c.fecho_cego { "1".to_string() } else { "0".to_string() }), ("caixa.notas", kz(&notas)), ("caixa.moedas", kz(&moedas))] {
+        sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").bind(k).bind(v).execute(&mut *tx).await?;
+    }
+    sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'CONFIGURACAO', ?)")
+        .bind(s.id)
+        .bind(format!("Fecho de caixa: fecho cego {}", if c.fecho_cego { "ligado" } else { "desligado" }))
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    config_fecho(&st.pool).await
 }
 
 async fn resumo(st: &AppState, sid: i64) -> AppResult<Value> {
@@ -60,7 +120,9 @@ async fn resumo(st: &AppState, sid: i64) -> AppResult<Value> {
     .await?;
     let numerario: i64 = por_modo.iter().filter(|r| r.get::<String, _>("codigo") == "NU").map(|r| r.get::<i64, _>("total")).sum();
     let inicial: i64 = s.get("valor_inicial");
-    Ok(json!({
+    let fecho = config_fecho(p).await?;
+    let contagem = s.get::<Option<String>, _>("contagem").and_then(|c| serde_json::from_str::<Value>(&c).ok()).unwrap_or(Value::Null);
+    let mut r = json!({
         "sessao": db::row_json(&s),
         "por_modo": db::rows_json(&por_modo),
         "documentos": docs,
@@ -70,7 +132,25 @@ async fn resumo(st: &AppState, sid: i64) -> AppResult<Value> {
         "movimentos": db::rows_json(&movimentos),
         "artigos": db::rows_json(&artigos),
         "numerario_esperado": inicial + numerario + entradas - saidas,
-    }))
+        "contagem": contagem,
+        "fecho": fecho,
+        "cego": false,
+    });
+    // Fecho cego: com o caixa aberto, quem não vê relatórios (o operador) não vê o esperado nem os totais.
+    // Depois de fechado, o relatório mostra tudo (a contagem já não se muda).
+    let aberta = s.get::<String, _>("estado") == "ABERTA";
+    if aberta && r["fecho"]["fecho_cego"] == true && !st.sessao_opcional().is_some_and(|x| x.tem("relatorios.ver")) {
+        r["numerario_esperado"] = Value::Null;
+        r["total_vendido"] = Value::Null;
+        r["artigos"] = json!([]);
+        if let Some(modos) = r["por_modo"].as_array_mut() {
+            for m in modos {
+                m["total"] = Value::Null;
+            }
+        }
+        r["cego"] = json!(true);
+    }
+    Ok(r)
 }
 
 pub async fn estado(st: &AppState) -> AppResult<Value> {
@@ -155,16 +235,49 @@ pub async fn movimento(st: &AppState, m: MovIn) -> AppResult<Value> {
 }
 
 #[derive(Deserialize)]
+pub struct ContagemIn {
+    /// Valor da nota ou moeda, em cêntimos.
+    valor: i64,
+    quantidade: i64,
+    /// «N» nota ou «M» moeda (há notas e moedas com o mesmo valor).
+    #[serde(default)]
+    tipo: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct FecharIn {
-    valor_contado: i64,
+    /// Valor físico contado (cêntimos). Com `contagem`, é a soma da contagem.
+    valor_contado: Option<i64>,
+    /// Contagem por notas e moedas.
+    #[serde(default)]
+    contagem: Vec<ContagemIn>,
 }
 
 pub async fn fechar(st: &AppState, f: FecharIn) -> AppResult<Value> {
     st.exigir_perm("pos.fecho_caixa")?;
     let sid = sessao_aberta(st).await?.ok_or_else(|| AppError::msg("Não há caixa aberto."))?;
-    sqlx::query("UPDATE caixa_sessoes SET estado = 'FECHADA', fechada_em = ?, valor_contado = ? WHERE id = ?")
+    let (contado, contagem) = if f.contagem.is_empty() {
+        let v = f.valor_contado.ok_or_else(|| AppError::msg("Indique o valor contado ou a contagem por notas e moedas."))?;
+        (v.max(0), None)
+    } else {
+        let mut total = 0i64;
+        let mut linhas = Vec::new();
+        for c in &f.contagem {
+            if !(1..=100_000_000).contains(&c.valor) || !(0..=1_000_000).contains(&c.quantidade) {
+                return Err(AppError::msg("Contagem inválida: valores e quantidades têm de ser positivos."));
+            }
+            if c.quantidade > 0 {
+                total += c.valor * c.quantidade;
+                let tipo = c.tipo.as_deref().filter(|t| matches!(*t, "N" | "M"));
+                linhas.push(json!({ "valor": c.valor, "quantidade": c.quantidade, "tipo": tipo }));
+            }
+        }
+        (total, Some(Value::Array(linhas).to_string()))
+    };
+    sqlx::query("UPDATE caixa_sessoes SET estado = 'FECHADA', fechada_em = ?, valor_contado = ?, contagem = ? WHERE id = ?")
         .bind(db::agora())
-        .bind(f.valor_contado)
+        .bind(contado)
+        .bind(contagem)
         .bind(sid)
         .execute(&st.pool)
         .await?;

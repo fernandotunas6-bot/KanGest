@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Pencil } from "lucide-react";
 import { call } from "@/lib/api";
-import type { OpcoesImpresso, TipoDocumento } from "@/lib/types";
+import type { FechoConfig, OpcoesImpresso, TipoDocumento } from "@/lib/types";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 
 interface Modo {
@@ -56,7 +56,10 @@ export default function Parametrizacao() {
       ) : vista === "documentos" ? (
         <Documentos tipos={q.data.tipos} />
       ) : vista === "venda" ? (
-        <OpcoesVenda modos={q.data.modos} contas={q.data.contas} />
+        <>
+          <OpcoesVenda modos={q.data.modos} contas={q.data.contas} />
+          <FechoCaixa />
+        </>
       ) : (
         <Impresso opcoes={q.data.opcoes} />
       )}
@@ -251,6 +254,64 @@ function OpcoesVenda({ modos, contas }: { modos: Modo[]; contas: Dados["contas"]
         </Table>
       </Card>
     </>
+  );
+}
+
+// ======================================================================= fecho de caixa
+/** Kz a partir de cêntimos, como se escreve nas listas de notas e moedas (0,50 Kz → «0.5»). */
+const kzLista = (v: number[]) => v.map((c) => String(c / 100)).join(", ");
+
+function FechoCaixa() {
+  const cfg = useQuery({ queryKey: ["caixa-config"], queryFn: () => call<FechoConfig>("caixa.config") });
+  const [f, setF] = useState<{ fecho_cego: boolean; notas: string; moedas: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!cfg.data) return null;
+  const v = f ?? { fecho_cego: cfg.data.fecho_cego, notas: kzLista(cfg.data.notas), moedas: kzLista(cfg.data.moedas) };
+  async function gravar() {
+    setBusy(true);
+    try {
+      await call("caixa.configGuardar", v);
+      toast.success("Opções do fecho de caixa gravadas.");
+      setF(null);
+      cfg.refetch();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card className="mt-5 max-w-3xl p-6">
+      <div className="mb-4 font-medium">Fecho de caixa</div>
+      <label className="flex cursor-pointer items-start gap-3">
+        <input className="mt-1" type="checkbox" checked={v.fecho_cego} onChange={(e) => setF({ ...v, fecho_cego: e.target.checked })} />
+        <span>
+          <span className="font-medium">Fecho cego</span>
+          <span className="block text-[13px] text-ink-3">
+            Com o caixa aberto, o operador não vê o valor esperado nem os totais: conta a gaveta e só depois de fechar o relatório mostra a diferença. Quem tem a permissão
+            Relatórios continua a ver tudo.
+          </span>
+        </span>
+      </label>
+      <div className="mt-4 grid grid-cols-2 gap-4">
+        <Field label="Notas na contagem (Kz)" hint="Separadas por vírgulas">
+          <Input value={v.notas} onChange={(e) => setF({ ...v, notas: e.target.value })} />
+        </Field>
+        <Field label="Moedas na contagem (Kz)" hint="Os cêntimos com ponto: 0.5">
+          <Input value={v.moedas} onChange={(e) => setF({ ...v, moedas: e.target.value })} />
+        </Field>
+      </div>
+      <div className="mt-5 flex justify-end gap-2">
+        {f && (
+          <Button variant="ghost" onClick={() => setF(null)}>
+            Cancelar
+          </Button>
+        )}
+        <Button loading={busy} onClick={gravar}>
+          Gravar
+        </Button>
+      </div>
+    </Card>
   );
 }
 

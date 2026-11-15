@@ -207,9 +207,18 @@ async fn fluxo_completo() {
     // NC da FR gerou saída de caixa (devolução)
     assert_eq!(cx["saidas"], 114000);
     assert_eq!(cx["numerario_esperado"], 1000000 + 342000 - 114000);
-    let fecho = rpc(&st, "caixa.fechar", json!({ "valor_contado": 1228000 })).await;
+    // contagem por notas e moedas: o valor físico é a soma (2×5000 + 1×2000 + 1×200 + 1×50 + 2×10 + 1×0,50 Kz = 12 270,50)
+    assert_eq!(cx["fecho"]["notas"], json!([500000, 200000, 100000, 50000, 20000]));
+    assert!(rpc_err(&st, "caixa.fechar", json!({ "contagem": [{ "valor": 500000, "quantidade": -1 }] })).await.contains("inválida"));
+    assert!(rpc_err(&st, "caixa.fechar", json!({})).await.contains("valor contado"));
+    let contagem = json!([{ "valor": 500000, "quantidade": 2 }, { "valor": 200000, "quantidade": 1 }, { "valor": 20000, "quantidade": 1 },
+                          { "valor": 5000, "quantidade": 1 }, { "valor": 1000, "quantidade": 2 }, { "valor": 50, "quantidade": 1 }, { "valor": 100000, "quantidade": 0 }]);
+    let fecho = rpc(&st, "caixa.fechar", json!({ "contagem": contagem })).await;
     assert_eq!(fecho["sessao"]["estado"], "FECHADA");
+    assert_eq!(fecho["sessao"]["valor_contado"], 1227050);
+    assert_eq!(fecho["contagem"].as_array().unwrap().len(), 6, "as notas sem quantidade não ficam");
     assert!(rpc(&st, "caixa.estado", Value::Null).await.is_null());
+
 
     // ---- painel e todos os relatórios executam ----
     let dash = rpc(&st, "dashboard", Value::Null).await;
@@ -332,8 +341,30 @@ async fn fluxo_completo() {
     let ids = rpc(&st, "artigos.porIds", json!({ "ids": [artigo] })).await;
     assert_eq!(ids.as_array().unwrap().len(), 1);
 
+    // fecho cego: o operador (sem relatórios) não vê o esperado nem os totais até fechar; o gestor vê
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    if !rpc(&st, "caixa.estado", Value::Null).await.is_null() {
+        rpc(&st, "caixa.fechar", json!({ "valor_contado": 0 })).await;
+    }
+    assert!(rpc_err(&st, "caixa.configGuardar", json!({ "fecho_cego": true, "notas": "5000, abc", "moedas": "" })).await.contains("inválido"));
+    let cfg = rpc(&st, "caixa.configGuardar", json!({ "fecho_cego": true, "notas": "5000,2000,1000,500,200", "moedas": "100 50 0.5" })).await;
+    assert_eq!(cfg["moedas"], json!([10000, 5000, 50]));
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Caixa Cega", "login": "cega", "perfil": "CAIXA", "senha": "cega1234", "mudar_senha": false })).await;
+    rpc(&st, "auth.login", json!({ "login": "cega", "senha": "cega1234" })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 500000 })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    let cego = rpc(&st, "caixa.estado", Value::Null).await;
+    assert_eq!((cego["cego"].as_bool(), cego["numerario_esperado"].is_null(), cego["total_vendido"].is_null()), (Some(true), true, true), "{cego}");
+    assert!(cego["por_modo"].as_array().unwrap().iter().all(|m| m["total"].is_null()));
+    assert_eq!(cego["documentos"], 1);
+    let fechado = rpc(&st, "caixa.fechar", json!({ "valor_contado": 614000 })).await;
+    assert_eq!((fechado["numerario_esperado"].as_i64(), fechado["cego"].as_bool()), (Some(614000), Some(false)), "depois de fechar mostra tudo");
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    rpc(&st, "caixa.configGuardar", json!({ "fecho_cego": false, "notas": "5000,2000,1000,500,200", "moedas": "200,100,50,20,10,5,2,1,0.5" })).await;
+
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
+
 }
 
 // =====================================================================================

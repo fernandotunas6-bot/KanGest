@@ -71,8 +71,8 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · **Esforço:** P pequeno (dia
 
 | Função | Nos grandes POS | KanGest | Prioridade | Esforço |
 |---|---|---|---|---|
-| Contagem do fecho por notas e moedas (Kz) | Padrão | ❌ escreve-se só o total contado | Alta | P |
-| Fecho cego (o operador conta sem ver o valor esperado) | Comum | ❌ | Média | P |
+| Contagem do fecho por notas e moedas (Kz) | Padrão | ✅ **feito:** contagem por notas e moedas (configuráveis), guardada e impressa no relatório de fecho | — | — |
+| Fecho cego (o operador conta sem ver o valor esperado) | Comum | ✅ **feito:** opção em Opções de Venda; quem não vê relatórios só vê o esperado depois de fechar | — | — |
 | Aviso de excesso de numerário na gaveta (recolha para o cofre) | Comum | ❌ | Baixa | P |
 | Leitura X a meio do turno | Comum | 🟡 o estado do caixa mostra o acumulado, sem talão próprio | Baixa | P |
 
@@ -109,7 +109,7 @@ limite de pedidos, registo de pedidos, idempotência na emissão e exportação 
 
 1. ~~Corrigir a compensação de saldo no POS~~ — feito: a FR paga-se com o crédito do cliente.
 2. Artigos a peso (EAN-13 de balança) e vários códigos de barras/embalagens por artigo.
-3. Contagem do fecho de caixa por notas e moedas e fecho cego.
+3. ~~Contagem do fecho de caixa por notas e moedas e fecho cego~~ — feito.
 4. Webhooks para a API (venda emitida, documento anulado, stock alterado), assinados com HMAC.
 5. Envio da factura por email/WhatsApp em PDF.
 6. Fotografias dos artigos (úteis no POS táctil e na loja online ligada pela API).

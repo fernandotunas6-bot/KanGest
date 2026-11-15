@@ -5,9 +5,9 @@ import { toast } from "sonner";
 import { ArrowDownLeft, ArrowUpRight, History, Lock, Printer, ShoppingCart, Wallet } from "lucide-react";
 import { call } from "@/lib/api";
 import { useTabelas, useTalao58 } from "@/lib/hooks";
-import { dataHora, kz, parseKz, qtd } from "@/lib/format";
+import { dataHora, kz, kzNum, parseKz, qtd } from "@/lib/format";
 import { imprimir } from "@/lib/print";
-import type { CaixaResumo } from "@/lib/types";
+import type { CaixaResumo, FechoConfig } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Stat, Table, Td, Th, cn } from "@/components/ui";
 import { PrintPortal } from "@/components/DocumentoPrint";
@@ -98,9 +98,15 @@ export default function Caixa() {
           />
           <div className="grid grid-cols-4 gap-4">
             <Stat label="Fundo de maneio" value={kz(c.sessao.valor_inicial)} />
-            <Stat label="Total recebido" value={kz(c.total_vendido)} hint={`${c.documentos} documentos`} />
+            <Stat label="Total recebido" value={c.total_vendido === null ? "—" : kz(c.total_vendido)} hint={`${c.documentos} documentos`} />
             <Stat label="Entradas / Saídas" value={kz(c.entradas - c.saidas)} hint={`+${kz(c.entradas)} · −${kz(c.saidas)}`} tone="accent" />
-            <Stat label="Numerário esperado na gaveta" value={kz(c.numerario_esperado)} tone="ok" icon={<Wallet className="size-4" />} />
+            <Stat
+              label="Numerário esperado na gaveta"
+              value={c.numerario_esperado === null ? "—" : kz(c.numerario_esperado)}
+              hint={c.cego ? "Fecho cego: aparece no relatório depois de fechar" : undefined}
+              tone="ok"
+              icon={<Wallet className="size-4" />}
+            />
           </div>
           <div className="mt-4 grid grid-cols-2 gap-4">
             <Card>
@@ -110,7 +116,7 @@ export default function Caixa() {
                   {c.por_modo.map((m) => (
                     <tr key={m.codigo}>
                       <Td>{m.descricao}</Td>
-                      <Td className="num text-right font-medium">{kz(m.total)}</Td>
+                      <Td className="num text-right font-medium">{m.total === null ? "—" : kz(m.total)}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -148,6 +154,7 @@ export default function Caixa() {
       {fechar && c && (
         <Fechar
           esperado={c.numerario_esperado}
+          fecho={c.fecho}
           onClose={() => setFechar(false)}
           onDone={(r) => {
             setFechar(false);
@@ -221,33 +228,108 @@ function Movimento({ onClose, onDone }: { onClose: () => void; onDone: () => voi
   );
 }
 
-function Fechar({ esperado, onClose, onDone }: { esperado: number; onClose: () => void; onDone: (r: CaixaResumo) => void }) {
+function Fechar({ esperado, fecho, onClose, onDone }: { esperado: number | null; fecho: FechoConfig; onClose: () => void; onDone: (r: CaixaResumo) => void }) {
+  const linhas = [...fecho.notas.map((valor) => ({ tipo: "N" as const, valor })), ...fecho.moedas.map((valor) => ({ tipo: "M" as const, valor }))];
+  const [modo, setModo] = useState<"notas" | "total">(linhas.length ? "notas" : "total");
   const [contado, setContado] = useState("");
-  const dif = parseKz(contado || "0") - esperado;
+  const [qtds, setQtds] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const chave = (l: { tipo: string; valor: number }) => `${l.tipo}${l.valor}`;
+  const quantidade = (l: { tipo: string; valor: number }) => Math.max(0, parseInt(qtds[chave(l)] || "0", 10) || 0);
+  const totalNotas = linhas.reduce((s, l) => s + l.valor * quantidade(l), 0);
+  const valor = modo === "notas" ? totalNotas : parseKz(contado || "0");
+  const dif = esperado === null ? null : valor - esperado;
+
   async function fechar() {
+    setBusy(true);
     try {
-      const r = await call<CaixaResumo>("caixa.fechar", { valor_contado: parseKz(contado || "0") });
+      const contagem = modo === "notas" ? linhas.map((l) => ({ valor: l.valor, quantidade: quantidade(l), tipo: l.tipo })).filter((x) => x.quantidade > 0) : [];
+      const r = await call<CaixaResumo>("caixa.fechar", { valor_contado: valor, contagem });
       toast.success("Caixa fechado.");
       onDone(r);
     } catch (e) {
       toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   }
+
+  const coluna = (titulo: string, itens: typeof linhas) =>
+    !!itens.length && (
+      <div>
+        <div className="mb-1.5 text-[12px] font-medium uppercase tracking-wide text-ink-2">{titulo}</div>
+        <div className="space-y-1.5">
+          {itens.map((l) => (
+            <div key={chave(l)} className="grid grid-cols-[72px_80px_1fr] items-center gap-2 text-[13px]">
+              <span className="num text-right font-medium">{kzNum(l.valor)}</span>
+              <Input
+                className="num h-8 text-right"
+                inputMode="numeric"
+                placeholder="0"
+                value={qtds[chave(l)] ?? ""}
+                onChange={(e) => setQtds({ ...qtds, [chave(l)]: e.target.value.replace(/\D/g, "") })}
+                onFocus={(e) => e.target.select()}
+              />
+              <span className="num text-right text-ink-2">{quantidade(l) ? kz(l.valor * quantidade(l)) : ""}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+
   return (
-    <Modal open onClose={onClose} title="Fecho de caixa" width="max-w-md" footer={<Button variant="danger" onClick={fechar}>Finalizar fecho</Button>}>
-      <p className="mb-4 text-ink-2">Conte o numerário na gaveta e indique o valor físico. O sistema compara com o total do sistema.</p>
-      <Field label="Valor físico (Kz)">
-        <Input autoFocus className="num text-right text-lg" value={contado} onChange={(e) => setContado(e.target.value)} />
-      </Field>
+    <Modal
+      open
+      onClose={onClose}
+      title="Fecho de caixa"
+      width={modo === "notas" ? "max-w-2xl" : "max-w-md"}
+      footer={
+        <Button variant="danger" loading={busy} onClick={fechar}>
+          Finalizar fecho
+        </Button>
+      }
+    >
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <p className="text-ink-2">{modo === "notas" ? "Conte as notas e as moedas da gaveta." : "Conte o numerário na gaveta e indique o valor físico."}</p>
+        {!!linhas.length && (
+          <div className="flex shrink-0 rounded-lg border border-line p-0.5 text-[12.5px]">
+            {(["notas", "total"] as const).map((m) => (
+              <button key={m} type="button" onClick={() => setModo(m)} className={cn("rounded-md px-2.5 py-1", modo === m ? "bg-brand text-white" : "text-ink-2 hover:bg-sunken")}>
+                {m === "notas" ? "Notas e moedas" : "Só o total"}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {modo === "notas" ? (
+        <div className="grid grid-cols-2 gap-6">
+          {coluna("Notas (Kz)", linhas.filter((l) => l.tipo === "N"))}
+          {coluna("Moedas (Kz)", linhas.filter((l) => l.tipo === "M"))}
+        </div>
+      ) : (
+        <Field label="Valor físico (Kz)">
+          <Input autoFocus className="num text-right text-lg" value={contado} onChange={(e) => setContado(e.target.value)} />
+        </Field>
+      )}
       <div className="mt-4 space-y-1 rounded-xl bg-sunken p-4">
-        <div className="flex justify-between">
-          <span>Total do sistema (numerário)</span>
-          <span className="num">{kz(esperado)}</span>
+        <div className="flex justify-between font-medium">
+          <span>Total contado</span>
+          <span className="num">{kz(valor)}</span>
         </div>
-        <div className={cn("flex justify-between font-medium", dif < 0 ? "text-danger" : dif > 0 ? "text-[#9a6514]" : "text-ok")}>
-          <span>Diferença</span>
-          <span className="num">{kz(dif)}</span>
-        </div>
+        {esperado === null || dif === null ? (
+          <p className="pt-1 text-[12.5px] text-ink-3">Fecho cego: o valor esperado e a diferença aparecem no relatório depois de fechar.</p>
+        ) : (
+          <>
+            <div className="flex justify-between">
+              <span>Total do sistema (numerário)</span>
+              <span className="num">{kz(esperado)}</span>
+            </div>
+            <div className={cn("flex justify-between font-medium", dif < 0 ? "text-danger" : dif > 0 ? "text-[#9a6514]" : "text-ok")}>
+              <span>Diferença</span>
+              <span className="num">{kz(dif)}</span>
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );
@@ -293,7 +375,7 @@ function Historico({ onClose, onAbrir }: { onClose: () => void; onAbrir: (id: nu
 }
 
 function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void }) {
-  const dif = (r.sessao.valor_contado ?? 0) - r.numerario_esperado;
+  const dif = r.numerario_esperado === null ? 0 : (r.sessao.valor_contado ?? 0) - r.numerario_esperado;
   const t58 = useTalao58();
   const e = useEmpresa();
   const tabelas = useTabelas();
@@ -331,17 +413,30 @@ function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void })
         <span>Valor</span>
       </div>
       {r.por_modo.map((m) => (
-        <div key={m.codigo}>{linha(m.descricao, kz(m.total))}</div>
+        <div key={m.codigo}>{linha(m.descricao, m.total === null ? "—" : kz(m.total))}</div>
       ))}
       <div className="mt-1 border-t border-black pt-1">
-        {linha(`Total de ${r.documentos} documento(s):`, kz(r.total_vendido), true)}
+        {linha(`Total de ${r.documentos} documento(s):`, r.total_vendido === null ? "—" : kz(r.total_vendido), true)}
         {linha("Fundo de maneio", kz(r.sessao.valor_inicial))}
         {linha("Entradas", kz(r.entradas))}
         {linha("Saídas", kz(r.saidas))}
-        {linha("Numerário esperado:", kz(r.numerario_esperado), true)}
+        {linha("Numerário esperado:", r.numerario_esperado === null ? "—" : kz(r.numerario_esperado), true)}
         {linha("Valor Físico:", r.sessao.valor_contado === null ? "—" : kz(r.sessao.valor_contado), true)}
-        {r.sessao.valor_contado !== null && linha(dif < 0 ? "Diferença (falta):" : dif > 0 ? "Diferença (sobra):" : "Diferença:", kz(dif), true)}
+        {r.sessao.valor_contado !== null && r.numerario_esperado !== null && linha(dif < 0 ? "Diferença (falta):" : dif > 0 ? "Diferença (sobra):" : "Diferença:", kz(dif), true)}
       </div>
+      {!!r.contagem?.length && (
+        <>
+          <div className="mt-2 border-y border-black py-0.5 text-center">Contagem</div>
+          {r.contagem.map((c, i) => (
+            <div key={i} className="flex justify-between gap-2">
+              <span>
+                {c.quantidade} x {c.tipo === "M" ? "moeda" : c.tipo === "N" ? "nota" : ""} {kzNum(c.valor)}
+              </span>
+              <span>{kz(c.valor * c.quantidade)}</span>
+            </div>
+          ))}
+        </>
+      )}
       {r.artigos.length > 0 && (
         <>
           <div className="mt-2 border-y border-black py-0.5 text-center">Artigos vendidos</div>

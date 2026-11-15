@@ -341,14 +341,26 @@ export interface CaixaResumo {
     utilizador: string;
     posto: string | null;
   };
-  por_modo: { codigo: string; descricao: string; total: number }[];
+  /** Com o fecho cego, os totais vêm a null enquanto o caixa está aberto (para quem não vê relatórios). */
+  por_modo: { codigo: string; descricao: string; total: number | null }[];
   documentos: number;
-  total_vendido: number;
+  total_vendido: number | null;
   entradas: number;
   saidas: number;
   movimentos: { id: number; data_hora: string; tipo: string; valor: number; descricao: string; rubrica: string | null; modo_codigo: string | null }[];
   artigos: { referencia: string; descricao: string; quantidade: number; total: number }[];
-  numerario_esperado: number;
+  numerario_esperado: number | null;
+  /** Contagem por notas e moedas do fecho (valor em cêntimos; tipo N nota, M moeda). */
+  contagem: { valor: number; quantidade: number; tipo?: "N" | "M" | null }[] | null;
+  fecho: FechoConfig;
+  cego: boolean;
+}
+
+/** Opções do fecho de caixa: fecho cego e as notas e moedas da contagem (em cêntimos). */
+export interface FechoConfig {
+  fecho_cego: boolean;
+  notas: number[];
+  moedas: number[];
 }
 
 // ---------------- Oficina ----------------

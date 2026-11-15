@@ -199,6 +199,8 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "caixa.abrir" => caixa::abrir(st, p(params)?).await,
         "caixa.movimento" => caixa::movimento(st, p(params)?).await,
         "caixa.fechar" => caixa::fechar(st, p(params)?).await,
+        "caixa.config" => caixa::config(st).await,
+        "caixa.configGuardar" => caixa::config_guardar(st, p(params)?).await,
 
         // ---- recursos humanos ----
         "rh.tabelas" => rh::tabelas(st).await,
