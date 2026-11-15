@@ -7,6 +7,7 @@
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
+    "beforeBundleCommand": "node scripts/selar-executavel.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -40,6 +41,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "selo/selo.json": "selo.json"
+    },
     "publisher": "KanGest",
     "copyright": "© 2026 KanGest",
     "longDescription": "Gestão comercial e ponto de venda para Angola: facturação certificada AGT, POS, stock com lotes, tesouraria, recursos humanos, oficina, SAF-T e facturação electrónica.",

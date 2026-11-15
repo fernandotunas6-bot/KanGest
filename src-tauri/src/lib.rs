@@ -4,6 +4,7 @@ mod db;
 mod error;
 pub mod http;
 mod rede;
+pub mod selo;
 mod services;
 mod state;
 pub mod webhooks;
@@ -42,6 +43,12 @@ fn posto_local(dir: &std::path::Path) -> i64 {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            // selo de integridade do executável (só nas compilações oficiais; corre numa thread à parte)
+            if let Ok(recursos) = app.path().resource_dir() {
+                selo::iniciar(recursos);
+            } else {
+                selo::iniciar(std::path::PathBuf::new());
+            }
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let caminho = dir.join("kigest.db");

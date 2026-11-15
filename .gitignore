@@ -9,3 +9,4 @@ src-tauri/gen/
 # exportações do KIGEST: têm os dados da empresa
 *.kigest
 *.kigest.parcial
+scripts/selo/target/

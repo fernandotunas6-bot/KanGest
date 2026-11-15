@@ -2067,6 +2067,41 @@ async fn licencas_experiencia_e_assinatura() {
     // sem registo no servidor, sincronizar não sai para a internet
     let r = rpc(&st, "licenca.sincronizar", Value::Null).await;
     assert_eq!((r["mudou"].as_bool(), r["estado"]["registada"].as_bool()), (Some(false), Some(false)), "{r}");
+    assert_eq!(e["selo"], "SEM_SELO", "compilação de testes: sem selo do executável");
+
+    // ---- selo dos dados da licença: mexer na tabela config à mão não dá mais dias ----
+    let ler_cfg = |chave: &'static str| {
+        let pool = st.pool.clone();
+        async move { sqlx::query_scalar::<_, String>("SELECT valor FROM config WHERE chave = ?").bind(chave).fetch_optional(&pool).await.unwrap() }
+    };
+    let contar = |detalhe: &'static str| {
+        let pool = st.pool.clone();
+        async move { sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM auditoria WHERE acao = 'LICENCA' AND detalhe LIKE ?").bind(detalhe).fetch_one(&pool).await.unwrap() }
+    };
+    assert!(ler_cfg("licenca.selo").await.unwrap().starts_with("S1."), "o selo é criado na primeira vez");
+    assert_eq!(contar("Selo dos dados da licença criado.").await, 1);
+    gravar("licenca.instalada_em", dia(100)).await; // «instalado daqui a 100 dias»
+    let e = rpc(&st, "licenca.estado", Value::Null).await;
+    assert_eq!((e["modo"].as_str(), e["dias"].as_i64()), (Some("EXPERIENCIA"), Some(30)), "vale o selo: {e}");
+    assert_eq!(ler_cfg("licenca.instalada_em").await.unwrap(), dia(0), "e a data volta a ser a verdadeira");
+    // apagar o selo e mudar a data: valem os registos da base (a empresa foi criada hoje)
+    sqlx::query("DELETE FROM config WHERE chave = 'licenca.selo'").execute(&st.pool).await.unwrap();
+    gravar("licenca.instalada_em", dia(100)).await;
+    assert_eq!(rpc(&st, "licenca.estado", Value::Null).await["dias"].as_i64(), Some(30));
+    assert_eq!(contar("%alterados fora do KanGest%").await, 1, "a alteração fica na auditoria");
+    // um selo inventado também não serve
+    let inventado = format!("S1.{}.AAAA", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!("{}|{}T00:00:00", dia(100), dia(100))));
+    gravar("licenca.selo", inventado).await;
+    gravar("licenca.instalada_em", dia(100)).await;
+    assert_eq!(rpc(&st, "licenca.estado", Value::Null).await["dias"].as_i64(), Some(30));
+    // o selo lembra-se da última utilização: apagar o ultimo_visto não esconde um relógio atrasado
+    gravar("licenca.selo", super::licenca::selo_teste(&dia(0), &format!("{}T10:00:00", dia(5)))).await;
+    sqlx::query("DELETE FROM config WHERE chave = 'licenca.ultimo_visto'").execute(&st.pool).await.unwrap();
+    let e = rpc(&st, "licenca.estado", Value::Null).await;
+    assert_eq!(e["modo"], "RELOGIO", "{e}");
+    assert!(rpc_err(&st, "documentos.emitir", venda.clone()).await.contains("data deste computador"));
+    gravar("licenca.selo", super::licenca::selo_teste(&dia(0), &format!("{}T00:00:00", dia(0)))).await;
+    assert_eq!(rpc(&st, "licenca.estado", Value::Null).await["modo"], "EXPERIENCIA");
 
     // fim da experiência: consulta-se, mas não se emite
     gravar("licenca.instalada_em", dia(-40)).await;

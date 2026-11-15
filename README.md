@@ -51,7 +51,8 @@ O equipamento do posto de venda (impressora térmica, gaveta, leitor, visor de c
 A **API de integração** (loja online, contabilidade, BI e outras aplicações, com chaves de acesso) está em [docs/API.md](docs/API.md)
 e a especificação OpenAPI em [docs/openapi.json](docs/openapi.json). O estudo do que falta face aos grandes POS está em
 [docs/ANALISE-POS-MERCADO.md](docs/ANALISE-POS-MERCADO.md). A protecção com a Cloudflare (túnel e Access para a API, servidor de
-licenças e site) está em [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md).
+licenças e site) está em [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md). A cifra e a protecção do programa (ligação entre postos,
+selo da licença e do executável) estão em [docs/SEGURANCA.md](docs/SEGURANCA.md).
 
 ## Testes
 

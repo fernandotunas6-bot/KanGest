@@ -88,6 +88,9 @@ uma versão nova do KanGest; as licenças antigas continuam válidas enquanto a 
   de comandos; o servidor de licenças ainda não guarda módulos por cliente (as renovações e o painel emitem sem módulos).
 - A experiência conta desde a criação da empresa; nas bases antigas, desde a primeira vez que a versão com licenças
   abre. Os 30 dias estão no programa (`DIAS_EXPERIENCIA`), não na configuração que o cliente pode alterar.
+- As datas da experiência e do relógio vão seladas na base (`licenca.selo`, HMAC-SHA256): editá-las à mão não dá mais
+  dias nem esconde um relógio atrasado. O executável oficial leva um selo de integridade e não emite se tiver sido
+  alterado nem com um depurador ligado. Ver [SEGURANCA.md](SEGURANCA.md).
 - Em rede, a licença é a do servidor: os postos pedem-lhe o estado e é ele que emite os documentos. O registo online
   faz-se também no servidor (é o computador dele que fica registado).
 - Ao receber uma licença do servidor, o KanGest nunca troca uma licença válida que dure mais (por exemplo, emitida à
