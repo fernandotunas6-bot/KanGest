@@ -139,7 +139,7 @@ pub async fn modo_guardar(st: &AppState, m: ModoIn) -> AppResult<Value> {
 /// Definição de Faturas e Recibos: o que aparece no impresso.
 pub async fn opcoes_guardar(st: &AppState, v: Value) -> AppResult<Value> {
     st.exigir_perm("sistema.parametrizacao")?;
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     for (k, chave) in OPCOES {
         if let Some(b) = v.get(*k).and_then(|x| x.as_bool()) {
             sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor")

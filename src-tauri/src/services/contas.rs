@@ -181,7 +181,7 @@ pub async fn devolver(st: &AppState, d: DevolverIn) -> AppResult<Value> {
         return Err(AppError::msg(format!("Valor inválido: o crédito disponível é {}.", agt::total_fmt(disponivel))));
     }
     let numero: String = doc.get("numero_doc");
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let mov = sqlx::query(
         "INSERT INTO movimentos_tesouraria (data, data_hora, conta_id, tipo, valor, descricao, centro_custo_id, entidade_id, documento, utilizador_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -236,7 +236,7 @@ pub async fn regularizar(st: &AppState, r: RegularizarIn) -> AppResult<Value> {
         return Err(AppError::msg("Indique o tipo e o valor da regularização."));
     }
     let credito = r.tipo == "CREDITO";
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let docs: Vec<(i64, i64)> = sqlx::query_as(if credito {
         "SELECT d.id, d.valor_pendente FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo
          WHERE d.entidade_id = ? AND d.estado = 'N' AND d.valor_pendente > 0 AND t.grupo = ? ORDER BY COALESCE(d.data_vencimento, d.data_emissao), d.id"
@@ -311,7 +311,7 @@ pub async fn regularizacao_anular(st: &AppState, a: AnularRegIn) -> AppResult<Va
         return Err(AppError::msg("A regularização já está anulada."));
     }
     let credito = row.get::<String, _>("tipo") == "CREDITO";
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     for (did, v) in sqlx::query_as::<_, (i64, i64)>("SELECT documento_id, valor FROM cc_regularizacao_docs WHERE regularizacao_id = ?").bind(a.id).fetch_all(&mut *tx).await? {
         sqlx::query(if credito {
             "UPDATE documentos SET valor_pendente = valor_pendente + ? WHERE id = ? AND estado = 'N'"

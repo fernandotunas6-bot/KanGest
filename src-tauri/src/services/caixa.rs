@@ -250,7 +250,7 @@ pub async fn fechar(st: &AppState, f: FecharIn) -> AppResult<Value> {
         return Err(AppError::msg("O valor contado não pode ser negativo."));
     }
     let modos: std::collections::BTreeMap<String, i64> = f.contado_modos.unwrap_or_default().into_iter().filter(|(k, v)| k != "NU" && *v >= 0).collect();
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let numero_z: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(numero_z), 0) + 1 FROM caixa_sessoes WHERE posto_id IS ?")
         .bind(st.posto().id)
         .fetch_one(&mut *tx)

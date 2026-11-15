@@ -166,7 +166,7 @@ pub async fn agt_importar_chave(st: &AppState, c: ChaveIn) -> AppResult<Value> {
     }
     let pkcs8 = chave.to_pkcs8_pem(LineEnding::LF).map_err(|e| AppError::msg(e.to_string()))?.to_string();
     let agora = crate::db::agora();
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     // a chave anterior fica arquivada (só a pública): os documentos que assinou continuam verificáveis
     agt::arquivar_chave(&mut tx, "ANTERIOR").await?;
     crate::segredos::gravar(&mut *tx, agt::CHAVE_CONFIG, &pkcs8).await?;

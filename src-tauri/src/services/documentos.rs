@@ -587,7 +587,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     let _guard = st.emissao.lock().await;
 
     let posto = st.posto();
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let tipo = carregar_tipo(&mut tx, &i.tipo).await?;
     let agora = db::agora();
     let hoje = db::hoje();
@@ -1686,7 +1686,7 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
         return Err(AppError::msg("Indique o motivo da anulação."));
     }
     let _guard = st.emissao.lock().await;
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let row = sqlx::query("SELECT numero_doc, estado, importado, tipo_codigo, data_emissao FROM documentos WHERE id = ?")
         .bind(a.id)
         .fetch_optional(&mut *tx)

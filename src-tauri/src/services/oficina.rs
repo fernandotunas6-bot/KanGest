@@ -227,7 +227,7 @@ pub async fn ordem_guardar(st: &AppState, o: OrdemIn) -> AppResult<Value> {
             return Err(AppError::msg("A quilometragem de saída não pode ser inferior à de entrada."));
         }
     }
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let id = match o.id {
         Some(id) => {
             let atual: String = sqlx::query_scalar("SELECT estado FROM of_ordens WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?.ok_or(AppError::NaoEncontrado)?;

@@ -279,7 +279,7 @@ pub async fn transferencia(st: &AppState, t: TransferenciaIn) -> AppResult<Value
     let nome = |id: i64| nomes.iter().find(|n| n.0 == id).map(|n| n.1.clone()).unwrap_or_default();
     let desc = t.descricao.filter(|d| !d.trim().is_empty()).unwrap_or_else(|| format!("Transferência {} → {}", nome(t.de_conta), nome(t.para_conta)));
     let (hoje, agora) = (db::hoje(), db::agora());
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let saida = sqlx::query(
         "INSERT INTO movimentos_tesouraria (data, data_hora, conta_id, tipo, valor, descricao, utilizador_id) VALUES (?, ?, ?, 'SAIDA', ?, ?, ?)",
     )
@@ -330,7 +330,7 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
         return Err(AppError::msg("O movimento já está anulado."));
     }
     let transf: Option<i64> = row.get("transferencia");
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     sqlx::query("UPDATE movimentos_tesouraria SET anulado = 1, motivo_anulacao = ? WHERE id = ? OR (? IS NOT NULL AND transferencia = ?)")
         .bind(a.motivo.trim())
         .bind(a.id)

@@ -891,8 +891,11 @@ async fn rh_oficina_lotes_moedas() {
     rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": pneu, "quantidade": 10, "preco_unitario": 2500000 }, { "artigo_id": valvula, "quantidade": 10, "preco_unitario": 10000 }] })).await;
     let kit = rpc(&st, "artigos.guardar", json!({ "descricao": "Kit 4 pneus montados", "taxa_iva_id": 1, "preco1": 17000000, "composto": true,
         "componentes": [{ "componente_id": pneu, "quantidade": 4 }, { "componente_id": valvula, "quantidade": 4 }] })).await["id"].as_i64().unwrap();
-    assert!(rpc_err(&st, "artigos.guardar", json!({ "id": kit, "descricao": "Kit", "taxa_iva_id": 1, "preco1": 1, "composto": true, "componentes": [{ "componente_id": kit, "quantidade": 1 }] })).await.contains("kit"));
-    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Kit de kits", "taxa_iva_id": 1, "preco1": 1, "composto": true, "componentes": [{ "componente_id": kit, "quantidade": 1 }] })).await.contains("composto"));
+    let e = rpc_err(&st, "artigos.guardar", json!({ "id": kit, "descricao": "Kit", "taxa_iva_id": 1, "preco1": 1, "composto": true, "componentes": [{ "componente_id": kit, "quantidade": 1 }] })).await;
+    assert!(e.contains("kit"), "{e}");
+    // logo a seguir a uma gravação recusada (a transacção ainda pode estar a desfazer-se noutra ligação)
+    let e = rpc_err(&st, "artigos.guardar", json!({ "descricao": "Kit de kits", "taxa_iva_id": 1, "preco1": 1, "composto": true, "componentes": [{ "componente_id": kit, "quantidade": 1 }] })).await;
+    assert!(e.contains("composto"), "{e}");
     assert_eq!(rpc(&st, "artigos.componentes", json!({ "id": kit })).await.as_array().unwrap().len(), 2);
     rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": kit, "quantidade": 2 }] })).await;
     assert_eq!(stock(&st, pneu).await, 2.0, "a venda do kit baixa os componentes");
@@ -2682,6 +2685,28 @@ async fn licencas_servidor_local() {
 }
 
 /// Base temporária com a empresa criada e o administrador com sessão iniciada.
+/// Fecha o pool só quando todas as ligações estão fechadas de facto. O `close()` do sqlx pode acabar antes de a
+/// última ligação usada voltar ao pool (isso faz-se numa tarefa à parte), e essa ligação, ao fechar, faria o
+/// checkpoint do WAL antigo para dentro do ficheiro já trocado. No programa o restauro aplica-se no arranque,
+/// antes de abrir a base, por isso só os testes precisam disto.
+async fn fechar_de_vez(pool: &sqlx::SqlitePool) {
+    let espera = std::time::Duration::from_millis(10);
+    for _ in 0..500 {
+        if pool.num_idle() == pool.size() as usize {
+            break;
+        }
+        tokio::time::sleep(espera).await;
+    }
+    pool.close().await;
+    for _ in 0..500 {
+        if pool.size() == 0 {
+            break;
+        }
+        tokio::time::sleep(espera).await;
+    }
+    assert_eq!(pool.size(), 0, "ficaram ligações abertas à base");
+}
+
 async fn base_com_admin(nome: &str) -> (AppState, std::path::PathBuf) {
     let pasta = std::env::temp_dir().join(format!("kigest-{nome}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&pasta);
@@ -2948,7 +2973,7 @@ async fn copias_externas_cifradas_e_restauro() {
     assert_eq!(r["reiniciar"], true);
     assert!(std::path::Path::new(r["copia_da_base_atual"].as_str().unwrap()).exists(), "a base actual fica guardada antes do restauro");
     // o que o arranque faz: fecha a base, troca o ficheiro e volta a abrir
-    st.pool.close().await;
+    fechar_de_vez(&st.pool).await;
     assert!(super::sistema::aplicar_restauro_pendente(&pasta).unwrap().is_some());
     let pool = db::abrir(&pasta.join("kigest.db")).await.unwrap();
     let nomes: Vec<String> = sqlx::query_scalar("SELECT descricao FROM artigos ORDER BY id").fetch_all(&pool).await.unwrap();
@@ -2965,6 +2990,26 @@ async fn copias_externas_cifradas_e_restauro() {
     assert!(rpc_err(&st2, "setup.restaurar", json!({ "ficheiro": externa })).await.contains("já está configurado"));
     let _ = std::fs::remove_dir_all(&pasta);
     let _ = std::fs::remove_dir_all(&pasta2);
+}
+
+/// Dois postos a gravar ao mesmo tempo: a segunda gravação espera pela primeira em vez de falhar com
+/// «database is locked» (as transacções de escrita começam com BEGIN IMMEDIATE).
+#[tokio::test]
+async fn gravacoes_simultaneas_esperam_pela_vez() {
+    let (st, pasta) = base_com_admin("gravacoes-simultaneas").await;
+    // outra ligação (outro posto) a meio de uma gravação, que só termina daqui a 300 ms
+    let mut outra = crate::db::transacao(&st.pool).await.unwrap();
+    sqlx::query("UPDATE empresa SET nome = nome WHERE id = 1").execute(&mut *outra).await.unwrap();
+    let terminar = async {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        outra.commit().await.unwrap();
+    };
+    let gravar = dispatch(&st, "artigos.guardar", json!({ "descricao": "Gravado à espera", "taxa_iva_id": 1, "preco1": 100000 }));
+    let (r, _) = tokio::join!(gravar, terminar);
+    assert!(r.is_ok(), "a gravação devia esperar pela outra: {:?}", r.err());
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM artigos WHERE descricao = 'Gravado à espera'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(n, 1);
+    let _ = std::fs::remove_dir_all(&pasta);
 }
 
 /// Base restaurada noutro computador (compilação de desenvolvimento): a chave cifrada não se lê,

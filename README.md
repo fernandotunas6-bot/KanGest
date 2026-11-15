@@ -6,9 +6,9 @@ A análise do sistema antigo e o roteiro estão em [docs/ANALISE-KIGEST.md](docs
 ## Baixar
 
 - **Página do produto:** https://kangest.pages.dev (cópia em https://fernandotunas6-bot.github.io/KanGest/)
-- **Windows 10/11 (64 bits):** [KanGest_1.0.0_x64-setup.exe](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_x64-setup.exe)
-- **macOS Apple Silicon (M1–M4):** [KanGest_1.0.0_aarch64.dmg](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_aarch64.dmg)
-- **macOS Intel:** [KanGest_1.0.0_x64.dmg](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_x64.dmg)
+- **Windows 10/11 (64 bits):** [KanGest_1.2.0_x64-setup.exe](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.2.0/KanGest_1.2.0_x64-setup.exe)
+- **macOS Apple Silicon (M1–M4):** [KanGest_1.2.0_aarch64.dmg](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.2.0/KanGest_1.2.0_aarch64.dmg)
+- **macOS Intel:** [KanGest_1.2.0_x64.dmg](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.2.0/KanGest_1.2.0_x64.dmg)
 - **Todas as versões:** https://github.com/fernandotunas6-bot/KanGest/releases
 
 Outros produtos na mesma página: [SIGA Plus](https://www.portal-siga.com) (gestão escolar) e o projecto da
@@ -40,7 +40,7 @@ A base de dados SQLite fica na pasta de dados da aplicação:
 
 ```bash
 npm ci
-npm run tauri build -- --bundles nsis          # Windows → src-tauri/target/release/bundle/nsis/KanGest_1.0.0_x64-setup.exe
+npm run tauri build -- --bundles nsis          # Windows → src-tauri/target/release/bundle/nsis/KanGest_1.2.0_x64-setup.exe
 CI=true npm run tauri build -- --bundles app,dmg   # macOS → src-tauri/target/release/bundle/dmg/*.dmg
 ```
 

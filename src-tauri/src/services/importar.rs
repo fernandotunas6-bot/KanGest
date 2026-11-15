@@ -919,7 +919,7 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
         utilizadores: HashMap::new(),
     };
     let _guard = st.emissao.lock().await;
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
 
     // 2) empresa (+ certificado do sistema anterior, só como referência)
     if let Some(e) = empresa.first() {

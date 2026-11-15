@@ -677,7 +677,7 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
         }
     }
     pares.push(("fe.ativo", if g.ativo { "1".into() } else { "0".into() }));
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     for (k, v) in &pares {
         if crate::segredos::CHAVES.contains(k) {
             crate::segredos::gravar(&mut *tx, k, v).await?;
@@ -817,7 +817,7 @@ pub async fn solicitar_serie(st: &AppState, s: SerieIn) -> AppResult<Value> {
         let e = erros_de(&v).into_iter().map(|x| x.1).collect::<Vec<_>>().join("; ");
         return Err(AppError::msg(format!("A AGT não criou a série (HTTP {estado}){}", if e.is_empty() { String::new() } else { format!(": {e}") })));
     };
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     sqlx::query("UPDATE series SET padrao = 0 WHERE tipo_codigo = ?").bind(&s.tipo).execute(&mut *tx).await?;
     sqlx::query(
         "INSERT INTO series (tipo_codigo, serie, descricao, data_inicio, data_fim, padrao, fe_agt) VALUES (?1, ?2, ?3, ?4, ?5, 1, 1)

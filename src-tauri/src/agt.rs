@@ -71,7 +71,7 @@ pub(crate) async fn retirar_chave_da_base(pool: &SqlitePool, produtor: &RsaPriva
     let bruto: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(CHAVE_CONFIG).fetch_optional(pool).await?;
     let Some(bruto) = bruto else { return Ok(()) };
     let pem = crate::segredos::decifrar(&bruto).unwrap_or_default();
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::transacao(pool).await?;
     if RsaPrivateKey::from_pkcs8_pem(&pem).map(|k| k.to_public_key() != produtor.to_public_key()).unwrap_or(false) {
         let importada: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'agt.chave_importada_em'").fetch_optional(&mut *tx).await?;
         arquivar_chave(&mut tx, if importada.is_some() { "IMPORTADA" } else { "DESENVOLVIMENTO" }).await?;
