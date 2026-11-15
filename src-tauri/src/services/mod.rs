@@ -28,6 +28,7 @@ pub mod sistema;
 mod suspensos;
 mod ficheiros;
 mod inventario;
+mod ligacao;
 mod quadro;
 #[cfg(test)]
 mod tests;
@@ -270,6 +271,9 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "rh.ferias" => rh::ferias(st, p(params)?).await,
         "rh.feriasGuardar" => rh::ferias_guardar(st, p(params)?).await,
         "rh.vendedores" => rh::vendedores(st).await,
+        "internet.estado" => ligacao::estado(st).await,
+        "internet.guardar" => ligacao::guardar(st, p(params)?).await,
+        "internet.diagnostico" => ligacao::diagnostico(st).await,
         "comissoes.taxas" => comissoes::taxas(st).await,
         "comissoes.taxaGuardar" => comissoes::taxa_guardar(st, p(params)?).await,
         "comissoes.relatorio" => comissoes::relatorio(st, p(params)?).await,

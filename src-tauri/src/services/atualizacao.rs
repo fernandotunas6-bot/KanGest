@@ -39,7 +39,7 @@ fn ficheiro_cfg(dir: &Path) -> PathBuf {
     dir.join("atualizacao.json")
 }
 
-fn ler_cfg(dir: &Path) -> Config {
+pub(crate) fn ler_cfg(dir: &Path) -> Config {
     std::fs::read_to_string(ficheiro_cfg(dir)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
 

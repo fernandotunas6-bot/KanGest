@@ -76,14 +76,28 @@ Os dados ficam em `~/Library/Application Support/ao.kigest.app`.
 
 Pormenores em [REDE.md](REDE.md). A API de integração usa outra porta (7800) e chaves próprias ([API.md](API.md)).
 
-## 7. Actualizações
+## 7. Internet (e proxy)
+
+Vender não precisa de Internet. A licença, as actualizações, a Facturação Electrónica da AGT, o email e os avisos da API
+precisam. Em **Configurações → Rede → Ligação à Internet**:
+
+- **Testar ligação** experimenta, a partir desta máquina, o site do KanGest, o servidor de licenças, a origem das
+  actualizações, a Facturação Electrónica (se estiver ligada) e o servidor de email, e mostra para cada um se respondeu,
+  em quanto tempo, por onde (directo ou proxy) e, se falhou, porquê.
+- **Proxy**: num escritório onde a Internet passa por um proxy, indique `http://endereço:porta` e, se ele pedir, o
+  utilizador e a senha (fica cifrada nesta máquina). Sem proxy escrito aqui, o KanGest usa o do sistema: as variáveis
+  `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` e, no Windows, o proxy das Opções da Internet. A rede local (o servidor dos
+  postos, impressoras) nunca vai pelo proxy. Só proxies HTTP; a configuração automática (ficheiro PAC) não é suportada.
+- A configuração é de cada máquina (ficheiro `internet.json` na pasta de dados), não da empresa.
+
+## 8. Actualizações
 
 Em Sistema → Sobre o KanGest → **Actualizações**, indique a origem
 `https://github.com/fernandotunas6-bot/KanGest/releases/latest/download` (ou a pasta partilhada onde a empresa guarda os
 instaladores). O KanGest lê o manifesto `kangest-atualizacao.json`, descarrega o instalador do seu sistema, confere o
 SHA-256 e a assinatura, faz uma cópia de segurança da base e abre o instalador.
 
-## 8. Problemas comuns
+## 9. Problemas comuns
 
 | Sintoma | O que fazer |
 |---|---|
@@ -93,3 +107,6 @@ SHA-256 e a assinatura, faz uma cópia de segurança da base e abre o instalador
 | O posto não encontra o servidor | Mesmo endereço e porta nos dois; firewall do servidor a aceitar a porta 7799 em redes privadas |
 | «Este KanGest foi alterado depois de publicado» | Reinstale a partir da página oficial ([SEGURANCA.md](SEGURANCA.md)) |
 | Restaurar diz «versão mais recente» | Actualize primeiro o KanGest deste computador |
+| A licença ou as actualizações dizem «Sem ligação» | Configurações → Rede → Ligação à Internet → **Testar ligação**: mostra o que falha e por onde |
+| «O proxy … pede utilizador e senha (407)» | Indique o utilizador e a senha do proxy no mesmo ecrã |
+| «O proxy … recusou a ligação a …» | O proxy ou a firewall da empresa bloqueia esse endereço: peça para o autorizar |

@@ -3,6 +3,7 @@ pub mod api;
 mod db;
 mod error;
 pub mod http;
+pub mod internet;
 mod produtor;
 mod rede;
 mod segredos;
@@ -63,6 +64,8 @@ pub fn run() {
             let caminho = dir.join("kigest.db");
             // chave mestra dos segredos da configuração (fora da base de dados)
             segredos::iniciar(&dir)?;
+            // proxy desta máquina para a Internet (internet.json; sem ele, o do sistema)
+            internet::carregar(&dir);
             // restauro de uma cópia de segurança marcado antes de reiniciar
             match services::sistema::aplicar_restauro_pendente(&dir) {
                 Ok(Some(origem)) => eprintln!("Cópia de segurança restaurada: {origem}"),

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { DatabaseBackup, ImagePlus, Inbox, Monitor, MonitorSmartphone, Network, Plus, Printer, Server, Wifi } from "lucide-react";
+import { Activity, CheckCircle2, DatabaseBackup, Globe, ImagePlus, Inbox, Monitor, MonitorSmartphone, Network, Plus, Printer, Server, Wifi, XCircle } from "lucide-react";
 import { abrirVisorEcra, logoParaRaster } from "@/lib/equipamento";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { PrintPortal } from "@/components/DocumentoPrint";
@@ -1338,6 +1338,144 @@ function Rede() {
           )}
         </Card>
       )}
+      <LigacaoInternet />
     </div>
+  );
+}
+
+interface ProxyEfectivo {
+  endereco: string;
+  origem: string;
+  autenticacao: boolean;
+}
+
+interface EstadoInternet {
+  proxy: string;
+  utilizador: string;
+  tem_senha: boolean;
+  excepcoes: string;
+  do_sistema: boolean;
+  efectivo: ProxyEfectivo | null;
+  origem_actualizacoes: string;
+}
+
+interface Diagnostico {
+  internet: boolean;
+  todos: boolean;
+  proxy: ProxyEfectivo | null;
+  resultados: { servico: string; endereco: string; ok: boolean; ms: number; detalhe?: string; erro?: string; via: ProxyEfectivo | null }[];
+}
+
+const ORIGEM_PROXY: Record<string, string> = { configurado: "configurado aqui", HTTPS_PROXY: "variável HTTPS_PROXY", HTTP_PROXY: "variável HTTP_PROXY", Windows: "Opções da Internet do Windows" };
+
+/** Como esta máquina sai para a Internet (licença, actualizações, Facturação Electrónica, email) e teste de cada serviço. */
+function LigacaoInternet() {
+  const { data: e, refetch } = useQuery({ queryKey: ["internet"], queryFn: () => call<EstadoInternet>("internet.estado") });
+  const [f, setF] = useState<{ proxy: string; utilizador: string; senha: string; excepcoes: string; do_sistema: boolean } | null>(null);
+  const [busy, setBusy] = useState<"" | "guardar" | "testar">("");
+  const [diag, setDiag] = useState<Diagnostico | null>(null);
+  useEffect(() => {
+    if (e && !f) setF({ proxy: e.proxy, utilizador: e.utilizador, senha: "", excepcoes: e.excepcoes, do_sistema: e.do_sistema });
+  }, [e, f]);
+
+  async function guardar() {
+    if (!f) return;
+    setBusy("guardar");
+    try {
+      // senha vazia = mantém a guardada
+      await call("internet.guardar", { ...f, senha: f.senha ? f.senha : undefined });
+      toast.success("Ligação à Internet guardada.");
+      setF(null);
+      refetch();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+  async function testar() {
+    setBusy("testar");
+    setDiag(null);
+    try {
+      setDiag(await call<Diagnostico>("internet.diagnostico"));
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+  const via = (p: ProxyEfectivo | null) => (p ? `proxy ${p.endereco}` : "directa");
+  return (
+    <Card className="p-6">
+      <div className="mb-1 flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 font-semibold">
+            <Globe className="size-4 text-brand" /> Ligação à Internet
+          </div>
+          <p className="text-[13px] text-ink-2">
+            Para a licença, as actualizações, a Facturação Electrónica e o email. Vender não precisa de Internet. Num escritório com proxy, indique-o aqui (é desta máquina, não da empresa).
+          </p>
+        </div>
+        <Button variant="secondary" loading={busy === "testar"} onClick={testar}>
+          <Activity className="size-4" /> Testar ligação
+        </Button>
+      </div>
+      {e && (
+        <p className="mb-4 text-[13px] text-ink-3">
+          Agora: {e.efectivo ? <>proxy <b className="font-mono text-ink-2">{e.efectivo.endereco}</b> ({ORIGEM_PROXY[e.efectivo.origem] ?? e.efectivo.origem})</> : "ligação directa, sem proxy"}.
+        </p>
+      )}
+      {f && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Proxy (opcional)" hint="Ex.: http://10.0.0.1:3128. Vazio: sem proxy próprio">
+            <Input value={f.proxy} placeholder="http://endereço:porta" onChange={(x) => setF({ ...f, proxy: x.target.value })} />
+          </Field>
+          <Field label="Excepções" hint="Endereços que não vão pelo proxy, separados por vírgulas. A rede local nunca vai">
+            <Input value={f.excepcoes} placeholder=".empresa.local, 41.63.0.0/16" onChange={(x) => setF({ ...f, excepcoes: x.target.value })} />
+          </Field>
+          <Field label="Utilizador do proxy">
+            <Input value={f.utilizador} autoComplete="off" onChange={(x) => setF({ ...f, utilizador: x.target.value })} />
+          </Field>
+          <Field label="Senha do proxy" hint={e?.tem_senha ? "Guardada (cifrada). Escreva só para a mudar" : "Guardada cifrada nesta máquina"}>
+            <Input type="password" value={f.senha} autoComplete="new-password" onChange={(x) => setF({ ...f, senha: x.target.value })} />
+          </Field>
+          <label className="flex items-center gap-2 text-[13px] text-ink-2 md:col-span-2">
+            <input type="checkbox" checked={f.do_sistema} onChange={(x) => setF({ ...f, do_sistema: x.target.checked })} />
+            Sem proxy aqui, usar o do sistema (variáveis HTTPS_PROXY e, no Windows, as Opções da Internet)
+          </label>
+          <div className="md:col-span-2">
+            <Button loading={busy === "guardar"} onClick={guardar}>
+              Guardar
+            </Button>
+          </div>
+        </div>
+      )}
+      {diag && (
+        <div className="mt-5 border-t border-line pt-4">
+          <div className={cn("mb-3 text-[13.5px] font-medium", diag.todos ? "text-ok" : diag.internet ? "text-[#9a6514]" : "text-danger")}>
+            {diag.todos
+              ? "Tudo a responder."
+              : diag.internet
+                ? "Há Internet, mas há serviços que não respondem (veja abaixo). Se estiver atrás de um proxy ou de uma firewall, peça para os autorizar."
+                : "Sem Internet a partir desta máquina: confirme o cabo ou o Wi-Fi e, num escritório com proxy, o proxy acima."}
+          </div>
+          <ul className="divide-y divide-line rounded-lg border border-line">
+            {diag.resultados.map((r) => (
+              <li key={r.servico} className="grid grid-cols-[18px_minmax(0,1fr)] gap-x-3 gap-y-1 px-4 py-2.5 md:grid-cols-[18px_minmax(0,1fr)_minmax(0,1.3fr)_auto] md:items-center">
+                {r.ok ? <CheckCircle2 className="size-4 text-ok" /> : <XCircle className="size-4 text-danger" />}
+                <div className="min-w-0">
+                  <div className="font-medium">{r.servico}</div>
+                  <div className="truncate font-mono text-[11.5px] text-ink-3" title={r.endereco}>{r.endereco}</div>
+                </div>
+                <div className={cn("col-start-2 break-words text-[13px] md:col-start-auto", r.ok ? "text-ink-2" : "text-danger")}>{r.ok ? r.detalhe : r.erro}</div>
+                <div className="col-start-2 whitespace-nowrap text-[12px] text-ink-3 md:col-start-auto md:text-right">
+                  {via(r.via)} · {r.ms} ms
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
   );
 }

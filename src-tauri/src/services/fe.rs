@@ -97,6 +97,11 @@ pub async fn ativo(p: &SqlitePool) -> AppResult<bool> {
     Ok(valor(p, "fe.ativo").await?.as_deref() == Some("1"))
 }
 
+/// Endereço dos serviços da FE para esta configuração (o oficial do ambiente, ou o alternativo dos testes).
+pub(crate) fn endereco_servicos(c: &Cfg) -> String {
+    if c.endereco.is_empty() { base_url(&c.ambiente).to_string() } else { c.endereco.trim_end_matches('/').to_string() }
+}
+
 fn base_url(ambiente: &str) -> &'static str {
     if ambiente == "PROD" {
         "https://sifp.minfin.gov.ao/sigt/fe/v1"

@@ -36,7 +36,7 @@ impl Default for EmailCfg {
     }
 }
 
-async fn cfg(p: &sqlx::SqlitePool) -> AppResult<EmailCfg> {
+pub(crate) async fn cfg(p: &sqlx::SqlitePool) -> AppResult<EmailCfg> {
     let v: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'email'").fetch_optional(p).await?;
     Ok(v.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default())
 }

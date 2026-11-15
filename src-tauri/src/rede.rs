@@ -32,7 +32,7 @@ pub const PORTA_PADRAO: u16 = 7799;
 pub const CHAVE_MINIMA: usize = 10;
 /// Métodos que são sempre desta máquina, mesmo em modo cliente: configuração de rede,
 /// impressão (a impressora é local) e gravação de ficheiros exportados.
-const LOCAIS: [&str; 6] = ["rede.", "impressao.", "sistema.exportar", "atualizacao.", "licenca.abrirSite", "partilha."];
+const LOCAIS: [&str; 7] = ["rede.", "impressao.", "sistema.exportar", "atualizacao.", "licenca.abrirSite", "partilha.", "internet."];
 
 // ============================== configuração ==============================
 

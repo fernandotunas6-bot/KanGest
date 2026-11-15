@@ -532,7 +532,7 @@ pub async fn activar(st: &AppState, i: ActivarIn) -> AppResult<Value> {
 
 // ------------------------------------------------------------------ servidor de licenças
 
-fn servidor() -> String {
+pub(crate) fn servidor() -> String {
     std::env::var("KANGEST_LICENCAS_URL").ok().filter(|u| !u.trim().is_empty()).unwrap_or_else(|| SERVIDOR.into()).trim_end_matches('/').to_string()
 }
 
