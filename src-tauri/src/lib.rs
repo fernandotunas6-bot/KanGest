@@ -6,6 +6,7 @@ pub mod http;
 mod rede;
 mod services;
 mod state;
+pub mod webhooks;
 
 use std::sync::Arc;
 
@@ -77,6 +78,8 @@ pub fn run() {
             if !config_rede.cliente() {
                 api::arrancar(estado.clone());
             }
+            // avisos automáticos da API (webhooks) às lojas online e outros sistemas
+            webhooks::iniciar(estado.clone());
             // Facturação electrónica da AGT: envia e consulta os documentos em segundo plano.
             services::fe::iniciar(estado.clone());
             app.manage(estado);

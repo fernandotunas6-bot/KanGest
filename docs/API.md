@@ -198,11 +198,72 @@ code da AGT para mostrar ao cliente).
 - A data é a de hoje. Não se recuperam documentos manuais pela API.
 - Com a licença terminada (modo de consulta), a emissão é recusada (422); as leituras continuam.
 
-## 7. Exemplos de integração
+## 7. Avisos automáticos (webhooks)
+
+Em vez de perguntar de minutos a minutos, o outro sistema pode ser **avisado**. Em **API e Integrações → Avisos
+automáticos → Novo aviso**, indique o endereço que recebe os avisos e os eventos:
+
+| Evento | Quando | `dados` |
+|---|---|---|
+| `documento.emitido` | Qualquer documento novo (vendas, compras, recibos, stock), no programa, no POS ou pela API | O documento com as linhas (sem custos) e `url` para o pedir à API |
+| `documento.anulado` | Um documento é anulado | O mesmo, com `estado: "A"` e o motivo |
+| `stock.alterado` | Entradas, saídas, vendas, transferências, inventário | O artigo, a `quantidade` total e o detalhe por armazém, no momento do envio |
+| `artigo.alterado` | Artigo criado ou alterado (descrição, preços, promoção, activo) | O artigo com os preços sem e com IVA (sem custos) |
+
+Cada aviso é um `POST` com JSON:
+
+```json
+{ "id": 381, "evento": "stock.alterado", "criado_em": "2026-11-15T10:42:07",
+  "dados": { "id": 12, "referencia": "ARZ5", "quantidade": 47, "armazens": [{ "armazem_id": 1, "armazem": "Principal", "quantidade": 47 }] } }
+```
+
+- Cabeçalhos: `X-KanGest-Evento`, `X-KanGest-Entrega` (o `id`, igual nas novas tentativas: use-o para não tratar o
+  mesmo aviso duas vezes) e `X-KanGest-Assinatura: t=<segundos>,v1=<hex>`.
+- Responda com `2xx` em menos de 15 segundos. Sem resposta ou com erro, o KanGest volta a tentar ao fim de 1, 5, 15 e
+  30 minutos e de 1, 3, 6 e 12 horas; depois a entrega fica «Falhada» e reenvia-se no ecrã.
+- Vários movimentos do mesmo artigo seguidos dão **um** aviso de stock, com a quantidade do momento do envio.
+- **Confirme sempre a assinatura**: `v1` é o HMAC-SHA256 de `"<t>.<corpo>"` com o segredo do aviso (botão da chave).
+  Recuse avisos com `t` de há mais de 5 minutos.
+
+```js
+// Node.js (Express com express.raw({ type: "application/json" }))
+import { createHmac, timingSafeEqual } from "node:crypto";
+function avisoValido(corpo, cabecalho, segredo) {
+  const { t, v1 } = Object.fromEntries(cabecalho.split(",").map((p) => p.split("=")));
+  if (Math.abs(Date.now() / 1000 - Number(t)) > 300) return false;
+  const esperado = createHmac("sha256", segredo).update(`${t}.${corpo}`).digest("hex");
+  return v1.length === esperado.length && timingSafeEqual(Buffer.from(v1), Buffer.from(esperado));
+}
+```
+
+```php
+// PHP (WordPress/WooCommerce)
+$corpo = file_get_contents('php://input');
+parse_str(str_replace(',', '&', $_SERVER['HTTP_X_KANGEST_ASSINATURA'] ?? ''), $a);
+$ok = abs(time() - (int)($a['t'] ?? 0)) <= 300
+   && hash_equals(hash_hmac('sha256', ($a['t'] ?? '') . '.' . $corpo, $segredo), $a['v1'] ?? '');
+```
+
+```python
+# Python
+import hmac, hashlib, time
+def aviso_valido(corpo: bytes, cabecalho: str, segredo: str) -> bool:
+    a = dict(p.split("=", 1) for p in cabecalho.split(","))
+    if abs(time.time() - int(a["t"])) > 300:
+        return False
+    esperado = hmac.new(segredo.encode(), f"{a['t']}.".encode() + corpo, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(esperado, a["v1"])
+```
+
+Os avisos fazem parte da API: só saem quando a licença a inclui. Com o KanGest na rede local e a loja na Internet, o
+endereço da loja tem de ser alcançável a partir do computador do KanGest (é ele que liga para fora).
+
+## 8. Exemplos de integração
 
 **Loja online** (WooCommerce, Shopify ou loja própria, através de um pequeno programa de ligação):
 
-1. De 10 em 10 minutos: `GET /artigos?alterado_desde=<última hora vista>` (página a página) para preços, descrições e
+1. Com **avisos automáticos** (§7) de `artigo.alterado` e `stock.alterado`, a loja actualiza-se no momento. Sem eles,
+   de 10 em 10 minutos: `GET /artigos?alterado_desde=<última hora vista>` (página a página) para preços, descrições e
    artigos desactivados; `GET /stock/movimentos?desde_id=<último id visto>` para o stock.
 2. Encomenda paga: `POST /documentos` (FR) com `Idempotency-Key` = n.º da encomenda e `referencia` = n.º da encomenda.
    Guarde `numero_doc` e mostre ao cliente o QR (`fe.url_consulta`).
@@ -249,10 +310,11 @@ while True:
     desde = pagina["seguinte"]
 ```
 
-## 8. Para quem programa o KanGest
+## 9. Para quem programa o KanGest
 
-- Código: `src-tauri/src/api.rs` (servidor HTTP, autenticação, rotas e os métodos `api.*` do ecrã) e
-  `src/pages/Integracoes.tsx`. Base de dados: migração `0018_api.sql` (`api_chaves`, `api_pedidos`, `api_idempotencia`,
+- Código: `src-tauri/src/api.rs` (servidor HTTP, autenticação, rotas e os métodos `api.*` do ecrã),
+  `src-tauri/src/webhooks.rs` (avisos: fila, entregas e assinatura; eventos pelos gatilhos da migração
+  `0021_webhooks.sql`) e `src/pages/Integracoes.tsx`. Base de dados: migração `0018_api.sql` (`api_chaves`, `api_pedidos`, `api_idempotencia`,
   `documentos.api_chave_id` e `alterado_em` mantido por gatilhos em artigos e entidades).
 - As rotas chamam os mesmos métodos do `rpc` (`services::dispatch`) dentro do contexto da chave (`state::CONTEXTO`):
   sessão com as permissões efectivas da chave e o posto da chave. As leituras próprias da API são consultas próprias

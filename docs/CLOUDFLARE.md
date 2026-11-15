@@ -97,5 +97,5 @@ bloqueio por chaves erradas; o Access tem o seu próprio registo (Zero Trust →
 
 - **R2**: cópia de segurança cifrada na nuvem (o KanGest envia a cópia diária, cifrada no computador do cliente).
 - **Turnstile** no formulário de contacto do site (precisa de um ponto que confirme o token antes de enviar).
-- **Queues** e Workers para os avisos automáticos da API (webhooks) às lojas online.
+- **Queues** e Workers para distribuir os avisos automáticos da API a muitos destinos (hoje saem do próprio KanGest).
 - **Email Routing** para os endereços do domínio.

@@ -3075,3 +3075,142 @@ async fn codigos_embalagens_e_balanca() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Receptor HTTP de avisos para os testes: guarda (caminho, cabeçalhos, corpo); responde 500 em /falha e 200 no resto.
+fn receptor_webhooks() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>) {
+    use std::io::{Read, Write};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let porta = l.local_addr().unwrap().port();
+    let recebidos = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let r = recebidos.clone();
+    std::thread::spawn(move || {
+        for s in l.incoming() {
+            let Ok(mut s) = s else { continue };
+            let mut dados = Vec::new();
+            let mut buf = [0u8; 8192];
+            let corpo = loop {
+                let n = s.read(&mut buf).unwrap_or(0);
+                if n == 0 {
+                    break None;
+                }
+                dados.extend_from_slice(&buf[..n]);
+                if let Some(fim) = dados.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let cab = String::from_utf8_lossy(&dados[..fim]).to_string();
+                    let tamanho: usize = cab.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap_or(0))).unwrap_or(0);
+                    if dados.len() >= fim + 4 + tamanho {
+                        break Some((cab, String::from_utf8_lossy(&dados[fim + 4..fim + 4 + tamanho]).to_string()));
+                    }
+                }
+            };
+            let Some((cab, corpo)) = corpo else { continue };
+            let caminho = cab.split_whitespace().nth(1).unwrap_or("").to_string();
+            let falha = caminho.starts_with("/falha");
+            r.lock().unwrap().push((caminho, cab, corpo));
+            let resp = if falha { "HTTP/1.1 500 Erro\r\nContent-Length: 5\r\nConnection: close\r\n\r\nerro!" } else { "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok" };
+            let _ = s.write_all(resp.as_bytes());
+        }
+    });
+    (porta, recebidos)
+}
+
+/// Avisos automáticos da API (webhooks): eventos por gatilhos, entregas assinadas (HMAC-SHA256), stock agregado
+/// por artigo, novas tentativas, reenvio, teste «ping» e anulação.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn webhooks_api() {
+    let pasta = std::env::temp_dir().join(format!("kigest-webhooks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Loja Avisos, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let conta = |tipo: &'static str| {
+        let pool = st.pool.clone();
+        async move { sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM api_eventos WHERE tipo = ?").bind(tipo).fetch_one(&pool).await.unwrap() }
+    };
+
+    // sem webhooks, os gatilhos não registam nada
+    let antes = rpc(&st, "artigos.guardar", json!({ "descricao": "Antes", "taxa_iva_id": 1, "preco1": 1000 })).await;
+    assert!(antes["id"].as_i64().is_some());
+    assert_eq!(conta("artigo.alterado").await, 0);
+
+    // ---- criar: validação e segredo ----
+    let (porta, recebidos) = receptor_webhooks();
+    assert!(rpc_err(&st, "api.webhookGuardar", json!({ "nome": "X", "url": "ftp://x", "eventos": ["documento.emitido"] })).await.contains("endereço"));
+    assert!(rpc_err(&st, "api.webhookGuardar", json!({ "nome": "X", "url": "https://x.ao/h", "eventos": [] })).await.contains("evento"));
+    assert!(rpc_err(&st, "api.webhookGuardar", json!({ "nome": "X", "url": "https://x.ao/h", "eventos": ["nada"] })).await.contains("desconhecido"));
+    let w = rpc(&st, "api.webhookGuardar", json!({ "nome": "Loja online", "url": format!("http://127.0.0.1:{porta}/avisos"),
+        "eventos": ["documento.emitido", "documento.anulado", "stock.alterado", "artigo.alterado"] })).await;
+    let segredo = w["segredo"].as_str().unwrap().to_string();
+    assert!(segredo.starts_with("whsec_"));
+    let falha = rpc(&st, "api.webhookGuardar", json!({ "nome": "Servidor em baixo", "url": format!("http://127.0.0.1:{porta}/falha"), "eventos": ["documento.emitido"] })).await["id"].as_i64().unwrap();
+
+    // ---- eventos: artigo, entrada de stock (2 movimentos do mesmo artigo → um aviso de stock), venda ----
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Café 250g", "referencia": "CAF250", "taxa_iva_id": 1, "preco1": 150000, "custo": 90000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": art, "quantidade": 5, "preco_unitario": 90000 }, { "artigo_id": art, "quantidade": 3, "preco_unitario": 90000 }] })).await;
+    assert_eq!(conta("stock.alterado").await, 1, "vários movimentos, um aviso de stock enquanto não foi distribuído");
+    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": art, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 171000 }] })).await;
+    let fr_id = fr["documento"]["id"].as_i64().unwrap();
+    let enviados = crate::webhooks::ciclo(&st).await.unwrap();
+    assert!(enviados >= 4, "artigo, ES, stock e FR: {enviados}");
+
+    // ---- o que chegou: assinatura HMAC-SHA256 confere, cabeçalhos e dados ----
+    let lista = recebidos.lock().unwrap().clone();
+    let avisos: Vec<&(String, String, String)> = lista.iter().filter(|x| x.0 == "/avisos").collect();
+    for (_, cab, corpo) in &avisos {
+        let linha = cab.lines().find(|l| l.to_ascii_lowercase().starts_with("x-kangest-assinatura:")).expect("assinatura");
+        let valor = linha.split_once(':').unwrap().1.trim();
+        let t: u64 = valor.split(',').next().unwrap().trim_start_matches("t=").parse().unwrap();
+        assert_eq!(valor, crate::webhooks::assinatura(&segredo, t, corpo), "a assinatura confere com o segredo");
+    }
+    let corpos: Vec<Value> = avisos.iter().map(|x| serde_json::from_str(&x.2).unwrap()).collect();
+    let fr_aviso = corpos.iter().find(|c| c["evento"] == "documento.emitido" && c["dados"]["tipo_codigo"] == "FR").expect("aviso da FR");
+    assert_eq!((fr_aviso["dados"]["numero_doc"].as_str(), fr_aviso["dados"]["total"].as_i64()), (fr["documento"]["numero_doc"].as_str(), Some(171000)));
+    assert_eq!(fr_aviso["dados"]["linhas"][0]["referencia"], "CAF250");
+    assert!(fr_aviso["dados"]["linhas"][0].get("custo").is_none(), "os avisos não levam custos");
+    let stock = corpos.iter().find(|c| c["evento"] == "stock.alterado").expect("aviso de stock");
+    assert_eq!(stock["dados"]["quantidade"].as_f64(), Some(7.0), "o aviso leva o stock no momento do envio (8 − 1)");
+    let artigo = corpos.iter().find(|c| c["evento"] == "artigo.alterado" && c["dados"]["id"] == art).expect("aviso do artigo");
+    assert_eq!((artigo["dados"]["preco1_iva"].as_i64(), artigo["dados"]["ativo"].as_bool()), (Some(171000), Some(true)));
+    assert!(artigo["dados"].get("custo").is_none());
+
+    // ---- falhas: nova tentativa mais tarde, e o reenvio põe-na já na fila ----
+    let estado = rpc(&st, "api.webhooks", Value::Null).await;
+    let wf = estado["webhooks"].as_array().unwrap().iter().find(|x| x["id"] == falha).unwrap().clone();
+    assert!(wf["falhas_seguidas"].as_i64().unwrap() >= 1 && wf["ultimo_estado"] == 500, "{wf}");
+    let entrega = estado["entregas"].as_array().unwrap().iter().find(|e| e["webhook"] == "Servidor em baixo").unwrap().clone();
+    assert_eq!((entrega["estado"].as_str(), entrega["tentativas"].as_i64()), (Some("PENDENTE"), Some(1)));
+    assert!(entrega["proxima_em"].as_str().is_some() && entrega["erro"].as_str().unwrap().contains("500"));
+    let n = recebidos.lock().unwrap().len();
+    crate::webhooks::ciclo(&st).await.unwrap();
+    assert_eq!(recebidos.lock().unwrap().len(), n, "antes da hora da nova tentativa não volta a enviar");
+    rpc(&st, "api.entregaReenviar", json!({ "id": entrega["id"] })).await;
+    crate::webhooks::ciclo(&st).await.unwrap();
+    assert!(recebidos.lock().unwrap().len() > n, "o reenvio sai no ciclo seguinte");
+
+    // ---- anulação e teste «ping» ----
+    rpc(&st, "documentos.anular", json!({ "id": fr_id, "motivo": "venda de teste" })).await;
+    crate::webhooks::ciclo(&st).await.unwrap();
+    assert!(recebidos.lock().unwrap().iter().any(|x| x.1.contains("documento.anulado")));
+    let t = rpc(&st, "api.webhookTestar", json!({ "id": w["id"] })).await;
+    assert_eq!((t["aceite"].as_bool(), t["codigo_http"].as_i64()), (Some(true), Some(200)), "{t}");
+    let t = rpc(&st, "api.webhookTestar", json!({ "id": falha })).await;
+    assert_eq!((t["aceite"].as_bool(), t["codigo_http"].as_i64()), (Some(false), Some(500)));
+
+    // ---- segredo novo; desactivar; apagar ----
+    let novo = rpc(&st, "api.webhookSegredo", json!({ "id": w["id"] })).await["segredo"].as_str().unwrap().to_string();
+    assert_ne!(novo, segredo);
+    rpc(&st, "api.webhookGuardar", json!({ "id": falha, "nome": "Servidor em baixo", "url": format!("http://127.0.0.1:{porta}/falha"), "eventos": ["documento.emitido"], "ativo": false })).await;
+    rpc(&st, "api.webhookApagar", json!({ "id": w["id"] })).await;
+    let antes = conta("artigo.alterado").await;
+    rpc(&st, "artigos.guardar", json!({ "descricao": "Depois", "taxa_iva_id": 1, "preco1": 1000 })).await;
+    assert_eq!(conta("artigo.alterado").await, antes, "sem webhooks activos, os gatilhos param");
+    let aud = rpc(&st, "auditoria.listar", json!({ "de": db::hoje(), "ate": db::hoje(), "evento": "API_WEBHOOK" })).await;
+    assert!(aud.as_array().unwrap().len() >= 4);
+
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

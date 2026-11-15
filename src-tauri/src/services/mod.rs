@@ -141,6 +141,12 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "api.chaveRenovar" => crate::api::chave_renovar(st, p(params)?).await,
         "api.chaveRevogar" => crate::api::chave_revogar(st, p(params)?).await,
         "api.pedidos" => crate::api::pedidos(st, p(params)?).await,
+        "api.webhooks" => crate::webhooks::listar(st).await,
+        "api.webhookGuardar" => crate::webhooks::guardar(st, p(params)?).await,
+        "api.webhookApagar" => crate::webhooks::apagar(st, p(params)?).await,
+        "api.webhookSegredo" => crate::webhooks::renovar_segredo(st, p(params)?).await,
+        "api.webhookTestar" => crate::webhooks::testar(st, p(params)?).await,
+        "api.entregaReenviar" => crate::webhooks::reenviar(st, p(params)?).await,
 
         // ---- postos em rede (servidor / cliente) ----
         "rede.estado" => crate::rede::estado(st).await,

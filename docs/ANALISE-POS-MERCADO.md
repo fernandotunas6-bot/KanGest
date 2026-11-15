@@ -28,7 +28,7 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · **Esforço:** P pequeno (dia
 | Função | Nos grandes POS | KanGest | Prioridade | Esforço |
 |---|---|---|---|---|
 | **API para outros sistemas** (loja online, contabilidade, BI, apps) com chaves de acesso | Padrão | ✅ **feita neste trabalho** — ver [API.md](API.md) | — | — |
-| Webhooks: avisar outro sistema quando há uma venda, uma anulação ou uma mudança de stock | Comum | ❌ (a API já permite sincronizar por consulta: `desde_id` e `alterado_desde`) | Alta | M |
+| Webhooks: avisar outro sistema quando há uma venda, uma anulação ou uma mudança de stock | Comum | ✅ **feito:** avisos assinados (HMAC-SHA256) de documentos, anulações, stock e artigos, com novas tentativas | — | — |
 | Ligação pronta a lojas online (WooCommerce, Shopify) | Comum | ❌ (agora possível através da API) | Média | M |
 | Enviar a factura ao cliente por email ou WhatsApp (PDF) | Padrão | ❌ só impressão; o PDF faz-se pelo diálogo de impressão do sistema | Alta | M |
 | Painel ou app do dono no telemóvel (vendas em tempo real, fora da loja) | Padrão | ❌ (a API é a base para isto) | Média | G |
@@ -110,7 +110,7 @@ limite de pedidos, registo de pedidos, idempotência na emissão e exportação 
 1. ~~Corrigir a compensação de saldo no POS~~ — feito: a FR paga-se com o crédito do cliente.
 2. ~~Artigos a peso (EAN-13 de balança) e vários códigos de barras/embalagens por artigo~~ — feito.
 3. ~~Contagem do fecho de caixa por notas e moedas e fecho cego~~ — feito.
-4. Webhooks para a API (venda emitida, documento anulado, stock alterado), assinados com HMAC.
+4. ~~Webhooks para a API (venda emitida, documento anulado, stock alterado), assinados com HMAC~~ — feito.
 5. Envio da factura por email/WhatsApp em PDF.
 6. Fotografias dos artigos (úteis no POS táctil e na loja online ligada pela API).
 7. Cópia de segurança na nuvem (cifrada).

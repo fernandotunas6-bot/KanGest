@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, Ban, Copy, FileJson, KeyRound, Monitor, Network, Pencil, Plug, Plus, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Ban, BellRing, Copy, FileJson, KeyRound, Monitor, Network, Pencil, Plug, Plus, RefreshCw, Send, ShieldCheck, Trash2 } from "lucide-react";
 import { call } from "@/lib/api";
 import { dataHora } from "@/lib/format";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
@@ -310,6 +310,7 @@ export default function Integracoes() {
             )}
           </Card>
 
+          <Avisos />
           <Pedidos chaves={e.chaves} />
           <ComoLigar base={base} />
         </div>
@@ -574,6 +575,325 @@ function EditarChave({ e, c, set, onGuardar, onFechar }: { e: EstadoApi; c: Edic
         </label>
       )}
     </Modal>
+  );
+}
+
+// ---------------------------------------------------------------- avisos automáticos (webhooks)
+
+interface WebhookApi {
+  id: number;
+  nome: string;
+  url: string;
+  eventos: string[];
+  segredo: string;
+  ativo: boolean;
+  ultimo_envio: string | null;
+  ultimo_estado: number | null;
+  falhas_seguidas: number;
+  pendentes: number;
+  falhadas: number;
+}
+interface EntregaApi {
+  id: number;
+  estado: "PENDENTE" | "ENTREGUE" | "FALHADA";
+  tentativas: number;
+  proxima_em: string | null;
+  codigo_http: number | null;
+  erro: string | null;
+  entregue_em: string | null;
+  webhook: string;
+  tipo: string;
+  objecto_id: number | null;
+  criado_em: string;
+}
+interface WebhooksDados {
+  webhooks: WebhookApi[];
+  entregas: EntregaApi[];
+  eventos: { id: string; descricao: string }[];
+}
+type EdicaoAviso = { id?: number; nome: string; url: string; eventos: string[]; ativo: boolean };
+
+const ESTADO_ENTREGA: Record<EntregaApi["estado"], { label: string; tom: "ok" | "accent" | "danger" }> = {
+  ENTREGUE: { label: "Entregue", tom: "ok" },
+  PENDENTE: { label: "Por enviar", tom: "accent" },
+  FALHADA: { label: "Falhada", tom: "danger" },
+};
+
+/** Avisos automáticos: o KanGest avisa outros sistemas (loja online, ERP) por POST assinado. */
+function Avisos() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["api-webhooks"], queryFn: () => call<WebhooksDados>("api.webhooks"), refetchInterval: 15000 });
+  const [ed, setEd] = useState<EdicaoAviso | null>(null);
+  const [segredo, setSegredo] = useState<{ nome: string; segredo: string } | null>(null);
+  const [apagar, setApagar] = useState<WebhookApi | null>(null);
+  const atualizar = () => qc.invalidateQueries({ queryKey: ["api-webhooks"] });
+  const d = q.data;
+
+  async function guardar() {
+    if (!ed) return;
+    try {
+      const r = await call<{ segredo: string | null }>("api.webhookGuardar", ed);
+      if (r.segredo) setSegredo({ nome: ed.nome, segredo: r.segredo });
+      else toast.success("Aviso guardado.");
+      setEd(null);
+      atualizar();
+    } catch (x) {
+      toast.error((x as Error).message);
+    }
+  }
+  async function testar(w: WebhookApi) {
+    try {
+      const r = await call<{ aceite: boolean; codigo_http: number | null; erro: string | null }>("api.webhookTestar", { id: w.id });
+      if (r.aceite) toast.success(`${w.nome}: o sistema recebeu o teste (HTTP ${r.codigo_http}).`);
+      else toast.error(`${w.nome}: ${r.erro ?? "sem resposta"}`, { duration: 8000 });
+      atualizar();
+    } catch (x) {
+      toast.error((x as Error).message);
+    }
+  }
+  async function renovar(w: WebhookApi) {
+    try {
+      const r = await call<{ segredo: string }>("api.webhookSegredo", { id: w.id });
+      setSegredo({ nome: w.nome, segredo: r.segredo });
+      atualizar();
+    } catch (x) {
+      toast.error((x as Error).message);
+    }
+  }
+  async function confirmarApagar() {
+    if (!apagar) return;
+    try {
+      await call("api.webhookApagar", { id: apagar.id });
+      toast.success(`Aviso «${apagar.nome}» apagado.`);
+      setApagar(null);
+      atualizar();
+    } catch (x) {
+      toast.error((x as Error).message);
+    }
+  }
+  async function reenviar(e: EntregaApi) {
+    try {
+      await call("api.entregaReenviar", { id: e.id });
+      toast.success("Volta a ser enviado dentro de momentos.");
+      atualizar();
+    } catch (x) {
+      toast.error((x as Error).message);
+    }
+  }
+  const nomeEvento = (id: string) => d?.eventos.find((x) => x.id === id)?.descricao ?? id;
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4">
+        <div className="flex items-center gap-2">
+          <BellRing className="size-4 text-ink-3" />
+          <span className="font-medium">Avisos automáticos (webhooks)</span>
+          <span className="text-[12.5px] text-ink-3">O KanGest avisa a loja online ou outro sistema quando há vendas, anulações e mudanças de stock ou de preços.</span>
+        </div>
+        <Button size="sm" onClick={() => setEd({ nome: "", url: "https://", eventos: ["documento.emitido", "stock.alterado", "artigo.alterado"], ativo: true })}>
+          <Plus className="size-4" /> Novo aviso
+        </Button>
+      </div>
+      {d?.webhooks.length ? (
+        <Table>
+          <thead>
+            <tr>
+              <Th>Nome</Th>
+              <Th>Eventos</Th>
+              <Th>Último envio</Th>
+              <Th className="text-right">Por enviar</Th>
+              <Th className="text-right">Falhados</Th>
+              <Th>Estado</Th>
+              <Th />
+            </tr>
+          </thead>
+          <tbody>
+            {d.webhooks.map((w) => (
+              <tr key={w.id}>
+                <Td>
+                  <div className="font-medium">{w.nome}</div>
+                  <div className="max-w-[320px] truncate font-mono text-[11.5px] text-ink-3" title={w.url}>
+                    {w.url}
+                  </div>
+                </Td>
+                <Td className="text-[12.5px] text-ink-2" title={w.eventos.map(nomeEvento).join("\n")}>
+                  {w.eventos.join(", ")}
+                </Td>
+                <Td className="text-ink-2">
+                  {w.ultimo_envio ? dataHora(w.ultimo_envio) : "—"}
+                  {w.ultimo_estado !== null && (
+                    <Badge tone={w.ultimo_estado >= 200 && w.ultimo_estado < 300 ? "ok" : "danger"} className="ml-2">
+                      {w.ultimo_estado || "sem ligação"}
+                    </Badge>
+                  )}
+                </Td>
+                <Td className="num text-right">{w.pendentes}</Td>
+                <Td className={cn("num text-right", w.falhadas > 0 && "text-danger")}>{w.falhadas}</Td>
+                <Td>{w.ativo ? <Badge tone="ok">Activo</Badge> : <Badge>Parado</Badge>}</Td>
+                <Td className="whitespace-nowrap text-right">
+                  <Button size="sm" variant="ghost" onClick={() => testar(w)} title="Enviar já um aviso de teste">
+                    <Send className="size-4" />
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEd({ id: w.id, nome: w.nome, url: w.url, eventos: w.eventos, ativo: w.ativo })} title="Editar">
+                    <Pencil className="size-4" />
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setSegredo({ nome: w.nome, segredo: w.segredo })} title="Ver o segredo da assinatura">
+                    <KeyRound className="size-4" />
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-danger" onClick={() => setApagar(w)} title="Apagar">
+                    <Trash2 className="size-4" />
+                  </Button>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      ) : (
+        <p className="p-6 text-ink-3">{q.isLoading ? "A carregar…" : "Sem avisos. Crie um para a loja online saber das vendas e do stock sem ter de perguntar."}</p>
+      )}
+
+      {!!d?.entregas.length && (
+        <>
+          <div className="border-t border-line px-4 pt-4 text-[13px] font-medium">Entregas recentes</div>
+          <Table className="max-h-[320px]">
+            <thead>
+              <tr>
+                <Th>Evento</Th>
+                <Th>Aviso</Th>
+                <Th>Estado</Th>
+                <Th className="text-right">Tentativas</Th>
+                <Th>Resposta</Th>
+                <Th />
+              </tr>
+            </thead>
+            <tbody>
+              {d.entregas.map((x) => (
+                <tr key={x.id}>
+                  <Td className="whitespace-nowrap">
+                    <span className="font-mono text-[12px]">{x.tipo}</span>
+                    {x.objecto_id !== null && <span className="text-ink-3"> #{x.objecto_id}</span>}
+                    <div className="text-[11.5px] text-ink-3">{dataHora(x.criado_em)}</div>
+                  </Td>
+                  <Td>{x.webhook}</Td>
+                  <Td>
+                    <Badge tone={ESTADO_ENTREGA[x.estado].tom}>{ESTADO_ENTREGA[x.estado].label}</Badge>
+                    {x.estado === "PENDENTE" && x.proxima_em && <div className="text-[11.5px] text-ink-3">nova tentativa {dataHora(x.proxima_em)}</div>}
+                  </Td>
+                  <Td className="num text-right">{x.tentativas}</Td>
+                  <Td className="max-w-[300px] truncate text-[12.5px] text-ink-2" title={x.erro ?? ""}>
+                    {x.erro ?? (x.codigo_http ? `HTTP ${x.codigo_http}` : "—")}
+                  </Td>
+                  <Td className="text-right">
+                    {x.estado !== "ENTREGUE" && (
+                      <Button size="sm" variant="ghost" onClick={() => reenviar(x)} title="Enviar de novo já">
+                        <RefreshCw className="size-4" />
+                      </Button>
+                    )}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </>
+      )}
+
+      {ed && d && (
+        <Modal
+          open
+          onClose={() => setEd(null)}
+          title={ed.id ? `Aviso «${ed.nome}»` : "Novo aviso automático"}
+          width="max-w-2xl"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setEd(null)}>
+                Cancelar
+              </Button>
+              <Button onClick={guardar}>{ed.id ? "Guardar" : "Criar aviso"}</Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <Field label="Nome" hint="O sistema avisado (ex.: Loja online)">
+              <Input autoFocus value={ed.nome} onChange={(x) => setEd({ ...ed, nome: x.target.value })} />
+            </Field>
+            <Field label="Endereço que recebe os avisos" hint="POST com JSON, assinado com o segredo (ver docs/API.md)">
+              <Input className="font-mono" value={ed.url} onChange={(x) => setEd({ ...ed, url: x.target.value })} />
+            </Field>
+            <div>
+              <div className="mb-1.5 text-[12px] font-medium uppercase tracking-wide text-ink-2">Eventos</div>
+              {d.eventos.map((ev) => (
+                <label key={ev.id} className="flex items-center gap-2 py-0.5 text-[13px]">
+                  <input
+                    type="checkbox"
+                    checked={ed.eventos.includes(ev.id)}
+                    onChange={() => setEd({ ...ed, eventos: ed.eventos.includes(ev.id) ? ed.eventos.filter((y) => y !== ev.id) : [...ed.eventos, ev.id] })}
+                  />
+                  <span>{ev.descricao}</span>
+                  <span className="font-mono text-[11.5px] text-ink-3">{ev.id}</span>
+                </label>
+              ))}
+            </div>
+            {ed.id && (
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={ed.ativo} onChange={(x) => setEd({ ...ed, ativo: x.target.checked })} />
+                <span>Activo (desmarque para parar os avisos sem apagar)</span>
+              </label>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {segredo && (
+        <Modal
+          open
+          onClose={() => setSegredo(null)}
+          title={`Segredo do aviso «${segredo.nome}»`}
+          width="max-w-xl"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => copiar(segredo.segredo, "Segredo copiado")}>
+                <Copy className="size-4" /> Copiar
+              </Button>
+              {d?.webhooks.find((w) => w.nome === segredo.nome) && (
+                <Button variant="ghost" onClick={() => { const w = d.webhooks.find((x) => x.nome === segredo.nome); if (w) renovar(w); }}>
+                  Gerar outro
+                </Button>
+              )}
+              <Button onClick={() => setSegredo(null)}>Fechar</Button>
+            </>
+          }
+        >
+          <p className="text-ink-2">
+            O sistema avisado usa este segredo para confirmar que o aviso veio do KanGest: cada pedido traz <span className="font-mono">X-KanGest-Assinatura: t=…,v1=…</span>, o
+            HMAC-SHA256 de <span className="font-mono">«t.corpo»</span> com este segredo.
+          </p>
+          <div className="mt-4 select-all break-all rounded-lg border border-line bg-sunken p-3 font-mono text-[13px]">{segredo.segredo}</div>
+        </Modal>
+      )}
+
+      {apagar && (
+        <Modal
+          open
+          onClose={() => setApagar(null)}
+          title="Apagar o aviso?"
+          width="max-w-md"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setApagar(null)}>
+                Cancelar
+              </Button>
+              <Button variant="danger" onClick={confirmarApagar}>
+                <Trash2 className="size-4" /> Apagar
+              </Button>
+            </>
+          }
+        >
+          <p className="text-ink-2">
+            O sistema <b className="text-ink">{apagar.nome}</b> deixa de ser avisado e as entregas por fazer perdem-se.
+          </p>
+        </Modal>
+      )}
+    </Card>
   );
 }
 
