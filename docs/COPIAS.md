@@ -32,6 +32,8 @@ ou do Google Drive (que a sincroniza para a nuvem). Cada cópia é gravada tamb�
 - **Configurações → Sistema → Cópias guardadas → Restaurar** (ou indique o caminho de um ficheiro `.db`/`.kgc`).
 - A cópia é verificada; a base actual é guardada em `copias/kangest-antes-do-restauro-…db`; o KanGest reinicia e troca a
   base antes de a abrir. As versões mais antigas da base são actualizadas pelas migrações ao abrir.
+- Uma cópia feita por uma **versão mais recente** do KanGest é recusada («Actualize este KanGest antes de a restaurar»):
+  tem migrações que esta versão não conhece e, depois da troca, a base deixaria de abrir.
 - **Computador novo:** no ecrã de configuração inicial há «Já tem uma cópia de segurança do KanGest?» para restaurar em vez
   de configurar do zero.
 - Os segredos guardados na instalação (chave do contribuinte da FE, senhas) estão cifrados com a chave mestra do

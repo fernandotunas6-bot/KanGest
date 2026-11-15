@@ -146,12 +146,21 @@ pub async fn verificar_ficheiro(f: &Path) -> AppResult<()> {
     let tabelas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('documentos', 'config', 'empresa', '_sqlx_migrations')")
         .fetch_one(&mut c)
         .await?;
+    let migracao: Option<i64> = if tabelas == 4 {
+        sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations").fetch_one(&mut c).await.ok().flatten()
+    } else {
+        None
+    };
     c.close().await.ok();
     if r != "ok" {
         return Err(AppError::msg(format!("A cópia está danificada ({r}).")));
     }
     if tabelas < 4 {
         return Err(AppError::msg("O ficheiro não é uma cópia de segurança do KanGest."));
+    }
+    // com migrações que esta versão não conhece, a base não voltaria a abrir depois do restauro
+    if migracao.unwrap_or(0) > crate::db::ultima_migracao() {
+        return Err(AppError::msg("A cópia é de uma versão mais recente do KanGest. Actualize este KanGest antes de a restaurar."));
     }
     Ok(())
 }

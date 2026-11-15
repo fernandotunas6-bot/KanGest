@@ -3118,6 +3118,23 @@ async fn copias_externas_cifradas_e_restauro() {
     assert!(e.contains("não é uma cópia de segurança"), "{e}");
     // o restauro inicial só existe enquanto o KanGest não está configurado
     assert!(rpc_err(&st2, "setup.restaurar", json!({ "ficheiro": externa })).await.contains("já está configurado"));
+
+    // uma cópia feita por uma versão mais recente (com migrações que esta não conhece) não se restaura:
+    // depois da troca, a base deixaria de abrir e o programa não arrancava
+    let nova = pasta2.join("kangest-versao-nova.db");
+    super::sistema::copiar(&st2.pool, &nova).await.unwrap();
+    {
+        let p = sqlx::SqlitePool::connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&nova)).await.unwrap();
+        sqlx::query("INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (999999, 'de uma versão futura', 1, x'00', 0)")
+            .execute(&p)
+            .await
+            .unwrap();
+        p.close().await;
+    }
+    assert!(db::abrir(&nova).await.is_err(), "esta versão não abre uma base com migrações que não conhece");
+    let e = rpc_err(&st2, "sistema.restaurar", json!({ "ficheiro": nova.display().to_string() })).await;
+    assert!(e.contains("versão mais recente"), "{e}");
+    assert!(!pasta2.join("restaurar.json").exists(), "nada fica marcado para o arranque");
     let _ = std::fs::remove_dir_all(&pasta);
     let _ = std::fs::remove_dir_all(&pasta2);
 }
