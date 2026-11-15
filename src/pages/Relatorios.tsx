@@ -2,13 +2,15 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { FileCode2, Printer, X } from "lucide-react";
+import { ChevronDown, FileCode2, FileSpreadsheet, PackageSearch, Printer, X } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, hojeISO, inicioMesISO, kz, numero, qtd } from "@/lib/format";
 import { useSession } from "@/store/session";
 import type { Entidade } from "@/lib/types";
 import { EntidadePicker } from "@/components/Pickers";
-import { Badge, Button, Card, Input, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Input, MenuItem, PageHeader, Popover, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { InventarioSaft } from "@/components/InventarioSaft";
+import { dataXL, exportarExcel, kzXL, type CelulaXL } from "@/lib/csv";
 import { InputData } from "@/components/InputData";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { imprimir } from "@/components/DocumentoModal";
@@ -175,6 +177,12 @@ export default function Relatorios() {
   });
   const anos = Array.from(new Set([new Date().getFullYear(), ano, ...(qSintese.data?.anos ?? [])])).sort((a, b) => b - a);
   const has = (k: keyof Linha) => linhas.some((l) => l[k] !== undefined && l[k] !== null);
+  const { ordenados, cab } = useOrdenacao(linhas, (l, k: keyof Linha) => l[k]);
+  // SAF-T de inventários: abre-se pelo botão ou pelo menu (?saft=inventario)
+  const [inventario, setInventario] = useState(false);
+  useEffect(() => {
+    if (sp.get("saft") === "inventario") setInventario(true);
+  }, [sp]);
   const soma = (k: keyof Linha) => linhas.reduce((s, l) => s + (Number(l[k]) || 0), 0);
   const titulo = VISTAS.find((v) => v.id === vista)!.label;
   const [exportando, setExportando] = useState<"" | "F" | "A" | "E">("");
@@ -218,22 +226,69 @@ export default function Relatorios() {
     }
   }
 
+  const primeiraColuna = vista === "dia" ? "Dia" : vista === "mes" ? "Mês" : titulo.replace("Por ", "").replace(/^\w/, (c) => c.toUpperCase());
+
+  /** O mapa à vista, com as mesmas colunas, num livro Excel (números e datas como tal). */
+  function exportarRelatorio() {
+    const colunas: { t: string; v: (l: Linha) => CelulaXL; total?: CelulaXL }[] = [
+      { t: primeiraColuna, v: (l) => (vista === "dia" ? dataXL(l.chave) : vista === "mes" ? mesAno(l.chave) : l.chave), total: "Total" },
+      ...(has("docs") ? [{ t: "Docs", v: (l: Linha) => l.docs, total: soma("docs") }] : []),
+      ...(has("quantidade") ? [{ t: "Quantidade", v: (l: Linha) => l.quantidade, total: soma("quantidade") }] : []),
+      ...(has("liquido") ? [{ t: "Líquido", v: (l: Linha) => kzXL(l.liquido), total: kzXL(soma("liquido")) }] : []),
+      ...(has("iva") ? [{ t: "IVA", v: (l: Linha) => kzXL(l.iva), total: kzXL(soma("iva")) }] : []),
+      { t: "Total", v: (l) => kzXL(l.total), total: kzXL(soma("total")) },
+      ...(has("lucro") ? [{ t: "Margem bruta", v: (l: Linha) => kzXL(l.lucro), total: kzXL(soma("lucro")) }] : []),
+      ...(has("irt") ? [{ t: "IRT Grupo C", v: (l: Linha) => kzXL(l.irt), total: kzXL(soma("irt")) }] : []),
+    ];
+    exportarExcel(
+      `Relatorio-${vista}-${de}-a-${ate}.xlsx`,
+      [colunas.map((c) => c.t), ...(ordenados ?? []).map((l) => colunas.map((c) => c.v(l))), colunas.map((c) => c.total ?? "")],
+      { titulo: `${titulo} — ${data(de)} a ${data(ate)}${entidade ? ` — ${entidade.nome}` : ""}`, folha: titulo },
+    );
+  }
+
   const corpo = (
     <>
       <thead>
         <tr>
-          <Th>{vista === "dia" ? "Dia" : vista === "mes" ? "Mês" : titulo.replace("Por ", "").replace(/^\w/, (c) => c.toUpperCase())}</Th>
-          {has("docs") && <Th className="text-right">Docs</Th>}
-          {has("quantidade") && <Th className="text-right">Quantidade</Th>}
-          {has("liquido") && <Th className="text-right">Líquido</Th>}
-          {has("iva") && <Th className="text-right">IVA</Th>}
-          <Th className="text-right">Total</Th>
-          {has("lucro") && <Th className="text-right">Margem bruta</Th>}
-          {has("irt") && <Th className="text-right">IRT Grupo C</Th>}
+          <Th {...cab("chave")}>{primeiraColuna}</Th>
+          {has("docs") && (
+            <Th className="text-right" {...cab("docs")}>
+              Docs
+            </Th>
+          )}
+          {has("quantidade") && (
+            <Th className="text-right" {...cab("quantidade")}>
+              Quantidade
+            </Th>
+          )}
+          {has("liquido") && (
+            <Th className="text-right" {...cab("liquido")}>
+              Líquido
+            </Th>
+          )}
+          {has("iva") && (
+            <Th className="text-right" {...cab("iva")}>
+              IVA
+            </Th>
+          )}
+          <Th className="text-right" {...cab("total")}>
+            Total
+          </Th>
+          {has("lucro") && (
+            <Th className="text-right" {...cab("lucro")}>
+              Margem bruta
+            </Th>
+          )}
+          {has("irt") && (
+            <Th className="text-right" {...cab("irt")}>
+              IRT Grupo C
+            </Th>
+          )}
         </tr>
       </thead>
       <tbody>
-        {linhas.map((l) => (
+        {(ordenados ?? []).map((l) => (
           <tr key={l.chave}>
             <Td>{vista === "dia" ? data(l.chave) : vista === "mes" ? mesAno(l.chave) : l.chave}</Td>
             {has("docs") && <Td className="num text-right">{l.docs}</Td>}
@@ -268,14 +323,50 @@ export default function Relatorios() {
         subtitle="Análise de vendas (facturas e notas de crédito, excluindo anulados)"
         actions={
           <>
-            <Button variant={saftParam === "compras" ? "secondary" : saftParam ? "primary" : "secondary"} loading={exportando === "F"} onClick={exportarSaft}>
-              <FileCode2 className="size-4" /> SAF-T facturação
-            </Button>
-            <Button variant={saftParam === "compras" ? "primary" : "secondary"} loading={exportando === "A"} onClick={exportarSaftCompras}>
-              <FileCode2 className="size-4" /> SAF-T aquisição
-            </Button>
-            <Button variant={saftParam === "estado" ? "primary" : "secondary"} loading={exportando === "E"} onClick={exportarSaftEstado}>
-              <FileCode2 className="size-4" /> SAF-T Estado
+            <Popover
+              className="w-72"
+              botao={({ alternar }) => (
+                <Button variant={saftParam ? "primary" : "secondary"} loading={!!exportando} onClick={alternar}>
+                  <FileCode2 className="size-4" /> SAF-T (AO) <ChevronDown className="size-3.5 opacity-80" />
+                </Button>
+              )}
+            >
+              {(fechar) => (
+                <>
+                  <div className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-3">Do período {data(de)} a {data(ate)}</div>
+                  {(
+                    [
+                      ["1", "Facturação", exportarSaft],
+                      ["compras", "Aquisição (compras)", exportarSaftCompras],
+                      ["estado", "Facturação ao Estado", exportarSaftEstado],
+                    ] as const
+                  ).map(([id, label, f]) => (
+                    <MenuItem
+                      key={id}
+                      icon={FileCode2}
+                      onClick={() => {
+                        fechar();
+                        f();
+                      }}
+                    >
+                      <span className={cn(saftParam === id && "font-semibold text-brand")}>{label}</span>
+                    </MenuItem>
+                  ))}
+                  <div className="my-1 h-px bg-line" />
+                  <MenuItem
+                    icon={PackageSearch}
+                    onClick={() => {
+                      fechar();
+                      setInventario(true);
+                    }}
+                  >
+                    Inventários (existências a 31/12)
+                  </MenuItem>
+                </>
+              )}
+            </Popover>
+            <Button variant="secondary" onClick={exportarRelatorio} disabled={sintese || !linhas.length}>
+              <FileSpreadsheet className="size-4" /> Excel
             </Button>
             <Button variant="secondary" onClick={imprimir}>
               <Printer className="size-4" /> Imprimir
@@ -283,6 +374,7 @@ export default function Relatorios() {
           </>
         }
       />
+      {inventario && <InventarioSaft onClose={() => setInventario(false)} />}
       <div className="mb-3 flex gap-1 overflow-x-auto border-b border-line">
         {CATEGORIAS.map((c) => (
           <button

@@ -6,7 +6,7 @@ import { AlertTriangle, FileText, HandCoins, Printer, Scale, Undo2 } from "lucid
 import { call } from "@/lib/api";
 import { data, kz, parseKz } from "@/lib/format";
 import { imprimir } from "@/lib/print";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Stat, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Stat, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 import { PrintPortal } from "@/components/DocumentoPrint";
 
 interface DocPend {
@@ -48,6 +48,12 @@ export default function Contas() {
     queryKey: ["contas", tipo, vencidos],
     queryFn: () => call<{ documentos: DocPend[]; entidades: PorEntidade[] }>("contas.pendentes", { tipo: pagar ? "F" : "C", vencidos }),
   });
+  const ordEnt = useOrdenacao(r?.entidades, (e, k: "nome" | "nif" | "docs" | "vencido" | "total") =>
+    k === "nome" ? e.entidade_nome : k === "nif" ? e.entidade_nif : k === "docs" ? e.documentos : k === "vencido" ? e.vencido : e.total,
+  );
+  const ordDoc = useOrdenacao(r?.documentos, (d, k: "doc" | "entidade" | "emissao" | "vencimento" | "total" | "pendente") =>
+    k === "doc" ? d.numero_doc : k === "entidade" ? d.entidade_nome : k === "emissao" ? d.data_emissao : k === "vencimento" ? d.data_vencimento : k === "total" ? d.total : d.valor_pendente,
+  );
   const total = r?.entidades.reduce((s, e) => s + e.total, 0) ?? 0;
   const vencido = r?.entidades.reduce((s, e) => s + e.vencido, 0) ?? 0;
   const titulo = pagar ? "Contas a Pagar" : "Contas a Receber";
@@ -93,16 +99,22 @@ export default function Contas() {
             <Table className="max-h-[calc(100vh-424px)]">
               <thead>
                 <tr>
-                  <Th>Entidade</Th>
-                  <Th>NIF</Th>
-                  <Th className="text-right">Documentos</Th>
-                  <Th className="text-right">Vencido</Th>
-                  <Th className="text-right">Total em dívida</Th>
+                  <Th {...ordEnt.cab("nome")}>Entidade</Th>
+                  <Th {...ordEnt.cab("nif")}>NIF</Th>
+                  <Th className="text-right" {...ordEnt.cab("docs")}>
+                    Documentos
+                  </Th>
+                  <Th className="text-right" {...ordEnt.cab("vencido")}>
+                    Vencido
+                  </Th>
+                  <Th className="text-right" {...ordEnt.cab("total")}>
+                    Total em dívida
+                  </Th>
                   <Th />
                 </tr>
               </thead>
               <tbody>
-                {r.entidades.map((e) => (
+                {(ordEnt.ordenados ?? []).map((e) => (
                   <tr key={e.entidade_id ?? e.entidade_nome} className="hover:bg-sunken/60">
                     <Td className="font-medium">{e.entidade_nome}</Td>
                     <Td className="font-mono text-[12.5px]">{e.entidade_nif}</Td>
@@ -125,16 +137,20 @@ export default function Contas() {
           <Table className="max-h-[calc(100vh-424px)]">
             <thead>
               <tr>
-                <Th>Documento</Th>
-                <Th>Entidade</Th>
-                <Th>Emissão</Th>
-                <Th>Vencimento</Th>
-                <Th className="text-right">Total</Th>
-                <Th className="text-right">Pendente</Th>
+                <Th {...ordDoc.cab("doc")}>Documento</Th>
+                <Th {...ordDoc.cab("entidade")}>Entidade</Th>
+                <Th {...ordDoc.cab("emissao")}>Emissão</Th>
+                <Th {...ordDoc.cab("vencimento")}>Vencimento</Th>
+                <Th className="text-right" {...ordDoc.cab("total")}>
+                  Total
+                </Th>
+                <Th className="text-right" {...ordDoc.cab("pendente")}>
+                  Pendente
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {r?.documentos.map((d) => (
+              {(ordDoc.ordenados ?? []).map((d) => (
                 <tr key={d.id}>
                   <Td>
                     <div className="font-medium">{d.numero_doc}</div>

@@ -20,6 +20,9 @@ mod series;
 mod setup;
 pub mod sistema;
 mod suspensos;
+mod ficheiros;
+mod inventario;
+mod quadro;
 #[cfg(test)]
 mod tests;
 
@@ -229,6 +232,12 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "oficina.ordem" => oficina::ordem(st, p(params)?).await,
         "oficina.ordemGuardar" => oficina::ordem_guardar(st, p(params)?).await,
         "oficina.ordemEstado" => oficina::ordem_estado(st, p(params)?).await,
+        // livros Excel gerados no ecrã (num posto cliente gravam-se no próprio posto: prefixo «sistema.exportar»)
+        "sistema.exportarBinario" => ficheiros::exportar_binario(st, p(params)?).await,
+        // SAF-T de inventários (AGT, Circular n.º 05/GACA/GJ/DSF/AGT/2026): existências a 31/12
+        "saft.inventario" => inventario::inventario(st, p(params)?).await,
+        // quadro de propostas e encomendas (kanban)
+        "documentos.quadro" => quadro::quadro(st, p(params)?).await,
         "oficina.associar" => oficina::associar(st, p(params)?).await,
 
         // ---- relatórios / sistema ----

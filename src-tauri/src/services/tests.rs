@@ -187,6 +187,10 @@ async fn fluxo_completo() {
     assert_eq!(stock(&st, artigo).await, 7.0); // proforma não mexe em stock
     let pp_id = pp["documento"]["id"].as_i64().unwrap();
     rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "doc_origem_id": pp_id, "linhas": [{ "artigo_id": artigo, "quantidade": 3 }] })).await;
+    let quadro = rpc(&st, "documentos.quadro", json!({ "grupo": "VENDAS" })).await;
+    let no_quadro = quadro.as_array().unwrap().iter().find(|d| d["id"] == pp_id).cloned().unwrap();
+    assert_eq!((no_quadro["estado"].as_str(), no_quadro["convertido_em"].as_str().map(|s| s.starts_with("FT "))), (Some("F"), Some(true)), "{no_quadro}");
+    assert!(rpc(&st, "documentos.quadro", json!({ "grupo": "COMPRAS" })).await.as_array().unwrap().is_empty());
     let pp_ligados = rpc(&st, "documentos.obter", json!({ "id": pp_id })).await;
     assert_eq!(pp_ligados["documento"]["estado"], "F");
     assert_eq!(pp_ligados["derivados"][0]["tipo_codigo"], "FT", "a proforma mostra a factura emitida a partir dela");
@@ -204,6 +208,12 @@ async fn fluxo_completo() {
     // ---- compra a fornecedor actualiza custo médio ----
     let forn = rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Fornecedor SA", "nif": "5410000000" })).await["id"].as_i64().unwrap();
     rpc(&st, "documentos.emitir", json!({ "tipo": "FC", "entidade_id": forn, "doc_externo": "FT A/123", "linhas": [{ "artigo_id": artigo, "quantidade": 4, "preco_unitario": 80000 }] })).await;
+    // a mesma V/Factura do fornecedor não se regista duas vezes (nem com espaços ou minúsculas diferentes)
+    let rep = rpc_err(&st, "documentos.emitir", json!({ "tipo": "FC", "entidade_id": forn, "doc_externo": "ft a/ 123", "linhas": [{ "artigo_id": artigo, "quantidade": 4, "preco_unitario": 80000 }] })).await;
+    assert!(rep.contains("já foi registado"), "{rep}");
+    // o vencimento não pode ser anterior à data do documento
+    let venc = rpc_err(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "data_vencimento": "2000-01-01", "linhas": [{ "artigo_id": artigo, "quantidade": 1 }] })).await;
+    assert!(venc.contains("vencimento"), "{venc}");
     let a = rpc(&st, "artigos.obter", json!({ "id": artigo })).await;
     // existências globais antes: 2 (principal) + 2 (loja 2) = 4 a 500,00; entram 4 a 800,00 → 650,00
     assert_eq!(a["custo_medio"], 65000);
@@ -1494,6 +1504,56 @@ async fn recalculo_stock() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// SAF-T de inventários: existências a 31/12 reconstituídas pelos movimentos (exercício fechado) ou as de hoje
+/// (exercício a decorrer), valorizadas ao custo médio; sem existências, «sem operações».
+#[tokio::test]
+async fn saft_inventario() {
+    let pasta = std::env::temp_dir().join(format!("kigest-teste-inventario-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Armazém Teste, Lda", "nif": "5417189230" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let ano: i32 = db::hoje()[..4].parse().unwrap();
+
+    // sem artigos: entrega-se na mesma, «sem operações»
+    let v = rpc(&st, "saft.inventario", json!({ "ano": ano })).await;
+    assert_eq!((v["sem_operacoes"].as_bool(), v["empresa"]["nif"].as_str()), (Some(true), Some("5417189230")), "{v}");
+
+    // 10 unidades entradas em Junho do ano passado a 3 000,00; este ano saem 4
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz 5kg", "taxa_iva_id": 1, "preco1": 450000 })).await["id"].as_i64().unwrap();
+    let s = rpc(&st, "artigos.guardar", json!({ "descricao": "Montagem", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": a, "quantidade": 10, "preco_unitario": 300000 }] })).await;
+    sqlx::query("UPDATE movimentos_stock SET data_hora = ? WHERE artigo_id = ?")
+        .bind(format!("{}-06-01T10:00:00", ano - 1))
+        .bind(a)
+        .execute(&st.pool)
+        .await
+        .unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "SS", "linhas": [{ "artigo_id": a, "quantidade": 4 }] })).await;
+
+    // exercício fechado: o que havia a 31/12, ao custo médio dessa data
+    let ant = rpc(&st, "saft.inventario", json!({ "ano": ano - 1 })).await;
+    assert_eq!(ant["provisorio"], false);
+    assert_eq!(ant["total_artigos"], 1, "os serviços não entram no inventário: {ant}");
+    assert_eq!(ant["linhas"][0]["quantidade"].as_f64(), Some(10.0));
+    assert_eq!(ant["linhas"][0]["valor"], 3000000);
+    assert_eq!(ant["data_referencia"], format!("{}-12-31", ano - 1));
+    assert_eq!(ant["metodo_custeio"], "Custo médio ponderado");
+    // exercício a decorrer: as existências de hoje
+    let atual = rpc(&st, "saft.inventario", json!({ "ano": ano })).await;
+    assert_eq!((atual["provisorio"].as_bool(), atual["linhas"][0]["quantidade"].as_f64()), (Some(true), Some(6.0)), "{atual}");
+    // antes de haver movimentos: sem operações; um ano futuro é recusado
+    assert_eq!(rpc(&st, "saft.inventario", json!({ "ano": ano - 2 })).await["sem_operacoes"], true);
+    assert!(rpc_err(&st, "saft.inventario", json!({ "ano": ano + 1 })).await.contains("exercício"));
+    let _ = s;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 #[tokio::test]
 async fn parametrizacao_documentos() {
     let pasta = std::env::temp_dir().join(format!("kigest-teste-param-{}", std::process::id()));
@@ -1853,8 +1913,18 @@ async fn servidor_demo() {
         rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": q }], "pagamentos": [{ "modo": if k % 2 == 0 { "NU" } else { "MB" }, "valor": total }] })).await;
     }
     let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli1, "linhas": [{ "artigo_id": arts[2], "quantidade": 20 }, { "artigo_id": serv, "quantidade": 1 }] })).await;
-    rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli2, "data_vencimento": format!("{ano}-01-15"), "linhas": [{ "artigo_id": arts[5], "quantidade": 8 }] })).await;
+    // factura vencida há muito (para os avisos e a antiguidade de saldos): o vencimento passa para Janeiro na base,
+    // porque ao emitir já não se aceita um vencimento anterior à data do documento
+    let ft_vencida = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli2, "linhas": [{ "artigo_id": arts[5], "quantidade": 8 }] })).await["documento"]["id"].as_i64().unwrap();
+    sqlx::query("UPDATE documentos SET data_vencimento = ? WHERE id = ?").bind(format!("{ano}-01-15")).bind(ft_vencida).execute(&st.pool).await.unwrap();
     rpc(&st, "documentos.emitir", json!({ "tipo": "PP", "entidade_id": cli2, "linhas": [{ "artigo_id": serv, "quantidade": 2 }] })).await;
+    // quadro de propostas: uma proforma já facturada, um orçamento expirado, uma nota de encomenda e uma encomenda a fornecedor
+    let pp2 = rpc(&st, "documentos.emitir", json!({ "tipo": "PP", "entidade_id": cli1, "linhas": [{ "artigo_id": arts[0], "quantidade": 40 }] })).await["documento"]["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli1, "doc_origem_id": pp2, "linhas": [{ "artigo_id": arts[0], "quantidade": 40 }] })).await;
+    let orc = rpc(&st, "documentos.emitir", json!({ "tipo": "OR", "entidade_id": cli2, "linhas": [{ "artigo_id": serv, "quantidade": 3 }] })).await["documento"]["id"].as_i64().unwrap();
+    sqlx::query("UPDATE documentos SET data_vencimento = date('now', 'localtime', '-5 day') WHERE id = ?").bind(orc).execute(&st.pool).await.unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "NE", "entidade_id": cli1, "linhas": [{ "artigo_id": arts[1], "quantidade": 24 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "VNE", "entidade_id": forn, "linhas": [{ "artigo_id": arts[3], "quantidade": 60, "preco_unitario": 110000 }] })).await;
     let ft_id = ft["documento"]["id"].as_i64().unwrap();
     rpc(&st, "documentos.emitir", json!({ "tipo": "RC", "entidade_id": cli1, "liquidar": [{ "documento_id": ft_id, "valor": 500000 }], "pagamentos": [{ "modo": "TB", "valor": 500000 }] })).await;
     rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": cli1, "doc_origem_id": ft_id, "motivo": "Devolução de 2 sacos danificados", "linhas": [{ "artigo_id": arts[2], "quantidade": 2 }] })).await;

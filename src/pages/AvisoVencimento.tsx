@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { BellRing, FileSpreadsheet, Printer, Search } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, hojeISO, kz } from "@/lib/format";
-import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
+import { dataXL, exportarExcel, kzXL } from "@/lib/csv";
 import { imprimir } from "@/lib/print";
 import { Badge, Button, Card, Empty, Input, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 import { InputData } from "@/components/InputData";
@@ -52,12 +52,13 @@ export default function AvisoVencimento() {
     imprimir();
   }
   function exportar() {
-    exportarFicheiro(
-      `Aviso_vencimento_${hojeISO()}.csv`,
-      csv([
+    exportarExcel(
+      `Aviso_vencimento_${hojeISO()}.xlsx`,
+      [
         ["Entidade", "NIF", "Documento", "Emissão", "Vencimento", "Dias de atraso", "Total", "Pendente"],
-        ...lista.flatMap((e) => e.documentos.map((d) => [e.nome, e.nif, d.numero_doc, d.data_emissao, d.vencimento, d.dias_atraso, csvKz(d.total), csvKz(d.valor_pendente)])),
-      ]),
+        ...lista.flatMap((e) => e.documentos.map((d) => [e.nome, e.nif, d.numero_doc, dataXL(d.data_emissao), dataXL(d.vencimento), d.dias_atraso, kzXL(d.total), kzXL(d.valor_pendente)])),
+      ],
+      { titulo: "Aviso de vencimento" },
     );
   }
 

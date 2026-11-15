@@ -28,6 +28,8 @@ interface L {
   controla_lote: boolean;
   lote: string;
   validade: string;
+  /** custo médio do artigo (cêntimos, s/ IVA), para avisar das vendas abaixo do custo */
+  custo?: number;
 }
 
 interface Custo {
@@ -112,6 +114,8 @@ export default function NovoDocumento() {
   const [emitido, setEmitido] = useState<number | null>(null);
   const [escolherOrigem, setEscolherOrigem] = useState(false);
   const [origemDoc, setOrigemDoc] = useState<string | null>(null);
+  // proforma/orçamento/encomenda de origem já expirada: avisa antes de facturar (os preços podem ter mudado)
+  const [origemExpirou, setOrigemExpirou] = useState<string | null>(null);
   // compras: documento do fornecedor, moeda e custos de importação
   const [docHash, setDocHash] = useState("");
   const [docData, setDocData] = useState("");
@@ -203,9 +207,13 @@ export default function NovoDocumento() {
     call<DocCompleto>("documentos.obter", { id: origemId }).then(async (d) => {
       if (d.documento.entidade_id) setEntidade(await call<Entidade>("entidades.obter", { id: d.documento.entidade_id }));
       setOrigemDoc(d.documento.numero_doc);
+      const venc = d.documento.data_vencimento?.slice(0, 10);
+      setOrigemExpirou(d.documento.classe === "PROFORMA" && d.documento.estado === "N" && venc && venc < hojeISO() ? venc : null);
       // o controlo de lotes vem da ficha do artigo (o documento de origem pode não ter lote, ex.: histórico)
       const ids = [...new Set(d.linhas.map((l) => l.artigo_id).filter(Boolean))];
-      const comLote = new Set((ids.length ? await call<Artigo[]>("artigos.porIds", { ids }) : []).filter((a) => a.controla_lote && !a.composto).map((a) => a.id));
+      const fichas = ids.length ? await call<Artigo[]>("artigos.porIds", { ids }) : [];
+      const comLote = new Set(fichas.filter((a) => a.controla_lote && !a.composto).map((a) => a.id));
+      const custoDe = new Map(fichas.map((a) => [a.id, a.custo_medio]));
       setLinhas(
         d.linhas.map((l) => ({
           key: crypto.randomUUID(),
@@ -221,6 +229,7 @@ export default function NovoDocumento() {
           controla_lote: comLote.has(l.artigo_id),
           lote: l.lote && !l.lote.includes("(") ? l.lote : "",
           validade: l.validade ?? "",
+          custo: custoDe.get(l.artigo_id),
         })),
       );
     });
@@ -259,6 +268,8 @@ export default function NovoDocumento() {
     return s + Math.round(((r.base === "IVA" ? tot.iva : tot.liq) * r.percentagem) / 100);
   }, 0);
   const aPagar = tot.total - retencaoValor;
+  // aviso de venda abaixo do custo: só nos documentos de venda que não são notas de crédito
+  const vendaComCusto = grupo === "VENDAS" && !eCompra && !eStock && !inventario && !tipo?.credito;
   const totalCustos = custos.reduce((s, c) => s + parseKz(c.valor), 0);
   const podeManual = !!tipo?.assinado && grupo === "VENDAS" && ["VENDA", "TRANSPORTE"].includes(tipo?.classe ?? "") && tem("vendas.documento_manual");
   const seriesNormais = series.filter((x) => x.ativa && !x.manual);
@@ -287,6 +298,7 @@ export default function NovoDocumento() {
         preco: toInputKz(preco),
         desconto: eCompra || eStock ? 0 : Math.max(entidade?.desconto ?? 0, a.promo_atual ?? 0),
         taxa: a.taxa_pct,
+        custo: a.custo_medio,
         unidade: a.unidade,
         existencia: a.stock,
         controla_lote: !!a.controla_lote && !a.composto,
@@ -562,6 +574,7 @@ export default function NovoDocumento() {
                 <FileSearch className="size-4 text-ink-3" />
                 <span className="text-ink-2">Documento de origem:</span>
                 {origemDoc ? <Badge tone="brand">{origemDoc}</Badge> : <span className="text-ink-3">nenhum</span>}
+                {origemExpirou && <Badge tone="accent">Expirou a {data(origemExpirou)}: confirme preços e condições</Badge>}
                 {!!tipo.credito && (
                   <Button size="sm" variant="secondary" className="ml-auto" disabled={!entidade} onClick={() => setEscolherOrigem(true)}>
                     Escolher documento…
@@ -610,6 +623,10 @@ export default function NovoDocumento() {
                     <Td>
                       <input className="w-full truncate bg-transparent font-medium outline-none" title={l.descricao} value={l.descricao} onChange={(e) => upd(l.key, { descricao: e.target.value })} />
                       <div className="font-mono text-[11.5px] text-ink-3">{l.referencia}</div>
+                      {/* venda abaixo do custo médio (já com os descontos): só aviso, como no Primavera */}
+                      {vendaComCusto && !!l.custo && l.quantidade > 0 && (calc[i]?.liq ?? 0) < Math.round(l.custo * l.quantidade) && (
+                        <div className="text-[11.5px] font-medium text-danger">Abaixo do custo médio ({kzNum(l.custo)})</div>
+                      )}
                       {l.controla_lote && tipo.stock !== 0 && (
                         <LoteCampos linha={l} entrada={entradaStock} armazem={armazem} onChange={(patch) => upd(l.key, patch)} />
                       )}

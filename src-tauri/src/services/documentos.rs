@@ -631,6 +631,34 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
             return Err(AppError::msg("Data do documento do fornecedor inválida."));
         }
     }
+    // O mesmo documento do fornecedor registado duas vezes (como o aviso de facturas em duplicado do Odoo):
+    // mesmo tipo, mesmo fornecedor, mesmo número e mesmo ano, e não anulado. Duplicaria o custo, o stock e o IVA dedutível.
+    if let (Some(ext), Some(ent)) = (&doc_externo, entidade_id.filter(|_| tipo.classe == "COMPRA")) {
+        let ano_ext = doc_externo_data.as_deref().unwrap_or(data_doc.as_str())[..4].to_string();
+        let repetido: Option<String> = sqlx::query_scalar(
+            "SELECT numero_doc FROM documentos WHERE tipo_codigo = ? AND entidade_id = ? AND estado <> 'A'
+               AND UPPER(REPLACE(TRIM(doc_externo), ' ', '')) = UPPER(REPLACE(TRIM(?), ' ', ''))
+               AND substr(COALESCE(doc_externo_data, data_emissao), 1, 4) = ?
+             LIMIT 1",
+        )
+        .bind(&tipo.codigo)
+        .bind(ent)
+        .bind(ext)
+        .bind(&ano_ext)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(n) = repetido {
+            return Err(AppError::msg(format!(
+                "O documento «{ext}» deste fornecedor já foi registado em {n}. Confirme o número; se for outro documento, escreva-o como aparece no original (com a série)."
+            )));
+        }
+    }
+    // O vencimento não pode ser anterior à data do documento (estragaria a antiguidade de saldos e os avisos).
+    if let Some(v) = i.data_vencimento.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        if v < data_doc.as_str() {
+            return Err(AppError::msg("A data de vencimento não pode ser anterior à data do documento."));
+        }
+    }
     let deducao_tipo = txt(&i.deducao_tipo).map(|t| t.to_uppercase());
     if let Some(t) = &deducao_tipo {
         if !matches!(t.as_str(), "MFI" | "INV" | "OBC" | "SERV" | "IMPT" | "SCE") {

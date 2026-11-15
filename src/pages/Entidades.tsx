@@ -6,7 +6,7 @@ import { FileSpreadsheet, HandCoins, Plus, Printer, Search, Users } from "lucide
 import { call } from "@/lib/api";
 import { useDebounce } from "@/lib/hooks";
 import { kz, parseKz, toInputKz } from "@/lib/format";
-import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
+import { exportarExcel, kzXL } from "@/lib/csv";
 import { imprimir } from "@/lib/print";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
@@ -35,9 +35,10 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
   const linhas = lista.data ?? [];
   const totalDivida = linhas.reduce((s, e) => s + Math.max(0, e.saldo ?? 0), 0);
   function exportar() {
-    exportarFicheiro(
-      `${nome.toLowerCase()}.csv`,
-      csv([["Nome", "NIF", "Telefone", "Email", "Endereço", "Localidade", "Província", "Saldo em dívida"], ...linhas.map((e) => [e.nome, e.nif, e.telefone ?? "", e.email ?? "", e.endereco ?? "", e.localidade ?? "", e.provincia ?? "", csvKz(e.saldo ?? 0)])]),
+    exportarExcel(
+      `${nome.toLowerCase()}.xlsx`,
+      [["Nome", "NIF", "Telefone", "Email", "Endereço", "Localidade", "Província", "Saldo em dívida"], ...(ordenados ?? linhas).map((e) => [e.nome, e.nif, e.telefone ?? "", e.email ?? "", e.endereco ?? "", e.localidade ?? "", e.provincia ?? "", kzXL(e.saldo ?? 0)])],
+      { titulo: nome },
     );
   }
 
@@ -49,7 +50,7 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
         actions={
           <>
             <Button variant="secondary" onClick={exportar} disabled={!linhas.length}>
-              <FileSpreadsheet className="size-4" /> CSV
+              <FileSpreadsheet className="size-4" /> Excel
             </Button>
             <Button variant="secondary" onClick={imprimir} disabled={!linhas.length}>
               <Printer className="size-4" /> Imprimir

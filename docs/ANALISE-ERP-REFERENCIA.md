@@ -66,6 +66,12 @@ o que já foi trazido para o KanGest, o que falta e se é possível aproveitar o
 | **2.ª ronda** — ordenar por coluna (clique no cabeçalho) em Documentos, Clientes/Fornecedores, Artigos e Stock | `useOrdenacao` e `Th` em `src/components/ui` |
 | **2.ª ronda** — quadro kanban das Ordens de Serviço: arrastar entre estados, OS paradas há mais de 7 dias assinaladas | `src/pages/oficina/Ordens.tsx`; `oficina.ordemEstado` |
 | **2.ª ronda** — rótulos dos formulários em letra normal; linhas da factura cabem a 1366 px (o botão de apagar já não fica escondido) | `src/components/ui`, `src/pages/NovoDocumento.tsx` |
+| **3.ª ronda** — SAF-T de inventários: existências a 31/12 (reconstituídas pelos movimentos num exercício fechado), ao custo médio, «sem operações» quando não há stock, livro Excel para o Portal do Contribuinte | `saft.inventario` em `src-tauri/src/services/inventario.rs`; `src/components/InventarioSaft.tsx` |
+| **3.ª ronda** — exportação para Excel (.xlsx) em vez de CSV, com números, kwanzas e datas como tal; a folha para o banco mantém também o CSV | `src/lib/xlsx.ts` (escritor próprio, sem bibliotecas); `sistema.exportarBinario` |
+| **3.ª ronda** — quadro de propostas e encomendas (proformas, orçamentos, notas de encomenda; encomendas e orçamentos de fornecedores): arrastar para facturar ou para anular, valor por coluna | `src/pages/QuadroPropostas.tsx`; `documentos.quadro` |
+| **3.ª ronda** — ordenar por coluna também nas contas correntes, funcionários, lotes, relatórios de vendas e relatórios de stock; relatórios exportáveis para Excel e SAF-T num só menu | `useOrdenacao` |
+| **3.ª ronda** — POS: teclas F visíveis nos botões (F12 no Pagar, Enter no Emitir), stock com indicador e «Sem stock», linhas numeradas e a seleccionada marcada, relógio, atalhos no carrinho vazio, aviso de venda abaixo do custo | `src/pages/Pos.tsx` |
+| **3.ª ronda** — regras: a mesma V/Factura do fornecedor não se regista duas vezes; o vencimento não pode ser anterior à data do documento; avisos de venda abaixo do custo médio e de proforma/orçamento expirado ao facturar | `documentos.emitir` (com testes); `NovoDocumento.tsx` |
 
 Os testes do backend cobrem as novidades (`fluxo_completo`: recibos e documentos derivados, faixas de antiguidade que
 somam o «A receber», recebimentos por meio). Um servidor de rede de uma versão anterior continua a funcionar com o
@@ -80,11 +86,11 @@ Esforço: **P** pequeno (dias), **M** médio (1–3 semanas), **G** grande (mese
 | # | Função | Como fazem os outros | Proposta para o KanGest | Esforço |
 |---|---|---|---|---|
 | 1 | **Facturação Electrónica homologada** | Primavera, PHC e Vendus anunciam a certificação AGT; obrigatória desde 1/1/2026 para grandes contribuintes e para todas as empresas em 2027 | O módulo existe; falta passar na homologação da AGT com credenciais reais (ver `COBERTURA.md`). É o maior risco comercial | P (técnico) |
-| 2 | **SAF-T de inventários** | Obrigação nova da AGT (2026), comum a todos os programas de gestão | Ficheiro anual com o inventário no fim do exercício, exigido a **todos** os contribuintes (mesmo sem stock: ficheiro «sem operações»). Estrutura na Circular n.º 05/GACA/GJ/DSF/AGT/2026: cabeçalho (NIF, período, data, software e certificação) e, por produto, método de custeio, tipo, identificador, descrição, quantidade, unidade e valor; entrega em XML, JSON ou Excel no Portal do Contribuinte. O KanGest já tem todos estes dados (existências por armazém ao custo médio); falta gerar o ficheiro no formato da circular. Prazo legal 15 de Fevereiro (o de 2025 foi prorrogado até 15/04/2026) | P |
+| 2 | **SAF-T de inventários** | Obrigação nova da AGT (2026), comum a todos os programas de gestão | ✅ Feito (3.ª ronda), em Excel com os campos da circular; falta confirmar os nomes das colunas no modelo do Portal do Contribuinte (a circular não está publicada de forma acessível). Ficheiro anual com o inventário no fim do exercício, exigido a **todos** os contribuintes (mesmo sem stock: ficheiro «sem operações»). Estrutura na Circular n.º 05/GACA/GJ/DSF/AGT/2026: cabeçalho (NIF, período, data, software e certificação) e, por produto, método de custeio, tipo, identificador, descrição, quantidade, unidade e valor; entrega em XML, JSON ou Excel no Portal do Contribuinte. O KanGest já tem todos estes dados (existências por armazém ao custo médio); falta gerar o ficheiro no formato da circular. Prazo legal 15 de Fevereiro (o de 2025 foi prorrogado até 15/04/2026) | P |
 | 3 | **PDF directo e envio por e-mail / WhatsApp** | Odoo: «Imprimir e enviar». Vendus: PDF assinado | Gerar o PDF sem o diálogo de impressão e partilhar: e-mail (SMTP da empresa) e WhatsApp (abrir a conversa com o ficheiro). Em Angola o WhatsApp é o canal habitual | M |
 | 4 | **Importação genérica de Excel/CSV** (artigos, clientes, fornecedores, saldos iniciais, stock) | Odoo: assistente de importação com modelos. Vendus: migração pelo próprio utilizador | Hoje só se importa do KIGEST, mas o site promete «migração de qualquer sistema». Modelos .xlsx, pré-visualização e verificação como na importação do KIGEST | M |
 | 5 | **Sugestão de encomenda a fornecedor** | Odoo: regras de reposição (mínimo/máximo) que geram pedidos de compra | Os artigos já têm mínimo e máximo; gerar a Encomenda a Fornecedor com o que está abaixo do mínimo até ao máximo, por fornecedor habitual | P/M |
-| 6 | **Exportação para Excel (.xlsx)** | Primavera e Odoo exportam qualquer lista | Hoje é CSV; um .xlsx com formatos de número e data evita erros ao abrir no Excel em português | P |
+| 6 | **Exportação para Excel (.xlsx)** | Primavera e Odoo exportam qualquer lista | ✅ Feito (3.ª ronda): as exportações passaram de CSV a .xlsx, com formatos de número e data | P |
 
 ### Prioridade 2 — diferenciação e produtividade
 
@@ -93,8 +99,8 @@ Esforço: **P** pequeno (dias), **M** médio (1–3 semanas), **G** grande (mese
 | 7 | **Integração contabilística** | Primavera e PHC têm contabilidade certificada e SAF-T de contabilidade | O SAF-T de contabilidade é obrigatório a partir do exercício de 2026 (entrega em 2027). Primeiro passo: gerar os lançamentos dos documentos (vendas, compras, recibos, pagamentos, salários) com um plano de contas configurável e exportá-los para o programa do contabilista | M |
 | 8 | **Anexos e notas** nos documentos, clientes e artigos | Odoo: *chatter* com anexos e histórico | Anexar a V/Factura digitalizada, o comprovativo da transferência ao recibo, o contrato ao cliente | M |
 | 9 | **Actividades e lembretes** | Odoo: actividades com data e responsável | «Ligar ao cliente», «cobrar factura» com data e utilizador; aparecem em «A sua atenção» | M |
-| 10 | **Vista kanban** onde há estados | Odoo: kanban arrastável | ✅ Ordens de serviço (2.ª ronda). Falta: proformas e encomendas | P/M |
-| 11 | **Listas configuráveis** | Primavera: Listas. Odoo: filtros, agrupar por e favoritos | 🟡 Ordenar por clique no cabeçalho feito nas listas principais (2.ª ronda). Falta: escolher colunas, agrupar, guardar filtros | M/G |
+| 10 | **Vista kanban** onde há estados | Odoo: kanban arrastável | ✅ Ordens de serviço (2.ª ronda); proformas, orçamentos e encomendas de clientes e de fornecedores (3.ª ronda) | P/M |
+| 11 | **Listas configuráveis** | Primavera: Listas. Odoo: filtros, agrupar por e favoritos | 🟡 Ordenar por clique no cabeçalho em todas as listas e relatórios (2.ª e 3.ª rondas). Falta: escolher colunas, agrupar, guardar filtros | M/G |
 | 12 | **Tabela dinâmica** sobre vendas e compras | Odoo: vista pivot. Primavera: Business Analytics | Linhas × colunas × medida (ex.: família × mês × total) com exportação | M |
 | 13 | **Conciliação bancária** | Odoo: importa extractos e concilia. Cegid PHC Bancos: importação de extractos e reconciliação | Importar o extracto do banco (CSV/Excel) e marcar os movimentos de tesouraria correspondentes | M |
 | 14 | **Listas de preços** | Odoo: tabelas por cliente, quantidade, período e família | Já há 4 PVP, desconto por cliente e promoções por artigo; faltam preços por quantidade, por família e por período | M |
@@ -136,9 +142,9 @@ preços, pivot).
 
 | Fase | Quando | O quê |
 |---|---|---|
-| 1 | Até 15 de Fevereiro de 2027 | SAF-T de inventários (2), homologação da Facturação Electrónica (1), exportação .xlsx (6); selector de data (17) já feito |
+| 1 | Até 15 de Fevereiro de 2027 | Homologação da Facturação Electrónica (1); confirmar as colunas do SAF-T de inventários (2) no modelo da AGT. Já feitos: SAF-T de inventários, .xlsx (6) e selector de data (17) |
 | 2 | Até ao fim do 1.º trimestre de 2027 | PDF e envio por e-mail/WhatsApp (3), importação de Excel (4), sugestão de encomenda (5), integração contabilística (7) |
-| 3 | 2.º e 3.º trimestres de 2027 | Anexos e actividades (8, 9), kanban nas proformas e encomendas (10), resto das listas configuráveis (11), tabela dinâmica (12), conciliação bancária (13), listas de preços (14) |
+| 3 | 2.º e 3.º trimestres de 2027 | Anexos e actividades (8, 9), resto das listas configuráveis (11), tabela dinâmica (12), conciliação bancária (13), listas de preços (14) |
 | 4 | A partir do 4.º trimestre de 2027 | Contabilidade (18), consulta no telemóvel (19), unidades e variantes (15), fidelização (16), multi-empresa (20) |
 
 ## Como ver os ecrãs

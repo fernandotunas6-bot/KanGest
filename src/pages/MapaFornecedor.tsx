@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { FileSpreadsheet, Printer, Truck, X } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, hojeISO, inicioMesISO, kz } from "@/lib/format";
-import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
+import { exportarExcel, kzXL } from "@/lib/csv";
 import type { Entidade } from "@/lib/types";
 import { EntidadePicker } from "@/components/Pickers";
 import { imprimir } from "@/components/DocumentoModal";
@@ -61,12 +61,13 @@ export default function MapaFornecedor() {
   const somaPendente = r?.pendentes.reduce((s, p) => s + p.pendente, 0) ?? 0;
 
   async function exportar() {
-    await exportarFicheiro(
-      "mapa-fornecedores.csv",
-      csv([
+    await exportarExcel(
+      "mapa-fornecedores.xlsx",
+      [
         ["Fornecedor", "NIF", "Documentos", "Compras", "IVA dedutível", "Pagamentos", "Em dívida"],
-        ...resumo.map((l) => [l.nome, l.nif, l.docs, csvKz(l.compras), csvKz(l.iva), csvKz(l.pagamentos), csvKz(pendente(l.id))]),
-      ]),
+        ...resumo.map((l) => [l.nome, l.nif, l.docs, kzXL(l.compras), kzXL(l.iva), kzXL(l.pagamentos), kzXL(pendente(l.id))]),
+      ],
+      { titulo: "Mapa de fornecedores" },
     );
   }
 
@@ -155,7 +156,7 @@ export default function MapaFornecedor() {
         actions={
           <>
             <Button variant="secondary" onClick={exportar} disabled={!resumo.length}>
-              <FileSpreadsheet className="size-4" /> CSV
+              <FileSpreadsheet className="size-4" /> Excel
             </Button>
             <Button variant="secondary" onClick={imprimir} disabled={!resumo.length}>
               <Printer className="size-4" /> Imprimir

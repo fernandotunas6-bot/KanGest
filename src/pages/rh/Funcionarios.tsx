@@ -6,10 +6,10 @@ import { call } from "@/lib/api";
 import { useDebounce } from "@/lib/hooks";
 import { data, kz, parseKz, toInputKz } from "@/lib/format";
 import type { Funcionario, TabelasRH } from "@/lib/types";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 import { InputData } from "@/components/InputData";
 import { imprimir } from "@/lib/print";
-import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
+import { dataXL, exportarExcel, kzXL } from "@/lib/csv";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 
@@ -38,21 +38,25 @@ export default function Funcionarios() {
   const dq = useDebounce(q);
   const [editar, setEditar] = useState<number | "novo" | null>(null);
   const lista = useQuery({ queryKey: ["funcionarios", dq, inativos], queryFn: () => call<Funcionario[]>("rh.funcionarios", { q: dq, inativos }) });
+  const { ordenados, cab } = useOrdenacao(lista.data, (f, k: "numero" | "nome" | "departamento" | "funcao" | "admissao" | "salario" | "estado") =>
+    ({ numero: f.numero, nome: f.nome, departamento: f.departamento, funcao: f.funcao, admissao: f.data_admissao, salario: f.salario_base, estado: f.ativo ? 1 : 2 })[k],
+  );
   const massa = (lista.data ?? []).filter((f) => f.ativo).reduce((s, f) => s + f.salario_base + SUBSIDIOS.reduce((x, c) => x + (Number(f[c.campo]) || 0), 0), 0);
   const empresa = useEmpresa();
   // a lista impressa só sai quando se pede (o portal também serve a ficha individual)
   const [imprimirLista, setImprimirLista] = useState(false);
   const [agregados, setAgregados] = useState<AgregadoLinha[] | null>(null);
   function exportar() {
-    exportarFicheiro(
-      "funcionarios.csv",
-      csv([
+    exportarExcel(
+      "funcionarios.xlsx",
+      [
         ["N.º", "Nome", "NIF", "N.º INSS", "BI", "Departamento", "Função", "Categoria", "Contrato", "Admissão", "Saída", "Salário base", "Conta própria", "Estado"],
         ...(lista.data ?? []).map((f) => [
           f.numero ?? "", f.nome, f.nif ?? "", f.inss_numero ?? "", f.bi_numero ?? "", f.departamento ?? "", f.funcao ?? "", f.categoria ?? "", f.tipo_contrato ?? "",
-          f.data_admissao ?? "", f.data_saida ?? "", csvKz(f.salario_base), f.independente ? "Sim" : "Não", f.ativo ? "Activo" : "Inactivo",
+          dataXL(f.data_admissao), dataXL(f.data_saida), kzXL(f.salario_base), f.independente ? "Sim" : "Não", f.ativo ? "Activo" : "Inactivo",
         ]),
-      ]),
+      ],
+      { titulo: "Funcionários" },
     );
   }
 
@@ -64,7 +68,7 @@ export default function Funcionarios() {
         actions={
           <>
             <Button variant="secondary" onClick={exportar} disabled={!lista.data?.length}>
-              <FileSpreadsheet className="size-4" /> CSV
+              <FileSpreadsheet className="size-4" /> Excel
             </Button>
             <Button
               variant="secondary"
@@ -110,17 +114,19 @@ export default function Funcionarios() {
           <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
-                <Th>N.º</Th>
-                <Th>Nome</Th>
-                <Th>Departamento</Th>
-                <Th>Função</Th>
-                <Th>Admissão</Th>
-                <Th className="text-right">Salário base</Th>
-                <Th>Estado</Th>
+                <Th {...cab("numero")}>N.º</Th>
+                <Th {...cab("nome")}>Nome</Th>
+                <Th {...cab("departamento")}>Departamento</Th>
+                <Th {...cab("funcao")}>Função</Th>
+                <Th {...cab("admissao")}>Admissão</Th>
+                <Th className="text-right" {...cab("salario")}>
+                  Salário base
+                </Th>
+                <Th {...cab("estado")}>Estado</Th>
               </tr>
             </thead>
             <tbody>
-              {lista.data?.map((f) => (
+              {ordenados?.map((f) => (
                 <tr key={f.id} className={cn("cursor-pointer hover:bg-sunken/60", !f.ativo && "opacity-55")} onClick={() => setEditar(f.id)}>
                   <Td className="font-mono text-[12.5px] text-ink-2">{f.numero ?? "—"}</Td>
                   <Td>
@@ -654,13 +660,14 @@ function AgregadosModal({ linhas, empresa, onClose }: { linhas: AgregadoLinha[];
             variant="secondary"
             disabled={!linhas.length}
             onClick={() =>
-              exportarFicheiro(
-                "agregados-familiares.csv",
-                csv([["Funcionário", "Nome", "Parentesco", "Data de nascimento", "Idade"], ...linhas.map((l) => [l.funcionario, l.nome, l.parentesco ?? "", l.data_nascimento ?? "", idade(l.data_nascimento) ?? ""])]),
+              exportarExcel(
+                "agregados-familiares.xlsx",
+                [["Funcionário", "Nome", "Parentesco", "Data de nascimento", "Idade"], ...linhas.map((l) => [l.funcionario, l.nome, l.parentesco ?? "", dataXL(l.data_nascimento), idade(l.data_nascimento) ?? ""])],
+                { titulo: "Agregados familiares" },
               )
             }
           >
-            <FileSpreadsheet className="size-4" /> CSV
+            <FileSpreadsheet className="size-4" /> Excel
           </Button>
           <Button
             disabled={!linhas.length}

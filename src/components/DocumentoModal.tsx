@@ -59,10 +59,13 @@ export default function DocumentoModal({
   id,
   onClose,
   formatoInicial,
+  anularAoAbrir,
 }: {
   id: number | null;
   onClose: () => void;
   formatoInicial?: Formato;
+  /** abre logo o pedido de anulação (ex.: arrastar para «Anuladas» no quadro de propostas) */
+  anularAoAbrir?: boolean;
 }) {
   // documento à vista: começa no pedido e muda ao abrir um documento ligado (origem, recibo, nota de crédito…)
   const [atual, setAtual] = useState(id);
@@ -80,6 +83,9 @@ export default function DocumentoModal({
   const tem = useSession((s) => s.tem);
   const qc = useQueryClient();
   const nav = useNavigate();
+  useEffect(() => {
+    if (anularAoAbrir && d && d.documento.id === id && d.documento.estado === "N" && !d.documento.importado && tem("documentos.anular")) setAnular(true);
+  }, [anularAoAbrir, d, id, tem]);
 
   // n.º de vias: o do posto (POS) ou o do tipo de documento
   useEffect(() => {

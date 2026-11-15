@@ -24,7 +24,6 @@ import {
   Percent,
   Plus,
   ScanBarcode,
-  Search,
   Tag,
   Trash2,
   UserRound,
@@ -126,6 +125,12 @@ export default function Pos() {
 
   const [busca, setBusca] = useState("");
   const [familia, setFamilia] = useState<number | null>(null);
+  // relógio da barra (os terminais POS ficam muitas vezes em ecrã inteiro, sem o relógio do sistema)
+  const [agora, setAgora] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setAgora(new Date()), 15_000);
+    return () => clearInterval(t);
+  }, []);
   const [linhas, setLinhas] = useState<Linha[]>([]);
   const [sel, setSel] = useState<number | null>(null);
   const [cliente, setCliente] = useState<Entidade>(CONSUMIDOR);
@@ -590,7 +595,13 @@ export default function Pos() {
           <Button variant="ghost" size="sm" onClick={alternarEcraInteiro} title={cheio ? "Sair do ecrã inteiro" : "Ecrã inteiro"}>
             {cheio ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
           </Button>
-          <span className="text-[13px] text-ink-2">{sessao?.nome}</span>
+          <span className="num hidden text-[13px] text-ink-2 md:inline" title={agora.toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long" })}>
+            {agora.toLocaleDateString("pt-PT", { weekday: "short", day: "2-digit", month: "2-digit" })} · <b className="font-semibold text-ink">{agora.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</b>
+          </span>
+          <span className="flex items-center gap-2 text-[13px] text-ink-2">
+            <span className="grid size-7 place-items-center rounded-full bg-brand text-[12px] font-semibold text-white">{sessao?.nome.slice(0, 1).toUpperCase()}</span>
+            {sessao?.nome}
+          </span>
           <Button variant="ghost" size="sm" onClick={bloquearSessao} title="Bloquear o posto (retoma-se com a senha ou o PIN; a venda fica como está)">
             <Lock className="size-4" />
           </Button>
@@ -685,19 +696,28 @@ export default function Pos() {
                         focar();
                       }}
                       disabled={semStock}
-                      className="group flex h-[118px] flex-col rounded-xl border border-line bg-surface p-3 text-left shadow-card transition hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-md disabled:opacity-45 disabled:hover:translate-y-0"
+                      className="group relative flex h-[118px] flex-col rounded-xl border border-line bg-surface p-3 text-left shadow-card transition hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:bg-sunken/60 disabled:hover:translate-y-0 disabled:hover:border-line disabled:hover:shadow-card"
                     >
+                      {semStock && <span className="absolute right-2 top-2 rounded-md bg-danger-50 px-1.5 py-0.5 text-[10.5px] font-medium text-danger">Sem stock</span>}
                       <span className="line-clamp-2 text-[13.5px] font-medium leading-snug">{a.descricao}</span>
                       <span className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink-3">
                         {a.referencia}
                         {!!a.promo_atual && <span className="rounded bg-accent-50 px-1.5 py-px font-medium text-accent-ink">−{numero(a.promo_atual, 2)}%</span>}
                       </span>
-                      <div className="mt-auto flex items-end justify-between">
-                        <span className="num text-[15px] font-semibold text-brand-700">{kzNum(comIvaArt(precoNivel(a, cliente.nivel_preco), a))}</span>
-                        {a.controla_stock === 1 && (
-                          <span className={cn("num text-[11px]", a.stock <= a.qtd_minima ? "text-danger" : "text-ink-3")}>
-                            {qtd(a.stock)} {a.unidade}
-                          </span>
+                      <div className="mt-auto flex items-end justify-between gap-2">
+                        <span className={cn("num text-[16px] font-semibold", semStock ? "text-ink-3" : "text-brand-700")}>{kzNum(comIvaArt(precoNivel(a, cliente.nivel_preco), a))}</span>
+                        {a.tipo === "S" ? (
+                          <span className="text-[11px] text-ink-3">Serviço</span>
+                        ) : (
+                          a.controla_stock === 1 && (
+                            <span
+                              className={cn("num inline-flex items-center gap-1 text-[11px]", a.stock <= 0 ? "text-danger" : a.stock <= a.qtd_minima ? "text-accent-ink" : "text-ink-3")}
+                              title={a.stock <= a.qtd_minima ? "No mínimo ou abaixo" : "Em stock"}
+                            >
+                              <span className={cn("size-1.5 rounded-full", a.stock <= 0 ? "bg-danger" : a.stock <= a.qtd_minima ? "bg-accent" : "bg-ok")} />
+                              {qtd(a.stock)} {a.unidade ?? "un"}
+                            </span>
+                          )
                         )}
                       </div>
                     </button>
@@ -713,8 +733,10 @@ export default function Pos() {
               <button
                 key={t.label}
                 onClick={t.on}
-                className="flex flex-col items-center justify-center gap-1 rounded-xl border border-line bg-surface px-1 py-2 text-[11.5px] text-ink-2 shadow-card transition hover:border-brand/50 hover:text-ink"
+                title={t.k ? `${t.label} (${t.k})` : t.label}
+                className="relative flex flex-col items-center justify-center gap-1 rounded-xl border border-line bg-surface px-1 pb-2 pt-3.5 text-[11.5px] text-ink-2 shadow-card transition hover:border-brand/50 hover:text-ink active:scale-[0.97]"
               >
+                {t.k && <kbd className="absolute right-1 top-1 px-1 py-px text-[9.5px] text-ink-3">{t.k}</kbd>}
                 {t.icon}
                 <span className="text-center leading-tight">{t.label}</span>
               </button>
@@ -769,8 +791,24 @@ export default function Pos() {
             {linhas.length === 0 ? (
               <div className="grid h-full place-items-center px-8 text-center text-ink-3">
                 <div>
-                  <Search className="mx-auto mb-2 size-7" />
-                  Leia um código de barras ou toque num artigo para começar.
+                  <div className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-brand-50 text-brand">
+                    <ScanBarcode className="size-6" />
+                  </div>
+                  <p className="font-medium text-ink-2">Leia um código de barras ou toque num artigo.</p>
+                  <ul className="mx-auto mt-4 w-fit space-y-1.5 text-left text-[12.5px]">
+                    {(
+                      [
+                        ["Enter", "ler o código (3*código = 3 unidades)"],
+                        ["F2", "lista de artigos"],
+                        ["F4", "escolher o cliente"],
+                        ["F12", "pagamento"],
+                      ] as const
+                    ).map(([k, d]) => (
+                      <li key={k} className="flex items-center gap-2">
+                        <kbd className="min-w-[44px] text-center">{k}</kbd> {d}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
             ) : (
@@ -778,14 +816,22 @@ export default function Pos() {
                 {linhas.map((l, i) => {
                   const c = totais.linhas[i];
                   return (
-                    <li key={l.key} onClick={() => setSel(i)} className={cn("cursor-pointer border-b border-line/70 px-5 py-3", idx === i && "bg-brand-50/60")}>
+                    <li key={l.key} onClick={() => setSel(i)} className={cn("relative cursor-pointer border-b border-line/70 px-5 py-3", idx === i && "bg-brand-50/60")}>
+                      {idx === i && <span className="absolute inset-y-0 left-0 w-1 bg-brand" />}
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="truncate font-medium">{l.descricao || l.artigo.descricao}</div>
+                          <div className="truncate font-medium">
+                            <span className="num mr-1.5 text-[12px] font-normal text-ink-3">{i + 1}.</span>
+                            {l.descricao || l.artigo.descricao}
+                          </div>
                           <div className="num text-[12px] text-ink-3">
                             {kzNum(comIvaArt(l.preco, l.artigo))} / {l.artigo.unidade ?? "UN"} · IVA {l.artigo.taxa_pct}%
                             {l.desconto ? ` · \u2212${numero(l.desconto, 2)}%` : ""}
                           </div>
+                          {/* preço líquido (já com os descontos) abaixo do custo médio: só aviso, a venda continua possível */}
+                          {!!c && l.artigo.custo_medio > 0 && l.quantidade > 0 && c.liquido < Math.round(l.artigo.custo_medio * l.quantidade) && (
+                            <div className="mt-0.5 text-[12px] font-medium text-danger">Abaixo do custo médio ({kzNum(l.artigo.custo_medio)} s/ IVA)</div>
+                          )}
                           {!!l.artigo.controla_lote && (
                             <button
                               className="mt-0.5 text-[12px] text-accent hover:underline"
@@ -803,7 +849,8 @@ export default function Pos() {
                       </div>
                       <div className="mt-2 flex items-center gap-2">
                         <button
-                          className="grid size-7 place-items-center rounded-md border border-line hover:bg-sunken"
+                          className="grid size-8 place-items-center rounded-md border border-line bg-surface hover:bg-sunken"
+                          aria-label="Menos uma unidade"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (l.quantidade > 1) comPermissao("pos.quantidade", "Alterar quantidade", () => atualizar(i, { quantidade: +(l.quantidade - 1).toFixed(3) }));
@@ -812,7 +859,7 @@ export default function Pos() {
                           <Minus className="size-3.5" />
                         </button>
                         <button
-                          className="num h-7 min-w-14 rounded-md border border-line px-2 text-center hover:bg-sunken"
+                          className="num h-8 min-w-14 rounded-md border border-line bg-surface px-2 text-center font-medium hover:bg-sunken"
                           onClick={(e) => {
                             e.stopPropagation();
                             setSel(i);
@@ -822,7 +869,8 @@ export default function Pos() {
                           {qtd(l.quantidade)}
                         </button>
                         <button
-                          className="grid size-7 place-items-center rounded-md border border-line hover:bg-sunken"
+                          className="grid size-8 place-items-center rounded-md border border-line bg-surface hover:bg-sunken"
+                          aria-label="Mais uma unidade"
                           onClick={(e) => {
                             e.stopPropagation();
                             atualizar(i, { quantidade: +(l.quantidade + 1).toFixed(3) });
@@ -861,8 +909,9 @@ export default function Pos() {
               <Button variant="secondary" size="lg" onClick={limpar} disabled={!linhas.length}>
                 <XCircle className="size-4" /> Cancelar
               </Button>
-              <Button size="lg" variant="accent" className="text-[16px]" onClick={abrirPagamento} disabled={!linhas.length || caixaFechado}>
+              <Button size="lg" variant="accent" className="text-[16px]" onClick={abrirPagamento} disabled={!linhas.length || caixaFechado} title="Pagamento (F12)">
                 <Banknote className="size-5" /> Pagar
+                <kbd className="ml-1 border-on-accent/25 bg-white/35 text-[10.5px] text-on-accent">F12</kbd>
               </Button>
             </div>
           </div>
@@ -1165,6 +1214,7 @@ function Pagamento({
           </Button>
           <Button size="lg" variant="accent" loading={busy} onClick={emitir} disabled={tipo === "FR" && falta > 0}>
             Emitir {tipo === "FR" ? "Factura/Recibo" : "Factura"}
+            <kbd className="ml-1 border-on-accent/25 bg-white/35 text-[10.5px] text-on-accent">Enter</kbd>
           </Button>
         </>
       }

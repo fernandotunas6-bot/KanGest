@@ -163,7 +163,7 @@ export function Th({
           className={cn("group/ord inline-flex items-center gap-1 uppercase tracking-wide transition hover:text-ink", direccao && "text-ink")}
         >
           {children}
-          <Seta className={cn("size-3.5 shrink-0", direccao ? "text-brand" : "opacity-0 group-hover/ord:opacity-60")} />
+          <Seta className={cn("size-3.5 shrink-0 print:hidden", direccao ? "text-brand" : "opacity-0 group-hover/ord:opacity-60")} />
         </button>
       ) : (
         children
