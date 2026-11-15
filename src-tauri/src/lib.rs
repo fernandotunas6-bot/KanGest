@@ -6,6 +6,7 @@ mod produtor;
 mod rede;
 mod segredos;
 mod services;
+mod smtp;
 mod state;
 
 use std::sync::Arc;

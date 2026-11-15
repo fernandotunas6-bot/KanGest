@@ -14,6 +14,7 @@ mod oficina;
 mod fidelizacao;
 mod gestao;
 mod parametros;
+mod partilha;
 mod promocoes;
 mod posto;
 mod rh;
@@ -207,6 +208,15 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "fidelizacao.clientes" => fidelizacao::clientes(st, p(params)?).await,
         "fidelizacao.movimentos" => fidelizacao::movimentos(st, p(params)?).await,
         "fidelizacao.ajustar" => fidelizacao::ajustar(st, p(params)?).await,
+
+        // ---- recibo digital: email e WhatsApp ----
+        "email.config" => partilha::config_obter(st).await,
+        "email.configGuardar" => partilha::config_guardar(st, p(params)?).await,
+        "email.testar" => partilha::testar(st, p(params)?).await,
+        "documentos.enviarEmail" => partilha::enviar_documento(st, p(params)?).await,
+        "documentos.mensagem" => partilha::mensagem(st, p(params)?).await,
+        // local: a ligação abre-se no posto onde está o operador
+        "partilha.abrir" => partilha::abrir(p(params)?).await,
 
         // ---- POS: suspensos ----
         "suspensos.guardar" => suspensos::guardar(st, p(params)?).await,

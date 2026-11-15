@@ -3397,3 +3397,62 @@ async fn fidelizacao_pontos_ganhos_pagos_e_devolvidos() {
     validar_xsd(saft["ficheiro"].as_str().unwrap());
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Parte HTML (base64) de uma mensagem MIME recebida pelo servidor SMTP falso.
+fn html_da_mensagem(dados: &str) -> String {
+    use base64::Engine;
+    let i = dados.find("Content-Type: text/html").expect("parte HTML");
+    let resto = &dados[i..];
+    let corpo = &resto[resto.find("\r\n\r\n").unwrap() + 4..];
+    let b64: String = corpo.lines().take_while(|l| !l.starts_with("--")).collect::<Vec<_>>().join("");
+    String::from_utf8(base64::engine::general_purpose::STANDARD.decode(b64.trim()).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn recibo_digital_por_email_e_whatsapp() {
+    let (st, pasta) = base_com_admin("recibo-digital").await;
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Pão & Bolos <especial>", "tipo": "S", "taxa_iva_id": 1, "preco1": 50000 })).await["id"].as_i64().unwrap();
+    let cli = rpc(&st, "entidades.guardar", json!({ "nome": "Hotel Baía Azul", "nif": "5417002211", "telefone": "923 456 789", "email": "reservas@baia.ao" })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 2 }], "pagamentos": [{ "modo": "NU", "valor": 120000 }] })).await;
+    let id = fr["documento"]["id"].as_i64().unwrap();
+    let numero = fr["documento"]["numero_doc"].as_str().unwrap().to_string();
+
+    // sem configuração não envia; configuração validada; a senha fica cifrada e não volta ao ecrã
+    assert!(rpc_err(&st, "documentos.enviarEmail", json!({ "id": id, "para": "reservas@baia.ao" })).await.contains("não está configurado"));
+    assert!(rpc_err(&st, "email.configGuardar", json!({ "servidor": "", "porta": 465, "remetente": "loja@kianda.ao" })).await.contains("servidor"));
+    let (porta, rx) = crate::smtp::testes::servidor_falso();
+    let c = rpc(&st, "email.configGuardar", json!({ "servidor": "127.0.0.1", "porta": porta, "seguranca": "NENHUMA", "utilizador": "loja@kianda.ao",
+                                                   "remetente": "loja@kianda.ao", "copia": "arquivo@kianda.ao", "senha": "segredo" })).await;
+    assert_eq!((c["tem_senha"].as_bool(), c.get("senha").is_none()), (Some(true), true));
+    let guardada: String = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'email.senha'").fetch_one(&st.pool).await.unwrap();
+    assert!(guardada.starts_with("kgs1:") && !guardada.contains("segredo"), "senha cifrada");
+    // gravar sem senha mantém a anterior
+    rpc(&st, "email.configGuardar", json!({ "servidor": "127.0.0.1", "porta": porta, "seguranca": "NENHUMA", "utilizador": "loja@kianda.ao", "remetente": "loja@kianda.ao", "copia": "arquivo@kianda.ao" })).await;
+    rpc(&st, "email.testar", json!({ "para": "gerente@kianda.ao" })).await;
+    let (cmds, _) = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert!(cmds.iter().any(|c| c == "RCPT TO:<gerente@kianda.ao>"), "{cmds:?}");
+
+    // o documento por email: HTML com as linhas (escapadas), o total, o rodapé da AGT; cópia oculta para o arquivo
+    assert!(rpc_err(&st, "documentos.enviarEmail", json!({ "id": id, "para": "reservas@baia" })).await.contains("inválido"));
+    let r = rpc(&st, "documentos.enviarEmail", json!({ "id": id, "para": "reservas@baia.ao" })).await;
+    assert!(r["resposta"].as_str().unwrap().contains("queued"));
+    let (cmds, dados) = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert!(cmds.iter().any(|c| c == "RCPT TO:<reservas@baia.ao>") && cmds.iter().any(|c| c == "RCPT TO:<arquivo@kianda.ao>"), "{cmds:?}");
+    let html = html_da_mensagem(&dados);
+    assert!(html.contains(&numero) && html.contains("Pão &amp; Bolos &lt;especial&gt;") && html.contains("1.140,00") && html.contains("Processado por programa"), "{html}");
+    let auditoria: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auditoria WHERE acao = 'EMAIL' AND detalhe LIKE ?").bind(format!("{numero}%")).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(auditoria, 1);
+
+    // WhatsApp: telefone da ficha com o indicativo de Angola, texto com o documento e o total
+    let m = rpc(&st, "documentos.mensagem", json!({ "id": id })).await;
+    assert_eq!((m["numero"].as_str(), m["email"].as_str()), (Some("244923456789"), Some("reservas@baia.ao")));
+    assert!(m["url"].as_str().unwrap().starts_with("https://wa.me/244923456789?text="));
+    let texto = m["texto"].as_str().unwrap();
+    assert!(texto.contains(&numero) && texto.contains("*Total: 1.140,00 Kz*"), "{texto}");
+    assert!(rpc_err(&st, "documentos.mensagem", json!({ "id": id, "telefone": "123" })).await.contains("Telefone inválido"));
+    assert_eq!(rpc(&st, "documentos.mensagem", json!({ "id": id, "telefone": "+351 912 345 678" })).await["numero"], "351912345678");
+    // só abre ligações do WhatsApp
+    assert!(rpc_err(&st, "partilha.abrir", json!({ "url": "https://exemplo.com/" })).await.contains("não permitido"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
