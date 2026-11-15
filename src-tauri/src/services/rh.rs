@@ -350,7 +350,7 @@ pub async fn config_guardar(st: &AppState, c: ConfigIn) -> AppResult<Value> {
     if c.escaloes.is_empty() || c.dias_uteis <= 0.0 || c.horas_dia <= 0.0 {
         return Err(AppError::msg("Parâmetros inválidos."));
     }
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     for (k, v) in [
         ("rh.inss_trabalhador", c.inss_trabalhador.to_string()),
         ("rh.inss_empregador", c.inss_empregador.to_string()),
@@ -487,7 +487,7 @@ pub async fn funcionario_guardar(st: &AppState, v: Value) -> AppResult<Value> {
         cols.push("desconto_sindicato");
         vals.push(json!(x.as_f64().unwrap_or(0.0)));
     }
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let id = match id {
         Some(id) => {
             let set = cols.iter().map(|c| format!("{c} = ?")).collect::<Vec<_>>().join(", ");
@@ -632,7 +632,7 @@ pub async fn adiantamento(st: &AppState, a: AdiantamentoIn) -> AppResult<Value> 
         return Err(AppError::msg("Indique o valor, o número de parcelas (1 a 24) e o mês inicial."));
     }
     let nome: String = sqlx::query_scalar("SELECT nome FROM funcionarios WHERE id = ?").bind(a.funcionario_id).fetch_optional(&st.pool).await?.ok_or(AppError::NaoEncontrado)?;
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let id = sqlx::query("INSERT INTO rh_adiantamentos (funcionario_id, data, valor, parcelas, ano_inicio, mes_inicio, descricao, conta_id, utilizador_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(a.funcionario_id)
         .bind(db::hoje())
@@ -761,7 +761,7 @@ pub async fn processar(st: &AppState, m: MesIn) -> AppResult<Value> {
         return Err(AppError::msg("Não há funcionários activos para processar."));
     }
     let total: i64 = calc.iter().map(|(_, r)| r.liquido).sum();
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let pid = sqlx::query("INSERT INTO rh_processamentos (ano, mes, data, utilizador_id, total_liquido) VALUES (?, ?, ?, ?, ?)")
         .bind(m.ano)
         .bind(m.mes)
@@ -874,7 +874,7 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
         return Err(AppError::msg("Os salários deste mês já foram pagos. Anule primeiro o movimento de pagamento na tesouraria."));
     }
     let (ano, mes): (i64, i64) = (row.get("ano"), row.get("mes"));
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     sqlx::query("UPDATE rh_processamentos SET estado = 'ANULADO', motivo_anulacao = ? WHERE id = ?").bind(a.motivo.trim()).bind(a.id).execute(&mut *tx).await?;
     sqlx::query("UPDATE rh_alteracoes SET processado = 0 WHERE ano = ? AND mes = ?").bind(ano).bind(mes).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'RH_ANULAR', ?)").bind(s.id).bind(format!("{mes:02}/{ano}: {}", a.motivo.trim())).execute(&mut *tx).await?;
@@ -895,7 +895,7 @@ pub async fn pagar(st: &AppState, pg: PagarIn) -> AppResult<Value> {
     if row.get::<String, _>("estado") != "PROCESSADO" || row.get::<i64, _>("pago") == 1 {
         return Err(AppError::msg("Este processamento não pode ser pago (anulado ou já pago)."));
     }
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     sqlx::query("INSERT INTO movimentos_tesouraria (data, data_hora, conta_id, tipo, valor, descricao, centro_custo_id, documento, utilizador_id)
                  VALUES (?, ?, ?, 'SAIDA', ?, ?, (SELECT id FROM centros_custo WHERE descricao = 'Salários' LIMIT 1), ?, ?)")
         .bind(db::hoje())
@@ -1231,7 +1231,7 @@ pub async fn honorario_pagar(st: &AppState, pg: PagarIn) -> AppResult<Value> {
     if row.get::<String, _>("estado") != "PROCESSADO" || row.get::<i64, _>("pago") == 1 {
         return Err(AppError::msg("Este honorário não pode ser pago (anulado ou já pago)."));
     }
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     sqlx::query("INSERT INTO movimentos_tesouraria (data, data_hora, conta_id, tipo, valor, descricao, centro_custo_id, documento, utilizador_id)
                  VALUES (?, ?, ?, 'SAIDA', ?, ?, (SELECT id FROM centros_custo WHERE descricao = 'Salários' LIMIT 1), ?, ?)")
         .bind(db::hoje())

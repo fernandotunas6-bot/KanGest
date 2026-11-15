@@ -20,6 +20,14 @@ pub async fn abrir(caminho: &Path) -> AppResult<SqlitePool> {
     Ok(pool)
 }
 
+/// Transacção de escrita. Com `BEGIN IMMEDIATE` o bloqueio de escrita fica preso logo no início, à espera do
+/// `busy_timeout` se outra ligação estiver a escrever. Com o `BEGIN` normal (diferido), uma transacção que já leu e
+/// depois tenta escrever recebe logo «database is locked», sem esperar: acontecia com dois postos a gravar ao mesmo
+/// tempo, ou numa gravação feita logo a seguir a outra recusada (que ainda se estava a desfazer noutra ligação).
+pub async fn transacao(pool: &SqlitePool) -> AppResult<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    Ok(pool.begin_with("BEGIN IMMEDIATE").await?)
+}
+
 /// Converte uma linha SQLite num objecto JSON (para leituras genéricas).
 pub fn row_json(row: &SqliteRow) -> Value {
     let mut obj = Map::new();

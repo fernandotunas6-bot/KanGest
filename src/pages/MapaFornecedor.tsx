@@ -3,14 +3,15 @@ import { useQuery } from "@tanstack/react-query";
 import { FileSpreadsheet, Printer, Truck, X } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, hojeISO, inicioMesISO, kz } from "@/lib/format";
-import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
+import { exportarExcel, kzXL } from "@/lib/csv";
 import type { Entidade } from "@/lib/types";
 import { EntidadePicker } from "@/components/Pickers";
 import { imprimir } from "@/components/DocumentoModal";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Empty, Input, PageHeader, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, PageHeader, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 
 interface LinhaFornecedor {
   id: number;
@@ -60,12 +61,13 @@ export default function MapaFornecedor() {
   const somaPendente = r?.pendentes.reduce((s, p) => s + p.pendente, 0) ?? 0;
 
   async function exportar() {
-    await exportarFicheiro(
-      "mapa-fornecedores.csv",
-      csv([
+    await exportarExcel(
+      "mapa-fornecedores.xlsx",
+      [
         ["Fornecedor", "NIF", "Documentos", "Compras", "IVA dedutível", "Pagamentos", "Em dívida"],
-        ...resumo.map((l) => [l.nome, l.nif, l.docs, csvKz(l.compras), csvKz(l.iva), csvKz(l.pagamentos), csvKz(pendente(l.id))]),
-      ]),
+        ...resumo.map((l) => [l.nome, l.nif, l.docs, kzXL(l.compras), kzXL(l.iva), kzXL(l.pagamentos), kzXL(pendente(l.id))]),
+      ],
+      { titulo: "Mapa de fornecedores" },
     );
   }
 
@@ -154,7 +156,7 @@ export default function MapaFornecedor() {
         actions={
           <>
             <Button variant="secondary" onClick={exportar} disabled={!resumo.length}>
-              <FileSpreadsheet className="size-4" /> CSV
+              <FileSpreadsheet className="size-4" /> Excel
             </Button>
             <Button variant="secondary" onClick={imprimir} disabled={!resumo.length}>
               <Printer className="size-4" /> Imprimir
@@ -163,9 +165,9 @@ export default function MapaFornecedor() {
         }
       />
       <div className="mb-4 flex flex-wrap items-end gap-3">
-        <Input type="date" className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
+        <InputData className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
         <span className="pb-2 text-ink-3">até</span>
-        <Input type="date" className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
+        <InputData className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
         <div className="w-72">
           <EntidadePicker tipo="F" label="Fornecedor (opcional)" valor={forn} onChange={setForn} />
         </div>

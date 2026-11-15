@@ -56,7 +56,7 @@ pub async fn listar(st: &AppState) -> AppResult<Value> {
 /// Abre (e retira da lista) um documento suspenso.
 pub async fn abrir(st: &AppState, i: IdIn) -> AppResult<Value> {
     st.exigir_perm("pos.suspenso")?;
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let row = sqlx::query("SELECT * FROM vendas_suspensas WHERE id = ?")
         .bind(i.id)
         .fetch_optional(&mut *tx)

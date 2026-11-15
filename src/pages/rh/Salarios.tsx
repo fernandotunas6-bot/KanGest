@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { AlertTriangle, Banknote, ChevronDown, ChevronRight, FileSpreadsheet, HandCoins, Landmark, ListOrdered, Plus, Printer, Trash2, Undo2 } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, dataHora, hojeISO, kz, parseKz, qtd } from "@/lib/format";
-import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
+import { csv, csvKz, exportarExcel, exportarFicheiro, kzXL } from "@/lib/csv";
 import { imprimir } from "@/lib/print";
 import { MESES, type Alteracao, type Funcionario, type Processamento, type ReciboSalario, type ResumoSalario } from "@/lib/types";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
@@ -221,7 +221,7 @@ function Alteracoes({ ano, mes }: { ano: number; mes: number }) {
         {!lista.data?.length ? (
           <Empty icon={<Plus className="size-6" />} title={`Sem alterações em ${periodo(ano, mes)}`} text="O salário base e os subsídios fixos da ficha entram automaticamente; aqui lançam-se só as variações do mês." />
         ) : (
-          <Table className="tabela-compacta max-h-[calc(100vh-380px)]">
+          <Table className="tabela-compacta max-h-[calc(100vh-424px)]">
             <thead>
               <tr>
                 <Th>Funcionário</Th>
@@ -376,7 +376,7 @@ function Simulacao({ ano, mes, onProcessado }: { ano: number; mes: number; onPro
     <>
       {tabs && !tabs.parametros.tabela_confirmada && (
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-accent/40 bg-accent-50 px-4 py-3 text-[13px]">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[#9a6514]" />
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-accent-ink" />
           <div>
             A tabela de IRT (Grupo A, Lei n.º 14/25) e as taxas de INSS (3% + 8%) vêm pré-carregadas e ainda não foram confirmadas.{" "}
             <Link to="/rh/configuracao" className="font-medium text-brand underline">
@@ -403,7 +403,7 @@ function Simulacao({ ano, mes, onProcessado }: { ano: number; mes: number; onPro
         {!linhas.length ? (
           <Empty icon={<Banknote className="size-6" />} title="Sem funcionários activos" text="Crie as fichas dos funcionários com o salário base e os subsídios fixos." />
         ) : (
-          <Table className="tabela-compacta max-h-[calc(100vh-330px)]">
+          <Table className="tabela-compacta max-h-[calc(100vh-374px)]">
             <thead>
               <tr>
                 <Th className="w-8" />
@@ -668,7 +668,8 @@ function Processamentos({ imprimirComo }: { imprimirComo: (i: Impressao) => void
           footer={
             <>
               <Button
-                variant="secondary"
+                variant="ghost"
+                title="Para o portal do banco, quando pede CSV"
                 onClick={() =>
                   exportarFicheiro(
                     `Folha_bancaria_${banco.p.ano}-${String(banco.p.mes).padStart(2, "0")}.csv`,
@@ -676,7 +677,19 @@ function Processamentos({ imprimirComo }: { imprimirComo: (i: Impressao) => void
                   )
                 }
               >
-                <FileSpreadsheet className="size-4" /> CSV
+                CSV
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  exportarExcel(
+                    `Folha_bancaria_${banco.p.ano}-${String(banco.p.mes).padStart(2, "0")}.xlsx`,
+                    [["Nome", "NIF", "Banco", "IBAN", "Valor"], ...banco.m.linhas.map((l) => [l.nome, l.nif, l.banco, l.iban, kzXL(l.liquido)])],
+                    { titulo: `Folha de pagamento ao banco — ${periodo(banco.p.ano, banco.p.mes)}` },
+                  )
+                }
+              >
+                <FileSpreadsheet className="size-4" /> Excel
               </Button>
               <Button onClick={() => imprimirComo({ tipo: "banco", p: banco.p, mapa: banco.m })}>
                 <Printer className="size-4" /> Imprimir
@@ -766,9 +779,10 @@ function RubricaModal({ p, recibos, onClose, onImprimir }: { p: Processamento; r
   function exportar() {
     if (!rubrica) return;
     const ls = linhasRubrica(recibos, rubrica.codigo);
-    exportarFicheiro(
-      `Mapa_${rubrica.descricao.replace(/[^\p{L}\p{N}]+/gu, "_")}_${p.ano}-${String(p.mes).padStart(2, "0")}.csv`,
-      csv([["N.º", "Nome", "Departamento", "Função", "Quantidade", "Valor"], ...ls.map((x) => [x.r.numero ?? "", x.r.nome, x.r.departamento ?? "", x.r.funcao ?? "", x.quantidade ?? "", csvKz(x.valor)])]),
+    exportarExcel(
+      `Mapa_${rubrica.descricao.replace(/[^\p{L}\p{N}]+/gu, "_")}_${p.ano}-${String(p.mes).padStart(2, "0")}.xlsx`,
+      [["N.º", "Nome", "Departamento", "Função", "Quantidade", "Valor"], ...ls.map((x) => [x.r.numero ?? "", x.r.nome, x.r.departamento ?? "", x.r.funcao ?? "", x.quantidade ?? "", kzXL(x.valor)])],
+      { titulo: `${rubrica.descricao} — ${periodo(p.ano, p.mes)}` },
     );
   }
   return (
@@ -780,7 +794,7 @@ function RubricaModal({ p, recibos, onClose, onImprimir }: { p: Processamento; r
       footer={
         <>
           <Button variant="secondary" onClick={exportar} disabled={!rubrica}>
-            <FileSpreadsheet className="size-4" /> CSV
+            <FileSpreadsheet className="size-4" /> Excel
           </Button>
           <Button onClick={() => rubrica && onImprimir(rubrica)} disabled={!rubrica}>
             <Printer className="size-4" /> Imprimir
@@ -942,13 +956,14 @@ function MapaModal({ p, mapa, onClose, onImprimir }: { p: Processamento; mapa: M
   const ls = mapa.linhas;
   const soma = (k: "salario_iliquido" | "excesso_subsidios" | "base_inss" | "inss" | "inss_empregador" | "base_irt" | "irt" | "liquido") => ls.reduce((s, l) => s + l[k], 0);
   function exportar() {
-    exportarFicheiro(
-      `Mapa_remuneracoes_${p.ano}-${String(p.mes).padStart(2, "0")}.csv`,
-      csv([
+    exportarExcel(
+      `Mapa_remuneracoes_${p.ano}-${String(p.mes).padStart(2, "0")}.xlsx`,
+      [
         ["Nome", "NIF", "N.º INSS", "Remuneração ilíquida", "Excesso de subsídios", "Base INSS", "INSS 3%", "INSS 8%", "Matéria colectável IRT", "IRT", "Líquido"],
-        ...ls.map((l) => [l.nome, l.nif, l.inss_numero, csvKz(l.salario_iliquido), csvKz(l.excesso_subsidios), csvKz(l.base_inss), csvKz(l.inss), csvKz(l.inss_empregador), csvKz(l.base_irt), csvKz(l.irt), csvKz(l.liquido)]),
-        ["Total", "", "", csvKz(soma("salario_iliquido")), csvKz(soma("excesso_subsidios")), csvKz(soma("base_inss")), csvKz(soma("inss")), csvKz(soma("inss_empregador")), csvKz(soma("base_irt")), csvKz(soma("irt")), csvKz(soma("liquido"))],
-      ]),
+        ...ls.map((l) => [l.nome, l.nif, l.inss_numero, kzXL(l.salario_iliquido), kzXL(l.excesso_subsidios), kzXL(l.base_inss), kzXL(l.inss), kzXL(l.inss_empregador), kzXL(l.base_irt), kzXL(l.irt), kzXL(l.liquido)]),
+        ["Total", "", "", kzXL(soma("salario_iliquido")), kzXL(soma("excesso_subsidios")), kzXL(soma("base_inss")), kzXL(soma("inss")), kzXL(soma("inss_empregador")), kzXL(soma("base_irt")), kzXL(soma("irt")), kzXL(soma("liquido"))],
+      ],
+      { titulo: `Mapa de remunerações IRT / INSS — ${periodo(p.ano, p.mes)}` },
     );
   }
   return (
@@ -960,7 +975,7 @@ function MapaModal({ p, mapa, onClose, onImprimir }: { p: Processamento; mapa: M
       footer={
         <>
           <Button variant="secondary" onClick={exportar}>
-            <FileSpreadsheet className="size-4" /> Exportar CSV
+            <FileSpreadsheet className="size-4" /> Exportar Excel
           </Button>
           <Button variant="secondary" onClick={onImprimir}>
             <Printer className="size-4" /> Imprimir

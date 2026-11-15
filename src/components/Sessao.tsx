@@ -273,7 +273,7 @@ export function MudarSenhaObrigatoria() {
     <Moldura>
       <form onSubmit={guardar} className="w-full max-w-sm">
         <div className="mb-7">
-          <div className="mb-4 inline-flex rounded-xl bg-accent-50 p-2.5 text-[#9a6514]">
+          <div className="mb-4 inline-flex rounded-xl bg-accent-50 p-2.5 text-accent-ink">
             <KeyRound className="size-5" />
           </div>
           <h2 className="text-[24px] font-semibold tracking-tight">Escolha a sua senha</h2>

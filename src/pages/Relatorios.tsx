@@ -2,13 +2,16 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { FileCode2, Printer, X } from "lucide-react";
+import { ChevronDown, FileCode2, FileSpreadsheet, PackageSearch, Printer, X } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, hojeISO, inicioMesISO, kz, numero, qtd } from "@/lib/format";
 import { useSession } from "@/store/session";
 import type { Entidade } from "@/lib/types";
 import { EntidadePicker } from "@/components/Pickers";
-import { Badge, Button, Card, Input, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Input, MenuItem, PageHeader, Popover, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { InventarioSaft } from "@/components/InventarioSaft";
+import { dataXL, exportarExcel, kzXL, type CelulaXL } from "@/lib/csv";
+import { InputData } from "@/components/InputData";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { imprimir } from "@/components/DocumentoModal";
 
@@ -31,6 +34,16 @@ const VISTAS = [
   { id: "iva_familia", label: "Mapa de imposto por família" },
   { id: "irt_c", label: "IRT Grupo C (por mês)" },
 ] as const;
+
+type Vista = (typeof VISTAS)[number]["id"];
+
+/** Os 17 mapas arrumados por assunto (como os grupos de mapas do Primavera e o menu de relatórios do Odoo). */
+const CATEGORIAS: { id: string; label: string; vistas: Vista[] }[] = [
+  { id: "vendas", label: "Vendas", vistas: ["sintese", "dia", "mes", "artigo", "familia", "cliente"] },
+  { id: "equipa", label: "Operadores e postos", vistas: ["operador", "vendedor", "posto", "artigo_operador"] },
+  { id: "documentos", label: "Pagamentos e documentos", vistas: ["pagamento", "artigo_entidade", "documento"] },
+  { id: "impostos", label: "Impostos", vistas: ["iva", "iva_dia", "iva_familia", "irt_c"] },
+];
 
 type Linha = { chave: string; docs?: number; quantidade?: number; liquido?: number; iva?: number; total: number; lucro?: number; irt?: number };
 
@@ -131,7 +144,8 @@ function TabelaSintese({ s }: { s: Sintese }) {
 
 export default function Relatorios() {
   const [sp] = useSearchParams();
-  const [vista, setVista] = useState<(typeof VISTAS)[number]["id"]>("dia");
+  const [vista, setVista] = useState<Vista>("dia");
+  const categoria = CATEGORIAS.find((c) => c.vistas.includes(vista)) ?? CATEGORIAS[0];
   // ?agrupar=<vista>: os itens de relatório do menu (Total por Dia, Mapa de Imposto…) abrem a vista certa
   useEffect(() => {
     const v = VISTAS.find((x) => x.id === sp.get("agrupar"));
@@ -139,6 +153,11 @@ export default function Relatorios() {
   }, [sp]);
   const [de, setDe] = useState(inicioMesISO());
   const [ate, setAte] = useState(hojeISO());
+  function escolher(v: Vista) {
+    setVista(v);
+    // «Por mês» com um período de um só mês mostraria uma linha: passa a ser o ano até hoje
+    if (v === "mes" && de.slice(0, 7) === ate.slice(0, 7)) setDe(`${ate.slice(0, 4)}-01-01`);
+  }
   const sessao = useSession((s) => s.sessao);
   const saftParam = sp.get("saft");
   const [entidade, setEntidade] = useState<Entidade | null>(null);
@@ -158,6 +177,12 @@ export default function Relatorios() {
   });
   const anos = Array.from(new Set([new Date().getFullYear(), ano, ...(qSintese.data?.anos ?? [])])).sort((a, b) => b - a);
   const has = (k: keyof Linha) => linhas.some((l) => l[k] !== undefined && l[k] !== null);
+  const { ordenados, cab } = useOrdenacao(linhas, (l, k: keyof Linha) => l[k]);
+  // SAF-T de inventários: abre-se pelo botão ou pelo menu (?saft=inventario)
+  const [inventario, setInventario] = useState(false);
+  useEffect(() => {
+    if (sp.get("saft") === "inventario") setInventario(true);
+  }, [sp]);
   const soma = (k: keyof Linha) => linhas.reduce((s, l) => s + (Number(l[k]) || 0), 0);
   const titulo = VISTAS.find((v) => v.id === vista)!.label;
   const [exportando, setExportando] = useState<"" | "F" | "A" | "E">("");
@@ -201,22 +226,69 @@ export default function Relatorios() {
     }
   }
 
+  const primeiraColuna = vista === "dia" ? "Dia" : vista === "mes" ? "Mês" : titulo.replace("Por ", "").replace(/^\w/, (c) => c.toUpperCase());
+
+  /** O mapa à vista, com as mesmas colunas, num livro Excel (números e datas como tal). */
+  function exportarRelatorio() {
+    const colunas: { t: string; v: (l: Linha) => CelulaXL; total?: CelulaXL }[] = [
+      { t: primeiraColuna, v: (l) => (vista === "dia" ? dataXL(l.chave) : vista === "mes" ? mesAno(l.chave) : l.chave), total: "Total" },
+      ...(has("docs") ? [{ t: "Docs", v: (l: Linha) => l.docs, total: soma("docs") }] : []),
+      ...(has("quantidade") ? [{ t: "Quantidade", v: (l: Linha) => l.quantidade, total: soma("quantidade") }] : []),
+      ...(has("liquido") ? [{ t: "Líquido", v: (l: Linha) => kzXL(l.liquido), total: kzXL(soma("liquido")) }] : []),
+      ...(has("iva") ? [{ t: "IVA", v: (l: Linha) => kzXL(l.iva), total: kzXL(soma("iva")) }] : []),
+      { t: "Total", v: (l) => kzXL(l.total), total: kzXL(soma("total")) },
+      ...(has("lucro") ? [{ t: "Margem bruta", v: (l: Linha) => kzXL(l.lucro), total: kzXL(soma("lucro")) }] : []),
+      ...(has("irt") ? [{ t: "IRT Grupo C", v: (l: Linha) => kzXL(l.irt), total: kzXL(soma("irt")) }] : []),
+    ];
+    exportarExcel(
+      `Relatorio-${vista}-${de}-a-${ate}.xlsx`,
+      [colunas.map((c) => c.t), ...(ordenados ?? []).map((l) => colunas.map((c) => c.v(l))), colunas.map((c) => c.total ?? "")],
+      { titulo: `${titulo} — ${data(de)} a ${data(ate)}${entidade ? ` — ${entidade.nome}` : ""}`, folha: titulo },
+    );
+  }
+
   const corpo = (
     <>
       <thead>
         <tr>
-          <Th>{vista === "dia" ? "Dia" : vista === "mes" ? "Mês" : titulo.replace("Por ", "").replace(/^\w/, (c) => c.toUpperCase())}</Th>
-          {has("docs") && <Th className="text-right">Docs</Th>}
-          {has("quantidade") && <Th className="text-right">Quantidade</Th>}
-          {has("liquido") && <Th className="text-right">Líquido</Th>}
-          {has("iva") && <Th className="text-right">IVA</Th>}
-          <Th className="text-right">Total</Th>
-          {has("lucro") && <Th className="text-right">Margem bruta</Th>}
-          {has("irt") && <Th className="text-right">IRT Grupo C</Th>}
+          <Th {...cab("chave")}>{primeiraColuna}</Th>
+          {has("docs") && (
+            <Th className="text-right" {...cab("docs")}>
+              Docs
+            </Th>
+          )}
+          {has("quantidade") && (
+            <Th className="text-right" {...cab("quantidade")}>
+              Quantidade
+            </Th>
+          )}
+          {has("liquido") && (
+            <Th className="text-right" {...cab("liquido")}>
+              Líquido
+            </Th>
+          )}
+          {has("iva") && (
+            <Th className="text-right" {...cab("iva")}>
+              IVA
+            </Th>
+          )}
+          <Th className="text-right" {...cab("total")}>
+            Total
+          </Th>
+          {has("lucro") && (
+            <Th className="text-right" {...cab("lucro")}>
+              Margem bruta
+            </Th>
+          )}
+          {has("irt") && (
+            <Th className="text-right" {...cab("irt")}>
+              IRT Grupo C
+            </Th>
+          )}
         </tr>
       </thead>
       <tbody>
-        {linhas.map((l) => (
+        {(ordenados ?? []).map((l) => (
           <tr key={l.chave}>
             <Td>{vista === "dia" ? data(l.chave) : vista === "mes" ? mesAno(l.chave) : l.chave}</Td>
             {has("docs") && <Td className="num text-right">{l.docs}</Td>}
@@ -251,14 +323,50 @@ export default function Relatorios() {
         subtitle="Análise de vendas (facturas e notas de crédito, excluindo anulados)"
         actions={
           <>
-            <Button variant={saftParam === "compras" ? "secondary" : saftParam ? "primary" : "secondary"} loading={exportando === "F"} onClick={exportarSaft}>
-              <FileCode2 className="size-4" /> SAF-T facturação
-            </Button>
-            <Button variant={saftParam === "compras" ? "primary" : "secondary"} loading={exportando === "A"} onClick={exportarSaftCompras}>
-              <FileCode2 className="size-4" /> SAF-T aquisição
-            </Button>
-            <Button variant={saftParam === "estado" ? "primary" : "secondary"} loading={exportando === "E"} onClick={exportarSaftEstado}>
-              <FileCode2 className="size-4" /> SAF-T Estado
+            <Popover
+              className="w-72"
+              botao={({ alternar }) => (
+                <Button variant={saftParam ? "primary" : "secondary"} loading={!!exportando} onClick={alternar}>
+                  <FileCode2 className="size-4" /> SAF-T (AO) <ChevronDown className="size-3.5 opacity-80" />
+                </Button>
+              )}
+            >
+              {(fechar) => (
+                <>
+                  <div className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-3">Do período {data(de)} a {data(ate)}</div>
+                  {(
+                    [
+                      ["1", "Facturação", exportarSaft],
+                      ["compras", "Aquisição (compras)", exportarSaftCompras],
+                      ["estado", "Facturação ao Estado", exportarSaftEstado],
+                    ] as const
+                  ).map(([id, label, f]) => (
+                    <MenuItem
+                      key={id}
+                      icon={FileCode2}
+                      onClick={() => {
+                        fechar();
+                        f();
+                      }}
+                    >
+                      <span className={cn(saftParam === id && "font-semibold text-brand")}>{label}</span>
+                    </MenuItem>
+                  ))}
+                  <div className="my-1 h-px bg-line" />
+                  <MenuItem
+                    icon={PackageSearch}
+                    onClick={() => {
+                      fechar();
+                      setInventario(true);
+                    }}
+                  >
+                    Inventários (existências a 31/12)
+                  </MenuItem>
+                </>
+              )}
+            </Popover>
+            <Button variant="secondary" onClick={exportarRelatorio} disabled={sintese || !linhas.length}>
+              <FileSpreadsheet className="size-4" /> Excel
             </Button>
             <Button variant="secondary" onClick={imprimir}>
               <Printer className="size-4" /> Imprimir
@@ -266,6 +374,29 @@ export default function Relatorios() {
           </>
         }
       />
+      {inventario && <InventarioSaft onClose={() => setInventario(false)} />}
+      <div className="mb-3 flex gap-1 overflow-x-auto border-b border-line">
+        {CATEGORIAS.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => escolher(c.vistas.includes(vista) ? vista : c.vistas[c.id === "vendas" ? 1 : 0])}
+            className={cn("-mb-px whitespace-nowrap border-b-2 px-4 py-2.5", categoria.id === c.id ? "border-brand font-medium text-ink" : "border-transparent text-ink-2 hover:text-ink")}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+      <div className="mb-4 inline-flex flex-wrap gap-1 rounded-lg bg-sunken p-1">
+        {categoria.vistas.map((id) => (
+          <button
+            key={id}
+            onClick={() => escolher(id)}
+            className={cn("rounded-md px-3 py-1.5 text-[13px]", vista === id ? "bg-surface font-medium shadow-sm" : "text-ink-2 hover:text-ink")}
+          >
+            {VISTAS.find((v) => v.id === id)!.label}
+          </button>
+        ))}
+      </div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         {sintese ? (
           <>
@@ -281,9 +412,9 @@ export default function Relatorios() {
           </>
         ) : (
           <>
-            <Input type="date" className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
+            <InputData className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
             <span className="text-ink-3">até</span>
-            <Input type="date" className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
+            <InputData className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
             <div className="w-64">
               <EntidadePicker tipo="C" label="Cliente (opcional)" valor={entidade} onChange={setEntidade} />
             </div>
@@ -294,21 +425,6 @@ export default function Relatorios() {
             )}
           </>
         )}
-        <div className="ml-2 flex flex-wrap gap-1 rounded-lg bg-sunken p-1">
-          {VISTAS.map((v) => (
-            <button
-              key={v.id}
-              onClick={() => {
-                setVista(v.id);
-                // «Por mês» com um período de um só mês mostraria uma linha: passa a ser o ano até hoje
-                if (v.id === "mes" && de.slice(0, 7) === ate.slice(0, 7)) setDe(`${ate.slice(0, 4)}-01-01`);
-              }}
-              className={cn("rounded-md px-3 py-1.5 text-[13px]", vista === v.id ? "bg-surface font-medium shadow-sm" : "text-ink-2 hover:text-ink")}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
       </div>
       {vista === "irt_c" && <TaxaGrupoC />}
       {sintese ? (
@@ -326,7 +442,7 @@ export default function Relatorios() {
         </Card>
       ) : (
         <Card className={cn("transition-opacity", isFetching && "opacity-60")}>
-          <Table className="max-h-[calc(100vh-250px)]">{corpo}</Table>
+          <Table className="max-h-[calc(100vh-294px)]">{corpo}</Table>
           {!linhas.length && <p className="py-12 text-center text-ink-3">Sem dados no período.</p>}
         </Card>
       )}

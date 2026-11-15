@@ -9,6 +9,7 @@ import { imprimir, NOMES_VIAS } from "@/lib/print";
 import type { DocCompleto } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { A4, NotaEntrega, PrintPortal, Ticket } from "./DocumentoPrint";
+import { EstadoDocumento } from "./EstadoDocumento";
 import { Badge, Button, Field, Input, Modal, Select, cn } from "./ui";
 
 export { imprimir };
@@ -58,12 +59,18 @@ export default function DocumentoModal({
   id,
   onClose,
   formatoInicial,
+  anularAoAbrir,
 }: {
   id: number | null;
   onClose: () => void;
   formatoInicial?: Formato;
+  /** abre logo o pedido de anulação (ex.: arrastar para «Anuladas» no quadro de propostas) */
+  anularAoAbrir?: boolean;
 }) {
-  const { data: d } = useDocumento(id);
+  // documento à vista: começa no pedido e muda ao abrir um documento ligado (origem, recibo, nota de crédito…)
+  const [atual, setAtual] = useState(id);
+  useEffect(() => setAtual(id), [id]);
+  const { data: d } = useDocumento(atual);
   const opcoes = useTabelas().data?.posto?.opcoes;
   const talao58 = useTalao58();
   // impressão da nota de entrega (sem preços) em vez do documento
@@ -76,6 +83,9 @@ export default function DocumentoModal({
   const tem = useSession((s) => s.tem);
   const qc = useQueryClient();
   const nav = useNavigate();
+  useEffect(() => {
+    if (anularAoAbrir && d && d.documento.id === id && d.documento.estado === "N" && !d.documento.importado && tem("documentos.anular")) setAnular(true);
+  }, [anularAoAbrir, d, id, tem]);
 
   // n.º de vias: o do posto (POS) ou o do tipo de documento
   useEffect(() => {
@@ -88,7 +98,7 @@ export default function DocumentoModal({
     setNotaEntrega(false);
     if (!termica) return imprimir();
     try {
-      await call("impressao.talao", { id, vias, segunda_via: segundaVia });
+      await call("impressao.talao", { id: atual, vias, segunda_via: segundaVia });
       toast.success("Talão enviado à impressora térmica.");
     } catch (e) {
       toast.error((e as Error).message);
@@ -97,7 +107,7 @@ export default function DocumentoModal({
 
   async function confirmarAnulacao() {
     try {
-      await call("documentos.anular", { id, motivo });
+      await call("documentos.anular", { id: atual, motivo });
       toast.success("Documento anulado.");
       setAnular(false);
       qc.invalidateQueries();
@@ -192,6 +202,7 @@ export default function DocumentoModal({
             {d.documento.hash_controlo && <Badge tone="brand">Assinado · {d.documento.hash_controlo}</Badge>}
             {d.documento.autorizado_por_nome && <Badge tone="accent">Autorizado por {d.documento.autorizado_por_nome}</Badge>}
           </div>
+          <EstadoDocumento d={d} onAbrir={setAtual} />
           <div className="max-h-[60vh] overflow-auto rounded-xl border border-line bg-sunken p-6">
             <div className="mx-auto w-fit bg-white shadow-card">
               {formato === "a4" ? <A4 d={d} via={segundaVia ? "2.ª Via" : "Original"} /> : <Ticket d={d} via={segundaVia ? "2.ª Via" : "Original"} />}

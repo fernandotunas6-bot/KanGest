@@ -53,7 +53,7 @@ export default function Estorno({ tipo }: { tipo: "RC" | "VRC" }) {
           {!lista.data?.length ? (
             <Empty icon={<Undo2 className="size-6" />} title="Sem recibos válidos" />
           ) : (
-            <Table className="max-h-[calc(100vh-280px)]">
+            <Table className="max-h-[calc(100vh-324px)]">
               <thead>
                 <tr>
                   <Th>Recibo</Th>

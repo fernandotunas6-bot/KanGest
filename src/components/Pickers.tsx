@@ -104,7 +104,7 @@ export function ArtigoPicker({
                 <span className="font-medium">{a.descricao}</span>
                 <span className="ml-2 font-mono text-[11.5px] text-ink-3">{a.referencia}</span>
                 {!!a.composto && <span className="ml-2 rounded bg-brand-50 px-1.5 text-[11px] text-brand-700">kit</span>}
-                {!!a.controla_lote && <span className="ml-2 rounded bg-accent-50 px-1.5 text-[11px] text-[#9a6514]">lotes</span>}
+                {!!a.controla_lote && <span className="ml-2 rounded bg-accent-50 px-1.5 text-[11px] text-accent-ink">lotes</span>}
               </span>
               <span className="num text-[13px] text-ink-2">
                 {kz(a.preco1_iva)} · stock {qtd(a.stock)}

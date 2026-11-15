@@ -67,6 +67,7 @@ export const MENU: GrupoMenu[] = [
       { label: "Recibo de Cliente", to: "/recibos/novo", perm: "tesouraria.recibo" },
       { label: "Adiantamento de Cliente", to: "/adiantamentos/novo", perm: "tesouraria.recibo" },
       { label: "Estorno de Recibo", to: "/recibos/estorno", perm: "tesouraria.recibo" },
+      { label: "Quadro de Propostas e Encomendas", to: "/documentos/quadro?grupo=VENDAS" },
       { label: "Documentos Emitidos", to: "/documentos?grupo=VENDAS" },
     ],
   },
@@ -87,6 +88,7 @@ export const MENU: GrupoMenu[] = [
       { label: "Estorno de Pagamento", to: "/pagamentos/estorno", perm: "tesouraria.pagamento" },
       { label: "Mapa de Fornecedor", to: "/relatorios/fornecedores", perm: "relatorios.ver" },
       { label: "Moedas e Câmbios", to: "/moedas", perm: "compras.fatura" },
+      { label: "Quadro de Encomendas", to: "/documentos/quadro?grupo=COMPRAS" },
       { label: "Documentos Emitidos", to: "/documentos?grupo=COMPRAS" },
     ],
   },
@@ -113,6 +115,7 @@ export const MENU: GrupoMenu[] = [
       { label: "Exportar SAF-T (AO)", to: "/relatorios?saft=1", perm: "sistema.saft" },
       { label: "SAF-T de Aquisição (compras)", to: "/relatorios?saft=compras", perm: "sistema.saft" },
       { label: "SAF-T de Facturação ao Estado", to: "/relatorios?saft=estado", perm: "sistema.saft" },
+      { label: "SAF-T de Inventários", to: "/relatorios?saft=inventario", perm: "sistema.saft" },
     ],
   },
   {

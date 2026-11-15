@@ -18,6 +18,8 @@ interface Estado {
   estabelecimento: string;
   chave_software: boolean;
   chave_contribuinte: boolean;
+  /** Dados do produtor que vieram com o programa (não se pedem aqui). */
+  do_produtor?: { utilizador: boolean; senha: boolean; numero_validacao: boolean; chave_software: boolean };
   nif: string;
   endereco: string;
   contagem: { estado: string; n: number }[];
@@ -149,7 +151,7 @@ export default function FacturacaoElectronica() {
               text={e?.ativo ? "As facturas e recibos emitidos entram aqui e são enviados à AGT automaticamente." : "Ligue a facturação electrónica no painel ao lado."}
             />
           ) : (
-            <Table className="max-h-[calc(100vh-330px)]">
+            <Table className="max-h-[calc(100vh-374px)]">
               <thead>
                 <tr>
                   <Th>Documento</Th>
@@ -327,23 +329,34 @@ function Configuracao({ e }: { e: Estado }) {
             <option value="PROD">Produção</option>
           </Select>
         </Field>
+        {e.do_produtor?.utilizador && e.do_produtor?.senha ? (
+          <p className="rounded-lg bg-ok-50 px-3 py-2 text-[13px] text-ok">As credenciais do produtor do software para os serviços da AGT vêm com o programa.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Utilizador (AGT)">
+              <Input value={f.utilizador} onChange={(x) => set({ utilizador: x.target.value })} />
+            </Field>
+            <Field label="Senha">
+              <Input type="password" value={f.senha_nova} placeholder={e.senha ? "•••••• (manter)" : ""} onChange={(x) => set({ senha_nova: x.target.value })} />
+            </Field>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Utilizador (AGT)">
-            <Input value={f.utilizador} onChange={(x) => set({ utilizador: x.target.value })} />
-          </Field>
-          <Field label="Senha">
-            <Input type="password" value={f.senha_nova} placeholder={e.senha ? "•••••• (manter)" : ""} onChange={(x) => set({ senha_nova: x.target.value })} />
-          </Field>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="N.º de validação do software">
-            <Input value={f.numero_validacao} onChange={(x) => set({ numero_validacao: x.target.value })} placeholder="Ex.: C_134" />
+          <Field label="N.º de validação do software" hint={e.do_produtor?.numero_validacao ? "Vem com o programa." : undefined}>
+            <Input value={f.numero_validacao} onChange={(x) => set({ numero_validacao: x.target.value })} placeholder="Ex.: C_134" disabled={e.do_produtor?.numero_validacao} />
           </Field>
           <Field label="Estabelecimento">
             <Input value={f.estabelecimento} onChange={(x) => set({ estabelecimento: x.target.value })} />
           </Field>
         </div>
-        {chave("Chave do produtor do software", e.chave_software, "chave_software_pem", "Assina o softwareInfo (registada no Portal do Parceiro)")}
+        {e.do_produtor?.chave_software ? (
+          <p className="text-[13px] text-ink-2">
+            <Badge tone="ok" className="mr-2">Chave do produtor</Badge>
+            Incluída no programa (assina o softwareInfo).
+          </p>
+        ) : (
+          chave("Chave do produtor do software", e.chave_software, "chave_software_pem", "Assina o softwareInfo (registada no Portal do Parceiro)")
+        )}
         {chave("Chave do contribuinte", e.chave_contribuinte, "chave_contribuinte_pem", "Emitida pela AGT no Portal do Contribuinte; assina os documentos")}
         <p className="text-[12px] text-ink-3">
           NIF emissor {e.nif || "—"} · {e.produto} {e.versao} · {e.endereco}

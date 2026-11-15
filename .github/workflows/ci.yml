@@ -1,0 +1,62 @@
+# Verificação em cada push e pull request: tipos do frontend, clippy e testes do backend,
+# numa compilação de desenvolvimento e numa com uma chave de produtor de teste (o caminho
+# da versão oficial, em que a chave AGT vem dentro do programa).
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Dependências do sistema (WebKitGTK do Tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev librsvg2-dev
+
+      - run: npm ci
+
+      - name: Tipos do frontend
+        run: npm run typecheck
+
+      # o tauri::generate_context! procura a pasta do frontend compilado
+      - run: mkdir -p dist
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Testes (desenvolvimento)
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: Testes (com chave do produtor embutida)
+        working-directory: src-tauri
+        run: |
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:1024 -out "$RUNNER_TEMP/produtor-teste.pem"
+          KANGEST_AGT_CHAVE_FICHEIRO="$RUNNER_TEMP/produtor-teste.pem" KANGEST_AGT_CERTIFICADO=999 cargo test --locked

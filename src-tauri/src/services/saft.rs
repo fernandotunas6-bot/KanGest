@@ -3,6 +3,7 @@
 //!   SourceDocuments (SalesInvoices, MovementOfGoods, WorkingDocuments, Payments).
 //! * Aquisição (TaxAccountingBasis = A): Header, MasterFiles (Supplier, TaxTable) e
 //!   SourceDocuments/PurchaseInvoices.
+//!
 //! Validar no validador da AGT antes de submeter.
 
 use std::collections::BTreeSet;
@@ -71,6 +72,8 @@ struct Doc {
     transporte: Option<String>,
     /// SourceBilling / SourcePayment: P (produzido), I (integrado), M (manual / recuperação)
     fonte: String,
+    /// Versão da chave com que foi assinado (HashControl); vazio nos documentos de versões antigas.
+    hash_versao: Option<String>,
 }
 
 async fn docs(p: &SqlitePool, tipos: &str, de: &str, ate: &str, estado: bool) -> AppResult<Vec<Doc>> {
@@ -78,7 +81,7 @@ async fn docs(p: &SqlitePool, tipos: &str, de: &str, ate: &str, estado: bool) ->
     let sql = format!(
         "SELECT d.id, d.tipo_codigo, d.numero_doc, d.estado, d.data_emissao, d.data_hora, COALESCE(d.entidade_id, 1) AS ent,
                 u.login, d.total_liquido, d.total_iva, d.total, d.hash, o.numero_doc AS origem, d.observacoes, d.motivo_anulacao,
-                d.motivo, d.transporte, d.origem AS fonte
+                d.motivo, d.transporte, d.origem AS fonte, d.hash_versao
          FROM documentos d JOIN utilizadores u ON u.id = d.utilizador_id
          LEFT JOIN documentos o ON o.id = d.doc_origem_id
          LEFT JOIN entidades e ON e.id = d.entidade_id
@@ -108,6 +111,7 @@ async fn docs(p: &SqlitePool, tipos: &str, de: &str, ate: &str, estado: bool) ->
             motivo: r.get("motivo"),
             transporte: r.get("transporte"),
             fonte: r.get("fonte"),
+            hash_versao: r.get("hash_versao"),
         })
         .collect())
 }
@@ -272,11 +276,7 @@ async fn preparar(st: &AppState, i: &SaftIn) -> AppResult<(sqlx::sqlite::SqliteR
     }
     let p = &st.pool;
     let emp = sqlx::query("SELECT * FROM empresa WHERE id = 1").fetch_one(p).await?;
-    let cert: String = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?")
-        .bind(agt::CERTIFICADO_CONFIG)
-        .fetch_optional(p)
-        .await?
-        .unwrap_or_else(|| "0".into());
+    let cert = Some(agt::certificado(p).await?).filter(|c| !c.is_empty()).unwrap_or_else(|| "0".into());
     let nif: String = emp.get("nif");
     Ok((emp, nif, cert))
 }
@@ -376,8 +376,8 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
         el(&mut x, 8, "InvoiceNo", &d.numero);
         status(&mut x, 8, "InvoiceStatus", d, "SourceBilling");
         el(&mut x, 8, "Hash", &d.hash);
-        el(&mut x, 8, "HashControl", hc);
-        el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+        el(&mut x, 8, "HashControl", d.hash_versao.as_deref().unwrap_or(hc));
+        el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
         el(&mut x, 8, "InvoiceDate", &d.data);
         el(&mut x, 8, "InvoiceType", &d.tipo);
         x.push_str("        <SpecialRegimes>\n");
@@ -425,8 +425,8 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
             el(&mut x, 8, "DocumentNumber", &d.numero);
             status(&mut x, 8, "MovementStatus", d, "SourceBilling");
             el(&mut x, 8, "Hash", &d.hash);
-            el(&mut x, 8, "HashControl", hc);
-            el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+            el(&mut x, 8, "HashControl", d.hash_versao.as_deref().unwrap_or(hc));
+            el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
             el(&mut x, 8, "MovementDate", &d.data);
             el(&mut x, 8, "MovementType", "GT");
             el(&mut x, 8, "SystemEntryDate", &d.data_hora);
@@ -461,8 +461,8 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
         el(&mut x, 8, "DocumentNumber", &d.numero);
         status(&mut x, 8, "WorkStatus", d, "SourceBilling");
         el(&mut x, 8, "Hash", &d.hash);
-        el(&mut x, 8, "HashControl", hc);
-        el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+        el(&mut x, 8, "HashControl", d.hash_versao.as_deref().unwrap_or(hc));
+        el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
         el(&mut x, 8, "WorkDate", &d.data);
         el(&mut x, 8, "WorkType", &d.tipo);
         el(&mut x, 8, "SourceID", &d.login);
@@ -483,7 +483,7 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
     for d in &recibos {
         x.push_str("      <Payment>\n");
         el(&mut x, 8, "PaymentRefNo", &d.numero);
-        el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+        el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
         el(&mut x, 8, "TransactionDate", &d.data);
         el(&mut x, 8, "PaymentType", "RC");
         status(&mut x, 8, "PaymentStatus", d, "SourcePayment");

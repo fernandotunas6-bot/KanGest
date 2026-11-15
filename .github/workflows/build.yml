@@ -1,6 +1,7 @@
 # Build do KanGest para Windows (instalador NSIS .exe) e macOS (.dmg).
 # Corre ao publicar uma etiqueta "v*" (ex.: v1.0.0) ou manualmente em Actions → Build → Run workflow.
 # Um push para um ramo «build/…» compila sem publicar (os instaladores ficam nos artefactos da execução).
+# O texto da release vem de docs/versoes/<etiqueta>.md (ex.: docs/versoes/v1.2.0.md), se existir.
 #
 # Assinatura de código (docs/ASSINATURA.md): activa-se sozinha quando os segredos existem no repositório.
 #   macOS:   APPLE_CERTIFICATE (.p12 em base64), APPLE_CERTIFICATE_PASSWORD; notarização: APPLE_ID,
@@ -58,11 +59,10 @@ jobs:
 
       - run: npm ci
 
-      # os testes correm no Windows (código só de Windows: impressão, consola, instalador) e no Apple Silicon
+      # os testes correm no Windows (código só de Windows: impressão, consola, instalador) e no Apple Silicon;
+      # um teste a falhar trava a publicação (o CI em cada push corre-os também no Linux)
       - name: Testes
         if: matrix.nome != 'macos-intel'
-        # um teste que falhe só num sistema não deve impedir o instalador; o resultado fica no registo da execução
-        continue-on-error: true
         working-directory: src-tauri
         run: cargo test --locked
 
@@ -130,16 +130,42 @@ jobs:
           ) | Add-Content -Encoding utf8 $env:GITHUB_ENV
           Write-Host "A assinar o Windows com o jsign ($(if ($env:WINDOWS_ASSINATURA_TIPO) { $env:WINDOWS_ASSINATURA_TIPO } else { 'ESIGNER' }))."
 
+      # notas da versão mostradas na página da release (só ao publicar uma etiqueta)
+      - name: Notas da versão
+        id: notas
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          f="docs/versoes/${GITHUB_REF_NAME}.md"
+          if [ -f "$f" ]; then
+            { echo "corpo<<FIM_DAS_NOTAS"; cat "$f"; echo; echo "FIM_DAS_NOTAS"; } >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Sem notas da versão em $f: a release fica sem texto."
+          fi
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Assinatura das actualizações (opcional): chave gerada com «npx tauri signer generate»
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Segredos do produtor embutidos no programa (docs/CERTIFICACAO-AGT.md). Nunca vão para a base de
+          # dados dos clientes. Sem eles a compilação sai como versão de desenvolvimento.
+          KANGEST_AGT_CHAVE: ${{ secrets.KANGEST_AGT_CHAVE }}
+          KANGEST_AGT_CERTIFICADO: ${{ secrets.KANGEST_AGT_CERTIFICADO }}
+          KANGEST_AGT_VERSAO_CHAVE: ${{ secrets.KANGEST_AGT_VERSAO_CHAVE }}
+          KANGEST_FE_UTILIZADOR: ${{ secrets.KANGEST_FE_UTILIZADOR }}
+          KANGEST_FE_SENHA: ${{ secrets.KANGEST_FE_SENHA }}
+          KANGEST_FE_CHAVE_SOFTWARE: ${{ secrets.KANGEST_FE_CHAVE_SOFTWARE }}
+          KANGEST_FE_NUMERO_VALIDACAO: ${{ secrets.KANGEST_FE_NUMERO_VALIDACAO }}
+          # públicos: variáveis do repositório (Settings → Secrets and variables → Actions → Variables)
+          KANGEST_CHAVE_ACTUALIZACOES: ${{ vars.KANGEST_CHAVE_ACTUALIZACOES }}
+          KANGEST_EXIGIR_CERTIFICACAO: ${{ vars.KANGEST_EXIGIR_CERTIFICACAO }}
         with:
           args: ${{ matrix.args }} ${{ env.ARGS_ASSINATURA }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: "KanGest ${{ github.ref_name }}"
+          releaseBody: ${{ steps.notas.outputs.corpo }}
           # publicada logo: os instaladores ficam com link público em Releases
           releaseDraft: false
 

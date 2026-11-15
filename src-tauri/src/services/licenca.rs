@@ -251,7 +251,7 @@ pub async fn calcular(st: &AppState) -> AppResult<Estado> {
             Err(erro) => problema = Some(erro),
             Ok(lic) => {
                 let nif_ok = nif_empresa.as_deref().map(so_algarismos) == Some(so_algarismos(&lic.nif));
-                let maquina_ok = lic.maquina.as_deref().map_or(true, |m| so_algarismos(m) == so_algarismos(&e.maquina));
+                let maquina_ok = lic.maquina.as_deref().is_none_or(|m| so_algarismos(m) == so_algarismos(&e.maquina));
                 if !nif_ok {
                     problema = Some(format!("A licença activada é da empresa com o NIF {}, e esta empresa tem o NIF {}.", lic.nif, nif_empresa.clone().unwrap_or_default()));
                 } else if !maquina_ok {

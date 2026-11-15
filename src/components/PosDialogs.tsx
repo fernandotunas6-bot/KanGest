@@ -137,7 +137,7 @@ export function PinModal({
       }
     >
       <div className="mb-4 flex items-start gap-3 rounded-xl bg-accent-50 p-3 text-[13px] text-ink-2">
-        <KeyRound className="mt-0.5 size-4 shrink-0 text-[#9a6514]" />
+        <KeyRound className="mt-0.5 size-4 shrink-0 text-accent-ink" />
         <span>
           <b className="text-ink">{pedido?.descricao}</b> exige autorização. Peça a um supervisor para introduzir o PIN.
         </span>

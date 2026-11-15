@@ -116,8 +116,8 @@ export default function VisorCliente() {
               )}
               {!!e.troco && (
                 <>
-                  <span className="font-semibold text-[#9a6514]">Troco</span>
-                  <span className="num text-right text-[34px] font-bold text-[#9a6514]">{kz(e.troco)}</span>
+                  <span className="font-semibold text-accent-ink">Troco</span>
+                  <span className="num text-right text-[34px] font-bold text-accent-ink">{kz(e.troco)}</span>
                 </>
               )}
             </div>

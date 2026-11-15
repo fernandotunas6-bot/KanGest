@@ -11,6 +11,7 @@ import Pos from "@/pages/Pos";
 import Artigos from "@/pages/Artigos";
 import Entidades from "@/pages/Entidades";
 import Documentos from "@/pages/Documentos";
+import QuadroPropostas from "@/pages/QuadroPropostas";
 import NovoDocumento from "@/pages/NovoDocumento";
 import Recibo from "@/pages/Recibo";
 import Stock from "@/pages/Stock";
@@ -89,6 +90,7 @@ export default function App() {
         <Route path="/fornecedores" element={<Entidades tipo="F" />} />
         <Route path="/documentos" element={<Documentos />} />
         <Route path="/documentos/novo/:tipo" element={<NovoDocumento />} />
+        <Route path="/documentos/quadro" element={<QuadroPropostas />} />
         <Route path="/recibos/novo" element={<Recibo tipo="RC" />} />
         <Route path="/pagamentos/novo" element={<Recibo tipo="VRC" />} />
         <Route path="/adiantamentos/novo" element={<Adiantamento />} />

@@ -10,6 +10,7 @@ import { call } from "@/lib/api";
 import { data, hojeISO, qtd } from "@/lib/format";
 import { MESES, type Alteracao, type Funcionario } from "@/lib/types";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 
 interface Ferias {
   id: number;
@@ -73,7 +74,7 @@ export default function FeriasFaltas() {
           {!ferias.data?.length ? (
             <Empty icon={<CalendarDays className="size-6" />} title="Sem férias marcadas" text="Marque os períodos de férias do pessoal. São 22 dias úteis por ano, regra geral (confirme a Lei Geral do Trabalho)." />
           ) : (
-            <Table className="max-h-[calc(100vh-280px)]">
+            <Table className="max-h-[calc(100vh-324px)]">
               <thead>
                 <tr>
                   <Th>Funcionário</Th>
@@ -253,10 +254,10 @@ function FeriasForm({ inicial, funcs, onClose }: { inicial: Partial<Ferias>; fun
           </Select>
         </Field>
         <Field label="Início">
-          <Input type="date" value={f.data_inicio ?? ""} onChange={(e) => setF({ ...f, data_inicio: e.target.value, dias: undefined })} />
+          <InputData value={f.data_inicio ?? ""} onChange={(e) => setF({ ...f, data_inicio: e.target.value, dias: undefined })} />
         </Field>
         <Field label="Fim">
-          <Input type="date" min={f.data_inicio} value={f.data_fim ?? ""} onChange={(e) => setF({ ...f, data_fim: e.target.value, dias: undefined })} />
+          <InputData min={f.data_inicio} value={f.data_fim ?? ""} onChange={(e) => setF({ ...f, data_fim: e.target.value, dias: undefined })} />
         </Field>
         <Field label="Dias úteis" hint="Calculado sem sábados e domingos; ajuste os feriados.">
           <Input className="num text-right" type="number" min={1} value={f.dias ?? sugeridos} onChange={(e) => setF({ ...f, dias: Number(e.target.value) })} />

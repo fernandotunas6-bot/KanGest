@@ -919,7 +919,7 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
         utilizadores: HashMap::new(),
     };
     let _guard = st.emissao.lock().await;
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
 
     // 2) empresa (+ certificado do sistema anterior, só como referência)
     if let Some(e) = empresa.first() {
@@ -1157,7 +1157,8 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
         let agora = db::agora();
         let mut n_stk = 0;
         // (artigo, armazém, quantidade, custo médio, última entrada, última saída) — as datas são as do KIGEST
-        let mut itens: Vec<(i64, i64, f64, Option<i64>, Option<String>, Option<String>)> = Vec::new();
+        type Item = (i64, i64, f64, Option<i64>, Option<String>, Option<String>);
+        let mut itens: Vec<Item> = Vec::new();
         if !stock.is_empty() {
             for r in &stock {
                 let artigo = i(r, &["IdArtigo"])
@@ -2208,7 +2209,7 @@ async fn n_recibos(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, mapas:
         )
         .bind(tipo)
         .bind(&serie)
-        .bind(numero.unwrap_or(n_r as i64 + 1))
+        .bind(numero.unwrap_or(n_r + 1))
         .bind(&rf)
         .bind(&data_r)
         .bind(&dh)
@@ -2380,10 +2381,7 @@ async fn n_proformas(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, mapa
         if sqlx::query_scalar::<_, i64>("SELECT id FROM documentos WHERE numero_doc = ?").bind(&rf).fetch_optional(&mut **tx).await?.is_some() {
             continue;
         }
-        let tipo = match tipo_documento(rf.split_whitespace().next(), None, None) {
-            Some(c @ ("PP" | "OR" | "NE")) => c,
-            _ => "PP",
-        };
+        let tipo = tipo_documento(rf.split_whitespace().next(), None, None).filter(|c| matches!(*c, "PP" | "OR" | "NE")).unwrap_or("PP");
         let ls = linhas.get(&rf).map(|v| v.as_slice()).unwrap_or(&[]);
         let soma = |nomes: &[&str]| ls.iter().map(|l| kz(l, nomes)).sum::<i64>();
         let total = Some(kz(r, &["ValTotal", "Total", "ValorTotal"])).filter(|v| *v != 0).unwrap_or_else(|| soma(&["ValorTotal"]));
@@ -2399,7 +2397,7 @@ async fn n_proformas(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, mapa
         )
         .bind(tipo)
         .bind(&serie)
-        .bind(numero.unwrap_or(n_p as i64 + 1))
+        .bind(numero.unwrap_or(n_p + 1))
         .bind(&rf)
         .bind(&data_p)
         .bind(data_hora(r, &["DataHoraEmissao"]).unwrap_or_else(|| format!("{data_p}T00:00:00")))
@@ -2423,6 +2421,7 @@ async fn n_proformas(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, mapa
 }
 
 // ------------------------------------------------------------------ tesouraria, caixa, moedas, prazos
+#[allow(clippy::too_many_arguments)]
 async fn conta_origem(tx: &mut Transaction<'_, Sqlite>, origem: &str, descricao: &str, tipo: &str, banco: Option<String>, agencia: Option<String>, numero: Option<String>, iban: Option<String>) -> AppResult<i64> {
     if let Some(id) = sqlx::query_scalar::<_, i64>("SELECT id FROM contas WHERE id_origem = ?").bind(origem).fetch_optional(&mut **tx).await? {
         return Ok(id);

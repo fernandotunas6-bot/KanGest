@@ -18,7 +18,7 @@ export function AvisoLicenca({ compacto = false, className }: { compacto?: boole
       role={grave ? "alert" : "status"}
       className={cn(
         "flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border px-4 py-2.5 text-[13.5px]",
-        grave ? "border-danger/30 bg-danger-50 text-danger" : "border-accent/40 bg-accent-50 text-[#7a4f0a]",
+        grave ? "border-danger/30 bg-danger-50 text-danger" : "border-accent/40 bg-accent-50 text-accent-ink",
         !compacto && "mb-5",
         className,
       )}

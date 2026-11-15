@@ -73,7 +73,7 @@ pub async fn guardar(st: &AppState, s: SerieIn) -> AppResult<Value> {
         return Err(AppError::msg("Tipo de documento inválido."));
     }
     let descricao = s.descricao.as_deref().map(str::trim).filter(|x| !x.is_empty()).map(String::from).unwrap_or_else(|| format!("Série {codigo}"));
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let id = match s.id {
         Some(id) => {
             let atual = sqlx::query("SELECT tipo_codigo, serie, ultimo_numero FROM series WHERE id = ?")
@@ -155,7 +155,7 @@ pub struct EstadoIn {
 pub async fn estado(st: &AppState, e: EstadoIn) -> AppResult<Value> {
     st.exigir_perm("sistema.series")?;
     let row = sqlx::query("SELECT tipo_codigo, posto_id, manual FROM series WHERE id = ?").bind(e.id).fetch_optional(&st.pool).await?.ok_or(AppError::NaoEncontrado)?;
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     if let Some(a) = e.ativa {
         sqlx::query("UPDATE series SET ativa = ? WHERE id = ?").bind(a as i64).bind(e.id).execute(&mut *tx).await?;
     }

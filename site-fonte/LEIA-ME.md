@@ -37,6 +37,10 @@ Em `config.json`, mude `versao`, os três links de `downloads` e os tamanhos; ge
 ## Imagens
 
 - Os ecrãs do KanGest foram tirados com a empresa fictícia de demonstração, nunca com dados de clientes.
+- Para os tirar de novo (interface nova), com o servidor de demonstração e o frontend a correr
+  (ver [scripts/auditoria/README.md](../scripts/auditoria/README.md)):
+  `node scripts/auditoria/capturas-site.cjs` (1440×900) e `python3 scripts/auditoria/miniaturas-site.py` (720×450).
+  O site só se gera e publica com a versão nova, para mostrar o que se descarrega.
 - O equipamento usa ilustrações próprias; os modelos indicados são exemplos de equipamento ESC/POS e USB compatível.
 - As imagens do SIGA Plus e da Livraria Adventista são fotografias das páginas públicas `www.portal-siga.com` e
   `livrariaadventista.ao`.

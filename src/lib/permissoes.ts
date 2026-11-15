@@ -35,6 +35,7 @@ export const GRUPOS_PERMISSOES: { grupo: string; itens: { id: string; label: str
       { id: "tesouraria.fluxo", label: "Fluxo de caixa e contas" },
       { id: "tesouraria.regularizar", label: "Regularizar conta corrente" },
       { id: "caixa.movimentos", label: "Inserir/retirar dinheiro do caixa" },
+      { id: "caixa.ver_totais", label: "Ver o valor esperado do caixa antes de fechar (fecho cego)" },
     ],
   },
   {

@@ -5,9 +5,10 @@ import { toast } from "sonner";
 import { Banknote, FileSpreadsheet, HeartPulse, Pencil, Plus, Trash2, Undo2, UserRoundCog } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, hojeISO, kz, parseKz, qtd, toInputKz } from "@/lib/format";
-import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
+import { dataXL, exportarExcel, kzXL } from "@/lib/csv";
 import { MESES, type Funcionario } from "@/lib/types";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 import { periodo } from "./Salarios";
 
 interface Independente {
@@ -115,12 +116,13 @@ function ListaHonorarios({ ano, mes }: { ano: number; mes: number }) {
   const tot = (k: "iliquido" | "irt" | "liquido") => validos.reduce((s, h) => s + h[k], 0);
 
   async function exportar() {
-    await exportarFicheiro(
-      `Honorarios_${ano}-${String(mes).padStart(2, "0")}.csv`,
-      csv([
+    await exportarExcel(
+      `Honorarios_${ano}-${String(mes).padStart(2, "0")}.xlsx`,
+      [
         ["Nome", "NIF", "Data", "Base", "Quantidade", "Ilíquido", "Taxa IRT %", "IRT retido", "Líquido", "Pago"],
-        ...validos.map((h) => [h.nome, h.nif, h.data, BASE[h.tipo], String(h.quantidade).replace(".", ","), csvKz(h.iliquido), String(h.irt_pct).replace(".", ","), csvKz(h.irt), csvKz(h.liquido), h.pago ? "Sim" : "Não"]),
-      ]),
+        ...validos.map((h) => [h.nome, h.nif, dataXL(h.data), BASE[h.tipo], h.quantidade, kzXL(h.iliquido), h.irt_pct, kzXL(h.irt), kzXL(h.liquido), h.pago ? "Sim" : "Não"]),
+      ],
+      { titulo: `Honorários — ${String(mes).padStart(2, "0")}/${ano}` },
     );
   }
 
@@ -554,10 +556,10 @@ function PrestacaoModal({ p, onClose }: { p: Partial<Prestacao>; onClose: () => 
           <Input className="num text-right" type="number" min={1} value={f.meses ?? 1} onChange={(e) => set("meses", Number(e.target.value))} />
         </Field>
         <Field label="Início">
-          <Input type="date" value={f.data_inicio ?? ""} onChange={(e) => set("data_inicio", e.target.value)} />
+          <InputData value={f.data_inicio ?? ""} onChange={(e) => set("data_inicio", e.target.value)} />
         </Field>
         <Field label="Fim">
-          <Input type="date" value={f.data_fim ?? ""} onChange={(e) => set("data_fim", e.target.value)} />
+          <InputData value={f.data_fim ?? ""} onChange={(e) => set("data_fim", e.target.value)} />
         </Field>
         <Field label="Líquido mensal da prestação (Kz)">
           <Input className="num text-right" value={liquido} onChange={(e) => setLiquido(e.target.value)} />

@@ -217,7 +217,7 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
     let controla = a.controla_stock.unwrap_or(tipo == "P") && tipo == "P";
     let cobar = a.codigo_barras.filter(|c| !c.trim().is_empty());
 
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let referencia = match a.referencia.filter(|r| !r.trim().is_empty()) {
         Some(r) => r.trim().to_string(),
         None => {
@@ -525,7 +525,7 @@ pub async fn stock_recalcular(st: &AppState, r: RecalcIn) -> AppResult<Value> {
     );
     let mut saldos = 0u64;
     if r.aplicar {
-        let mut tx = st.pool.begin().await?;
+        let mut tx = crate::db::transacao(&st.pool).await?;
         sqlx::query(
             "INSERT INTO stock (artigo_id, armazem_id, quantidade)
              SELECT artigo_id, armazem_id, ROUND(SUM(quantidade), 6) FROM movimentos_stock GROUP BY artigo_id, armazem_id
