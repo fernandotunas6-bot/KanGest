@@ -477,11 +477,12 @@ pub async fn executar_ficheiro(st: &AppState, e: ExecutarFicheiroIn) -> AppResul
 pub async fn ficheiros(st: &AppState) -> AppResult<Value> {
     st.exigir_perm("sistema.importar")?;
     let pasta_exp = st.pasta_exportacao.clone();
-    let lista = tokio::task::spawn_blocking(move || procurar_ficheiros(&pasta_exp)).await.map_err(|e| AppError::msg(e.to_string()))?;
+    let lista = tokio::task::spawn_blocking(move || procurar_ficheiros(&pasta_exp, &["kigest"])).await.map_err(|e| AppError::msg(e.to_string()))?;
     Ok(json!(lista))
 }
 
-fn procurar_ficheiros(pasta_exportacao: &std::path::Path) -> Vec<Value> {
+/// Ficheiros com uma destas extensões na pasta de exportação, Transferências, Ambiente de Trabalho, Documentos e pens.
+pub(crate) fn procurar_ficheiros(pasta_exportacao: &std::path::Path, extensoes: &[&str]) -> Vec<Value> {
     use std::path::PathBuf;
     let mut pastas: Vec<(PathBuf, usize)> = vec![(pasta_exportacao.to_path_buf(), 1)];
     let casa = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from);
@@ -501,7 +502,7 @@ fn procurar_ficheiros(pasta_exportacao: &std::path::Path) -> Vec<Value> {
     }
     let mut vistos = HashSet::new();
     let mut achados = Vec::new();
-    fn visitar(p: &std::path::Path, nivel: usize, achados: &mut Vec<Value>, vistos: &mut HashSet<std::path::PathBuf>) {
+    fn visitar(p: &std::path::Path, nivel: usize, extensoes: &[&str], achados: &mut Vec<Value>, vistos: &mut HashSet<std::path::PathBuf>) {
         let Ok(it) = std::fs::read_dir(p) else { return };
         for e in it.flatten().take(500) {
             let caminho = e.path();
@@ -509,9 +510,9 @@ fn procurar_ficheiros(pasta_exportacao: &std::path::Path) -> Vec<Value> {
             if tipo.is_dir() {
                 let oculto = e.file_name().to_string_lossy().starts_with('.');
                 if nivel > 0 && !oculto {
-                    visitar(&caminho, nivel - 1, achados, vistos);
+                    visitar(&caminho, nivel - 1, extensoes, achados, vistos);
                 }
-            } else if caminho.extension().is_some_and(|x| x.eq_ignore_ascii_case("kigest")) && vistos.insert(caminho.clone()) {
+            } else if caminho.extension().is_some_and(|x| extensoes.iter().any(|e| x.eq_ignore_ascii_case(e))) && vistos.insert(caminho.clone()) {
                 let meta = e.metadata().ok();
                 let modificado = meta
                     .as_ref()
@@ -529,7 +530,7 @@ fn procurar_ficheiros(pasta_exportacao: &std::path::Path) -> Vec<Value> {
     }
     for (p, nivel) in pastas {
         if p.is_dir() {
-            visitar(&p, nivel, &mut achados, &mut vistos);
+            visitar(&p, nivel, extensoes, &mut achados, &mut vistos);
         }
     }
     achados.sort_by(|a, b| b["modificado"].as_str().cmp(&a["modificado"].as_str()));

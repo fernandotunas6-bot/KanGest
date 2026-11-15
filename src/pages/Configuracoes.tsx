@@ -2,14 +2,14 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { DatabaseBackup, ImagePlus, Inbox, Monitor, MonitorSmartphone, Network, Plus, Printer, Server, Wifi } from "lucide-react";
+import { ArchiveRestore, DatabaseBackup, ImagePlus, Inbox, LockKeyhole, Monitor, MonitorSmartphone, Network, Plus, Printer, RefreshCw, Server, Wifi } from "lucide-react";
 import { abrirVisorEcra, logoParaRaster } from "@/lib/equipamento";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { imprimir } from "@/lib/print";
 import { call } from "@/lib/api";
 import { useTabelas } from "@/lib/hooks";
-import { parseKz, toInputKz } from "@/lib/format";
+import { dataHora, parseKz, toInputKz } from "@/lib/format";
 import type { Empresa, EscPos, Posto, PostoOpcoes, VisorOpcoes } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
@@ -755,12 +755,175 @@ function Tabelas() {
   );
 }
 
+interface CopiaRestaurar {
+  caminho: string;
+  nome: string;
+  tamanho: number;
+  modificado: string;
+}
+
+interface CopiaInfo {
+  empresa: string | null;
+  nif: string | null;
+  documentos: number;
+  ultimo_documento: string | null;
+}
+
+/** Cópia cifrada com senha: para levar numa pen ou guardar na nuvem. */
+function CopiaCifrada({ onClose }: { onClose: () => void }) {
+  const [senha, setSenha] = useState("");
+  const [repetir, setRepetir] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function criar() {
+    if (senha.length < 8) return toast.error("A senha tem de ter pelo menos 8 caracteres.");
+    if (senha !== repetir) return toast.error("As duas senhas não são iguais.");
+    setBusy(true);
+    try {
+      const r = await call<{ ficheiro: string }>("sistema.backupCifrado", { senha });
+      toast.success("Cópia cifrada criada.", { description: r.ficheiro, duration: 12000 });
+      onClose();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal open onClose={onClose} title="Cópia cifrada com senha" width="max-w-md" footer={<Button loading={busy} onClick={criar}><LockKeyhole className="size-4" /> Criar cópia</Button>}>
+      <div className="space-y-4">
+        <p className="text-[13.5px] text-ink-2">
+          A cópia fica na pasta Transferências, cifrada com AES-256. <b className="text-ink">Sem a senha ninguém a abre — nem o KanGest nem o suporte.</b> Guarde-a num sítio seguro.
+        </p>
+        <Field label="Senha da cópia" hint="Pelo menos 8 caracteres; uma frase é mais fácil de lembrar e mais segura">
+          <Input type="password" autoFocus value={senha} onChange={(e) => setSenha(e.target.value)} autoComplete="new-password" />
+        </Field>
+        <Field label="Repita a senha">
+          <Input type="password" value={repetir} onChange={(e) => setRepetir(e.target.value)} onKeyDown={(e) => e.key === "Enter" && criar()} autoComplete="new-password" />
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
+/** Restaurar uma cópia: prepara-a agora e a troca faz-se ao reabrir o programa. */
+function Restaurar() {
+  const qc = useQueryClient();
+  const { data, refetch, isFetching } = useQuery({
+    queryKey: ["copias-restaurar"],
+    queryFn: () => call<{ copias: CopiaRestaurar[]; pendente: CopiaInfo | null }>("sistema.copiasRestaurar"),
+  });
+  const [escolhida, setEscolhida] = useState<CopiaRestaurar | null>(null);
+  const [senha, setSenha] = useState("");
+  const [percebi, setPercebi] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const cifrada = escolhida?.nome.toLowerCase().endsWith(".kgc");
+  const fechar = () => {
+    setEscolhida(null);
+    setSenha("");
+    setPercebi(false);
+  };
+  async function preparar() {
+    if (!escolhida) return;
+    setBusy(true);
+    try {
+      await call("sistema.restaurar", { caminho: escolhida.caminho, senha: cifrada ? senha : null });
+      toast.success("Cópia pronta a restaurar. Feche e volte a abrir o KanGest para concluir.", { duration: 15000 });
+      fechar();
+      qc.invalidateQueries({ queryKey: ["copias-restaurar"] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function cancelar() {
+    await call("sistema.restaurarCancelar");
+    refetch();
+  }
+  const mb = (b: number) => `${(b / 1024 / 1024).toFixed(2)} MB`;
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-4 px-5 pt-4">
+        <div>
+          <div className="font-semibold">Restaurar uma cópia</div>
+          <p className="text-[13px] text-ink-2">Cópias cifradas (.kgc), manuais e automáticas encontradas neste computador e nas pens.</p>
+        </div>
+        <Button variant="ghost" size="sm" loading={isFetching} onClick={() => refetch()}>
+          <RefreshCw className="size-4" /> Procurar
+        </Button>
+      </div>
+      {data?.pendente && (
+        <div role="status" className="mx-5 mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-accent/40 bg-accent-50 px-4 py-2.5 text-[13px] text-[#7a4f0a]">
+          <ArchiveRestore className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1">
+            Restauro preparado: <b>{data.pendente.empresa}</b> ({data.pendente.documentos} documentos{data.pendente.ultimo_documento ? `, o último de ${dataHora(data.pendente.ultimo_documento)}` : ""}). Feche e volte a abrir o KanGest para o concluir.
+          </span>
+          <Button size="sm" variant="ghost" onClick={cancelar}>Desistir</Button>
+        </div>
+      )}
+      <div className="max-h-72 overflow-auto pt-2">
+        <Table>
+          <tbody>
+            {data?.copias.map((c) => (
+              <tr key={c.caminho}>
+                <Td>
+                  <div className="flex items-center gap-2 font-mono text-[12px]">
+                    {c.nome.toLowerCase().endsWith(".kgc") && <LockKeyhole className="size-3.5 text-brand" aria-label="cifrada" />}
+                    {c.nome}
+                  </div>
+                  <div className="truncate text-[11.5px] text-ink-3" title={c.caminho}>{c.caminho}</div>
+                </Td>
+                <Td className="num whitespace-nowrap text-right text-ink-2">{dataHora(c.modificado)}</Td>
+                <Td className="num text-right text-ink-2">{mb(c.tamanho)}</Td>
+                <Td className="text-right">
+                  <Button size="sm" variant="secondary" onClick={() => setEscolhida(c)}>Restaurar…</Button>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+        {data && !data.copias.length && <p className="py-6 text-center text-ink-3">Nenhuma cópia encontrada.</p>}
+      </div>
+      {escolhida && (
+        <Modal
+          open
+          onClose={fechar}
+          title="Restaurar esta cópia?"
+          width="max-w-md"
+          footer={
+            <Button variant="danger" loading={busy} disabled={!percebi || (cifrada && !senha)} onClick={preparar}>
+              <ArchiveRestore className="size-4" /> Preparar o restauro
+            </Button>
+          }
+        >
+          <div className="space-y-4 text-[13.5px]">
+            <p className="font-mono text-[12.5px]">{escolhida.nome}</p>
+            {cifrada && (
+              <Field label="Senha da cópia">
+                <Input type="password" autoFocus value={senha} onChange={(e) => setSenha(e.target.value)} autoComplete="off" />
+              </Field>
+            )}
+            <label className="flex items-start gap-2 text-ink-2">
+              <input type="checkbox" className="mt-1" checked={percebi} onChange={(e) => setPercebi(e.target.checked)} />
+              <span>
+                Percebo que <b className="text-ink">todos os dados actuais são substituídos</b> pelos da cópia ao reabrir o programa. A base actual fica guardada nas cópias automáticas («antes do restauro»).
+              </span>
+            </label>
+          </div>
+        </Modal>
+      )}
+    </Card>
+  );
+}
+
 function Sistema() {
   const { data, refetch } = useQuery({
     queryKey: ["copias"],
     queryFn: () => call<{ pasta: string; copias: { ficheiro: string; bytes: number }[] }>("sistema.copias"),
   });
   const [busy, setBusy] = useState(false);
+  const [cifrar, setCifrar] = useState(false);
+  const { tem } = useSession();
   async function copiar() {
     setBusy(true);
     try {
@@ -782,14 +945,21 @@ function Sistema() {
             <div className="mb-1 font-semibold">Cópia de segurança</div>
             <p className="text-ink-2">
               Uma cópia automática é feita todos os dias ao abrir o programa (guardam-se as últimas 14). Pode também criar uma cópia manual na pasta Transferências e guardá-la
-              numa pen ou na nuvem.
+              numa pen ou na nuvem — de preferência <b className="text-ink">cifrada com senha</b>: quem a encontrar não lê nada.
             </p>
           </div>
-          <Button loading={busy} onClick={copiar}>
-            <DatabaseBackup className="size-4" /> Copiar agora
-          </Button>
+          <div className="flex shrink-0 flex-col gap-2">
+            <Button loading={busy} onClick={copiar}>
+              <DatabaseBackup className="size-4" /> Copiar agora
+            </Button>
+            <Button variant="secondary" onClick={() => setCifrar(true)}>
+              <LockKeyhole className="size-4" /> Cópia cifrada…
+            </Button>
+          </div>
         </div>
       </Card>
+      {cifrar && <CopiaCifrada onClose={() => setCifrar(false)} />}
+      {tem("sistema.configuracoes") && <Restaurar />}
       <Card>
         <div className="px-5 pt-4 font-semibold">Cópias automáticas</div>
         <div className="px-5 pb-2 text-[12px] text-ink-3" data-selectable>

@@ -3372,3 +3372,72 @@ async fn cofre_segredos_cifrados() {
     st2.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Cópia cifrada com senha e restauro: a cópia lista-se, abre só com a senha e a troca faz-se ao reabrir o programa,
+/// guardando a base que estava em uso.
+#[tokio::test]
+async fn copia_cifrada_e_restauro() {
+    let pasta = std::env::temp_dir().join(format!("kigest-teste-restauro-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let abrir = |pasta: std::path::PathBuf| async move {
+        let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+        let mut st = AppState::new(pool);
+        st.pasta_dados = pasta.clone();
+        st.pasta_exportacao = pasta.join("exportados");
+        std::fs::create_dir_all(&st.pasta_exportacao).unwrap();
+        st.carregar_posto(1).await.unwrap();
+        st
+    };
+    let st = abrir(pasta.clone()).await;
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Restauro, Lda", "nif": "5000000002" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    rpc(&st, "artigos.guardar", json!({ "descricao": "Antes da cópia", "taxa_iva_id": 1, "preco1": 1000 })).await;
+
+    // ---- cópia cifrada ----
+    assert!(rpc_err(&st, "sistema.backupCifrado", json!({ "senha": "curta" })).await.contains("8 caracteres"));
+    let copia = rpc(&st, "sistema.backupCifrado", json!({ "senha": "senha da loja 2026" })).await;
+    let ficheiro = copia["ficheiro"].as_str().unwrap().to_string();
+    assert!(ficheiro.ends_with(".kgc"), "{copia}");
+    let bytes = std::fs::read(&ficheiro).unwrap();
+    assert!(!String::from_utf8_lossy(&bytes).contains("Restauro, Lda"), "o nome da empresa não aparece na cópia");
+    assert!(std::fs::read_dir(&pasta).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().starts_with("copia-a-cifrar")), "sem ficheiros temporários");
+    let lista = rpc(&st, "sistema.copiasRestaurar", Value::Null).await;
+    assert!(lista["copias"].as_array().unwrap().iter().any(|c| c["caminho"] == ficheiro.as_str()), "{lista}");
+    assert_eq!(lista["pendente"], Value::Null);
+
+    // depois da cópia, mais trabalho
+    rpc(&st, "artigos.guardar", json!({ "descricao": "Depois da cópia", "taxa_iva_id": 1, "preco1": 2000 })).await;
+
+    // ---- restaurar: senha errada, ficheiro que não é do KanGest, e a cópia certa ----
+    assert!(rpc_err(&st, "sistema.restaurar", json!({ "caminho": ficheiro })).await.contains("senha"));
+    assert!(rpc_err(&st, "sistema.restaurar", json!({ "caminho": ficheiro, "senha": "outra senha" })).await.contains("Senha errada"));
+    let estranho = pasta.join("exportados").join("kangest-estranho.db");
+    std::fs::write(&estranho, b"isto nao e uma base").unwrap();
+    assert!(rpc_err(&st, "sistema.restaurar", json!({ "caminho": estranho.display().to_string() })).await.contains("não é uma base"));
+    let r = rpc(&st, "sistema.restaurar", json!({ "caminho": ficheiro, "senha": "senha da loja 2026" })).await;
+    assert_eq!(r["copia"]["empresa"], "Restauro, Lda", "{r}");
+    assert_eq!(rpc(&st, "sistema.copiasRestaurar", Value::Null).await["pendente"]["nif"], "5000000002");
+    // desistir e voltar a preparar
+    rpc(&st, "sistema.restaurarCancelar", Value::Null).await;
+    assert_eq!(rpc(&st, "sistema.copiasRestaurar", Value::Null).await["pendente"], Value::Null);
+    rpc(&st, "sistema.restaurar", json!({ "caminho": ficheiro, "senha": "senha da loja 2026" })).await;
+
+    // ---- reabrir o programa: a troca faz-se antes de abrir a base ----
+    st.pool.close().await;
+    drop(st);
+    let antes = super::sistema::aplicar_restauro(&pasta).await.unwrap().expect("restauro feito");
+    assert!(antes.exists());
+    assert!(super::sistema::aplicar_restauro(&pasta).await.unwrap().is_none(), "só uma vez");
+    let st = abrir(pasta.clone()).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let nomes: Vec<String> = sqlx::query_scalar("SELECT descricao FROM artigos ORDER BY id").fetch_all(&st.pool).await.unwrap();
+    assert!(nomes.contains(&"Antes da cópia".to_string()) && !nomes.contains(&"Depois da cópia".to_string()), "{nomes:?}");
+    // a base que estava em uso ficou guardada, com o trabalho feito depois da cópia
+    let pool = db::abrir(&antes).await.unwrap();
+    let guardados: Vec<String> = sqlx::query_scalar("SELECT descricao FROM artigos").fetch_all(&pool).await.unwrap();
+    assert!(guardados.contains(&"Depois da cópia".to_string()), "{guardados:?}");
+    pool.close().await;
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

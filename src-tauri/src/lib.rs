@@ -53,6 +53,12 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let caminho = dir.join("kigest.db");
+            // restauro de uma cópia preparado antes de fechar: a troca faz-se agora, com a base ainda fechada
+            match tauri::async_runtime::block_on(services::sistema::aplicar_restauro(&dir)) {
+                Ok(Some(antes)) => eprintln!("Cópia restaurada; a base anterior ficou em {}", antes.display()),
+                Ok(None) => {}
+                Err(e) => eprintln!("Restauro da cópia falhou (a base actual continua em uso): {e}"),
+            }
             let pool = tauri::async_runtime::block_on(db::abrir(&caminho))?;
             let mut estado = AppState::new(pool);
             estado.pasta_dados = dir.clone();
