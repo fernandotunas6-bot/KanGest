@@ -21,12 +21,10 @@ use crate::error::{AppError, AppResult};
 pub const CHAVE_CONFIG: &str = "agt.chave_privada";
 pub const CERTIFICADO_CONFIG: &str = "agt.numero_certificado";
 
+/// Chave de assinatura dos documentos. Guardada cifrada na base (`crate::cofre`).
 pub async fn chave(pool: &SqlitePool) -> AppResult<RsaPrivateKey> {
-    let pem: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?")
-        .bind(CHAVE_CONFIG)
-        .fetch_optional(pool)
-        .await?;
-    if let Some(pem) = pem {
+    let pem = crate::cofre::ler_config(pool, CHAVE_CONFIG).await?;
+    if let Some(pem) = pem.filter(|p| !p.trim().is_empty()) {
         return RsaPrivateKey::from_pkcs8_pem(&pem).map_err(|e| AppError::msg(format!("Chave AGT inválida: {e}")));
     }
     let chave = tokio::task::spawn_blocking(|| RsaPrivateKey::new(&mut rand::thread_rng(), 1024))
@@ -37,9 +35,9 @@ pub async fn chave(pool: &SqlitePool) -> AppResult<RsaPrivateKey> {
         .to_pkcs8_pem(LineEnding::LF)
         .map_err(|e| AppError::msg(e.to_string()))?
         .to_string();
-    sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?)")
+    sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor")
         .bind(CHAVE_CONFIG)
-        .bind(pem)
+        .bind(crate::cofre::para_config(pool, CHAVE_CONFIG, &pem).await?)
         .execute(pool)
         .await?;
     Ok(chave)

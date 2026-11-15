@@ -3296,3 +3296,79 @@ async fn webhooks_api() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Cofre: os segredos da base (chave AGT, Facturação Electrónica, avisos automáticos) ficam cifrados e continuam a servir.
+#[tokio::test]
+async fn cofre_segredos_cifrados() {
+    use crate::cofre;
+    let pasta = std::env::temp_dir().join(format!("kigest-teste-cofre-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Cofre, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let bruto = |chave: &'static str| {
+        let pool = st.pool.clone();
+        async move { sqlx::query_scalar::<_, String>("SELECT valor FROM config WHERE chave = ?").bind(chave).fetch_one(&pool).await.unwrap() }
+    };
+
+    // a chave de assinatura AGT, gerada ao criar a empresa, está cifrada na base
+    let guardada = bruto("agt.chave_privada").await;
+    assert!(guardada.starts_with("KGC1.") && !guardada.contains("PRIVATE KEY"), "{guardada}");
+    // e continua a assinar os documentos
+    let artigo = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    let venda = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    let hash = venda["documento"]["hash"].as_str().unwrap_or_default().to_string();
+    assert!(hash.len() > 100, "documento assinado: {venda}");
+
+    // uma base de uma versão anterior (chave em texto) lê-se na mesma e é cifrada no arranque
+    let pem = cofre::ler_config(&st.pool, "agt.chave_privada").await.unwrap().unwrap();
+    assert!(pem.contains("BEGIN PRIVATE KEY"));
+    sqlx::query("UPDATE config SET valor = ? WHERE chave = 'agt.chave_privada'").bind(&pem).execute(&st.pool).await.unwrap();
+    sqlx::query("INSERT INTO config (chave, valor) VALUES ('fe.senha', 'senha-antiga') ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").execute(&st.pool).await.unwrap();
+    assert_eq!(cofre::ler_config(&st.pool, "agt.chave_privada").await.unwrap().unwrap(), pem);
+    assert_eq!(cofre::migrar(&st.pool).await.unwrap(), 2);
+    assert_eq!(cofre::migrar(&st.pool).await.unwrap(), 0, "só uma vez");
+    assert!(bruto("agt.chave_privada").await.starts_with("KGC1."));
+    assert!(bruto("fe.senha").await.starts_with("KGC1."));
+    assert_eq!(cofre::ler_config(&st.pool, "fe.senha").await.unwrap().unwrap(), "senha-antiga");
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+
+    // cada valor só abre no sítio onde foi guardado: a chave AGT copiada para a senha da FE não se lê
+    sqlx::query("UPDATE config SET valor = (SELECT valor FROM config WHERE chave = 'agt.chave_privada') WHERE chave = 'fe.senha'").execute(&st.pool).await.unwrap();
+    let erro = cofre::ler_config(&st.pool, "fe.senha").await.unwrap_err().to_string();
+    assert!(erro.contains("não abre"), "{erro}");
+    // e a base de outra empresa (outro sal) também não abre os segredos desta
+    let cifrado = cofre::para_config(&st.pool, "fe.senha", "123").await.unwrap();
+    sqlx::query("UPDATE config SET valor = 'outro-sal' WHERE chave = 'cofre.sal'").execute(&st.pool).await.unwrap();
+    assert!(cofre::decifrar(&st.pool, "config:fe.senha", &cifrado).await.is_err());
+
+    // avisos automáticos: o segredo vai cifrado na base e aparece em claro só a quem gere a API
+    let st2 = {
+        let pool = db::abrir(&pasta.join("outra.db")).await.unwrap();
+        let mut s = AppState::new(pool);
+        s.pasta_dados = pasta.clone();
+        s.carregar_posto(1).await.unwrap();
+        s
+    };
+    rpc(&st2, "setup.inicializar", json!({ "empresa": { "nome": "Avisos, Lda", "nif": "5000000001" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st2, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let w = rpc(&st2, "api.webhookGuardar", json!({ "nome": "Loja", "url": "https://loja.exemplo/avisos", "eventos": ["documento.emitido"] })).await;
+    let segredo = w["segredo"].as_str().unwrap().to_string();
+    let na_base: String = sqlx::query_scalar("SELECT segredo FROM api_webhooks WHERE id = ?").bind(w["id"].as_i64()).fetch_one(&st2.pool).await.unwrap();
+    assert!(na_base.starts_with("KGC1.") && !na_base.contains(&segredo));
+    let lista = rpc(&st2, "api.webhooks", Value::Null).await;
+    assert_eq!(lista["webhooks"][0]["segredo"], segredo.as_str());
+    // segredo antigo, em texto: cifrado no arranque, sem mudar de valor
+    sqlx::query("UPDATE api_webhooks SET segredo = 'whsec_antigo'").execute(&st2.pool).await.unwrap();
+    assert_eq!(cofre::migrar(&st2.pool).await.unwrap(), 1);
+    assert_eq!(rpc(&st2, "api.webhooks", Value::Null).await["webhooks"][0]["segredo"], "whsec_antigo");
+
+    st.pool.close().await;
+    st2.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

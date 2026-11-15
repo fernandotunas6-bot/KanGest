@@ -66,12 +66,12 @@ pub async fn cfg(p: &SqlitePool) -> AppResult<Cfg> {
         ambiente: Some(g("fe.ambiente").await?).filter(|a| a == "PROD").unwrap_or_else(|| "HML".into()),
         desde: g("fe.desde").await?,
         utilizador: g("fe.utilizador").await?,
-        senha: g("fe.senha").await?,
+        senha: crate::cofre::ler_config(p, "fe.senha").await?.unwrap_or_default(),
         numero_validacao: g("fe.numero_validacao").await?,
         produto: Some(g("fe.produto").await?).filter(|x| !x.is_empty()).unwrap_or_else(|| "KanGest".into()),
         estabelecimento: Some(g("fe.estabelecimento").await?).filter(|x| !x.is_empty()).unwrap_or_else(|| "SEDE".into()),
-        chave_software: valor(p, "fe.chave_software").await?.filter(|x| !x.is_empty()),
-        chave_contribuinte: valor(p, "fe.chave_contribuinte").await?.filter(|x| !x.is_empty()),
+        chave_software: crate::cofre::ler_config(p, "fe.chave_software").await?.filter(|x| !x.is_empty()),
+        chave_contribuinte: crate::cofre::ler_config(p, "fe.chave_contribuinte").await?.filter(|x| !x.is_empty()),
         nif: nif.unwrap_or_default(),
         endereco: g("fe.endereco").await?,
     })
@@ -617,14 +617,16 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
     if let Some(p) = g.produto.as_deref().map(str::trim).filter(|x| !x.is_empty()) {
         pares.push(("fe.produto", p.to_string()));
     }
+    // senha e chaves privadas: cifradas no cofre
+    let cofre = |k: &'static str, v: String| async move { crate::cofre::para_config(&st.pool, k, &v).await.map(|c| (k, c)) };
     if let Some(x) = g.senha.filter(|x| !x.is_empty()) {
-        pares.push(("fe.senha", x));
+        pares.push(cofre("fe.senha", x).await?);
     }
     if let Some(x) = g.chave_software.map(|x| x.trim().to_string()).filter(|x| !x.is_empty()) {
-        pares.push(("fe.chave_software", x));
+        pares.push(cofre("fe.chave_software", x).await?);
     }
     if let Some(x) = g.chave_contribuinte.map(|x| x.trim().to_string()).filter(|x| !x.is_empty()) {
-        pares.push(("fe.chave_contribuinte", x));
+        pares.push(cofre("fe.chave_contribuinte", x).await?);
     }
     let atual = cfg(&st.pool).await?;
     if g.ativo {

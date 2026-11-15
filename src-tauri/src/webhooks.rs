@@ -211,7 +211,7 @@ async fn entregar(p: &SqlitePool, d: &SqliteRow) -> AppResult<bool> {
         ("Content-Type", "application/json; charset=utf-8".into()),
         ("X-KanGest-Evento", tipo.clone()),
         ("X-KanGest-Entrega", id.to_string()),
-        ("X-KanGest-Assinatura", assinatura(&d.get::<String, _>("segredo"), agora_s(), &corpo)),
+        ("X-KanGest-Assinatura", assinatura(&crate::cofre::decifrar(p, crate::cofre::WEBHOOK, &d.get::<String, _>("segredo")).await?, agora_s(), &corpo)),
     ];
     let url: String = d.get("url");
     let r = tokio::task::spawn_blocking(move || crate::http::pedido("POST", &url, &cabecalhos, Some(corpo.as_bytes()), Duration::from_secs(15))).await;
@@ -272,6 +272,8 @@ pub async fn listar(st: &AppState) -> AppResult<Value> {
     for w in webhooks.as_array_mut().into_iter().flatten() {
         w["eventos"] = serde_json::from_str(w["eventos"].as_str().unwrap_or("[]")).unwrap_or(json!([]));
         w["ativo"] = json!(w["ativo"].as_i64() == Some(1));
+        // guardado cifrado; o administrador pode vê-lo para configurar o sistema que recebe os avisos
+        w["segredo"] = json!(crate::cofre::decifrar(p, crate::cofre::WEBHOOK, w["segredo"].as_str().unwrap_or_default()).await.unwrap_or_default());
     }
     Ok(json!({
         "webhooks": webhooks,
@@ -336,7 +338,7 @@ pub async fn guardar(st: &AppState, w: WebhookIn) -> AppResult<Value> {
                 .bind(nome)
                 .bind(url)
                 .bind(&lista)
-                .bind(&segredo)
+                .bind(crate::cofre::cifrar(&st.pool, crate::cofre::WEBHOOK, &segredo).await?)
                 .bind(ativo)
                 .execute(&st.pool)
                 .await?
@@ -370,7 +372,8 @@ pub async fn apagar(st: &AppState, i: IdIn) -> AppResult<Value> {
 pub async fn renovar_segredo(st: &AppState, i: IdIn) -> AppResult<Value> {
     let s = st.exigir_perm("sistema.api")?;
     let segredo = gerar_segredo();
-    let r = sqlx::query("UPDATE api_webhooks SET segredo = ? WHERE id = ?").bind(&segredo).bind(i.id).execute(&st.pool).await?;
+    let cifrado = crate::cofre::cifrar(&st.pool, crate::cofre::WEBHOOK, &segredo).await?;
+    let r = sqlx::query("UPDATE api_webhooks SET segredo = ? WHERE id = ?").bind(cifrado).bind(i.id).execute(&st.pool).await?;
     if r.rows_affected() == 0 {
         return Err(AppError::NaoEncontrado);
     }

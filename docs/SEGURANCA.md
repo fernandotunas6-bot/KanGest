@@ -7,6 +7,7 @@ KanGest ou os seus dados dê muito trabalho, deixe rasto e não funcione às ceg
 | O quê | Protecção | Onde |
 |---|---|---|
 | Ligação entre os postos e o servidor (rede local) | AES-256-GCM, chave derivada da chave de rede (Argon2id), contra repetições | [REDE.md](REDE.md#cifra-da-ligação) |
+| Segredos na base (chave de assinatura AGT, senha e chaves da Facturação Electrónica, segredos dos avisos) | AES-256-GCM (cofre) | abaixo, §4 |
 | Datas da licença na base (início da experiência, última data vista) | Selo HMAC-SHA256 com chave fora da base | abaixo, §1 |
 | Executável do KanGest | Selo de integridade Ed25519 posto na compilação oficial | abaixo, §2 |
 | Depuradores (engenharia reversa com o programa a correr) | A emissão pára com um depurador ligado | abaixo, §3 |
@@ -72,15 +73,32 @@ Nas compilações oficiais, se houver um depurador ligado ao KanGest (x64dbg, Wi
 pára com a mensagem «Há uma ferramenta de depuração ligada ao KanGest» e volta quando a ferramenta é fechada. É a forma
 mais comum de estudar o programa a correr para descobrir onde está a verificação da licença.
 
-## 4. Limites (o que estas protecções não fazem)
+## 4. Segredos guardados na base (cofre)
+
+A chave privada que assina os documentos (AGT), a senha e as duas chaves privadas da Facturação Electrónica e os
+segredos dos avisos automáticos estavam em texto na base. Agora vão cifrados com AES-256-GCM (`src-tauri/src/cofre.rs`):
+quem abre a base com um editor de SQLite, ou lê uma cópia de segurança, vê `KGC1.…` em vez da chave ou da senha.
+
+- A chave da cifra junta uma chave do programa (que não está inteira no executável) e o sal da própria base
+  (`cofre.sal`). Por isso a base continua a abrir noutro computador com o KanGest (cópia de segurança restaurada,
+  computador novo) e não precisa de nenhuma senha no dia-a-dia.
+- Cada valor só abre no campo onde foi guardado: copiar a chave AGT para o campo da senha não a revela.
+- As bases de versões anteriores são cifradas no primeiro arranque desta versão. **Não volte depois a uma versão
+  anterior**: ela não leria os segredos cifrados (a chave AGT e as da Facturação Electrónica).
+
+## 5. Limites (o que estas protecções não fazem)
 
 - **Quem altera o executável também pode retirar as verificações.** O selo, o selo da licença e a detecção de
   depurador obrigam a perceber e alterar várias partes do programa compilado (Rust optimizado, sem símbolos), mas não
   o tornam impossível. O que realmente não se falsifica são as licenças (só o produtor tem a chave privada) e a cadeia
   de assinaturas dos documentos.
-- **A base de dados não está cifrada.** Quem tem acesso ao computador lê a base (`kigest.db`). As cópias de segurança
-  devem ser guardadas com o mesmo cuidado.
-- **A chave de assinatura dos documentos (AGT) está na base**, gerada na primeira emissão, até haver o certificado do
-  produtor. Com o certificado, a chave do produtor passa a ir no programa e merece o mesmo cuidado que a chave do selo.
+- **O resto da base não está cifrado.** Os segredos vão no cofre, mas os documentos, os clientes e os artigos lêem-se
+  com um editor de SQLite por quem tiver acesso ao computador. As cópias de segurança devem ser guardadas com o mesmo
+  cuidado. Cifrar a base inteira (SQLCipher) obriga a uma senha ou a uma chave guardada no sistema (DPAPI no Windows,
+  Porta-chaves no macOS) e a um cuidado especial ao restaurar noutro computador: fica como passo seguinte.
+- **O cofre não resiste a quem estuda o programa**: a chave do programa está no executável, embora partida. Contra
+  isso só uma senha que não está no computador — é o caso das cópias de segurança cifradas com senha.
+- **A chave de assinatura dos documentos (AGT)** é gerada na base até haver o certificado do produtor. Com o
+  certificado, a chave do produtor passa a ir no programa e merece o mesmo cuidado que a chave do selo.
 - **Uma base nova recomeça a experiência** se não estiver registada no servidor de licenças: o registo online prende a
   experiência ao NIF (uma vez por NIF), e é essa a defesa.

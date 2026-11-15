@@ -160,6 +160,8 @@ pub async fn agt_importar_chave(st: &AppState, c: ChaveIn) -> AppResult<Value> {
         return Err(AppError::msg("A chave tem de ter pelo menos 1024 bits."));
     }
     let pkcs8 = chave.to_pkcs8_pem(LineEnding::LF).map_err(|e| AppError::msg(e.to_string()))?.to_string();
+    // cifrada no cofre (antes da transacção: o cofre lê a base)
+    let pkcs8 = crate::cofre::para_config(&st.pool, agt::CHAVE_CONFIG, &pkcs8).await?;
     let agora = crate::db::agora();
     let mut tx = st.pool.begin().await?;
     for (k, v) in [(agt::CHAVE_CONFIG, pkcs8.as_str()), ("agt.chave_importada_em", agora.as_str())] {

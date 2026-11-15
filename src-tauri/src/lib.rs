@@ -1,5 +1,6 @@
 mod agt;
 pub mod api;
+mod cofre;
 mod db;
 mod error;
 pub mod http;
@@ -57,6 +58,10 @@ pub fn run() {
             estado.pasta_dados = dir.clone();
             estado.pasta_exportacao = app.path().download_dir().unwrap_or_else(|_| dir.clone());
             tauri::async_runtime::block_on(async {
+                // segredos de versões anteriores, ainda em texto, passam a cifrados
+                if let Err(e) = cofre::migrar(&estado.pool).await {
+                    eprintln!("Cofre: não foi possível cifrar os segredos antigos: {e}");
+                }
                 estado.carregar_posto(posto_local(&dir)).await?;
                 // Cópia de segurança automática diária (não impede o arranque se falhar).
                 if let Err(e) = services::sistema::backup_automatico(&estado.pool, &dir).await {
