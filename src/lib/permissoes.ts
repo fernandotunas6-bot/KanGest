@@ -81,6 +81,7 @@ export const GRUPOS_PERMISSOES: { grupo: string; itens: { id: string; label: str
       { id: "sistema.backup", label: "Cópia de segurança" },
       { id: "sistema.atualizacoes", label: "Actualizações" },
       { id: "sistema.importar", label: "Importar dados do KIGEST" },
+      { id: "sistema.api", label: "API e integrações (chaves de acesso)" },
     ],
   },
 ];

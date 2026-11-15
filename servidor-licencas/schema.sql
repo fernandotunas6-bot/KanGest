@@ -84,3 +84,10 @@ CREATE TABLE IF NOT EXISTS pagamentos (
     pago_ate TEXT NOT NULL,           -- a assinatura ficou paga até este dia
     registado_em TEXT NOT NULL
 );
+
+-- Limite de pedidos por IP e por hora (registo, confirmação, renovação, tentativas falhadas no painel).
+CREATE TABLE IF NOT EXISTS limites (
+    chave TEXT PRIMARY KEY,           -- «registo:41.63.1.2»
+    janela TEXT NOT NULL,             -- hora UTC (AAAA-MM-DDTHH)
+    n INTEGER NOT NULL DEFAULT 0
+);

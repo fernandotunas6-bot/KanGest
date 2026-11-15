@@ -10,7 +10,10 @@
 //   POST /admin/api/pagamento · emitir · plano · cliente · maquina · codigo
 //
 // Variáveis: DB (D1), CHAVE_PRIVADA (secreto, PEM pkcs8 Ed25519), ADMIN_TOKEN (secreto),
-//            RESEND_API_KEY + EMAIL_REMETENTE (opcionais: sem eles, o código aparece no painel).
+//            RESEND_API_KEY + EMAIL_REMETENTE (opcionais: sem eles, o código aparece no painel),
+//            ACCESS_EQUIPA + ACCESS_AUD (opcionais: o painel só responde a quem passou pelo Cloudflare Access).
+// Protecção: limite de pedidos por IP e por hora (tabela «limites»), Cloudflare Access à frente do painel,
+//            cabeçalhos de segurança em todas as respostas.
 // As licenças têm o mesmo formato do scripts/licencas/kangest-licencas.mjs: «KG1.<json base64url>.<assinatura>».
 import { PAINEL } from "./painel.js";
 
@@ -69,6 +72,99 @@ class Falha extends Error {
     this.estado = estado;
   }
 }
+
+// ------------------------------------------------------------------ protecção
+
+/** Pedidos por IP e por hora. O registo envia emails; a confirmação testa códigos; o painel conta só as falhas. */
+export const LIMITES = { registo: 20, confirmar: 60, renovar: 600, admin: 30 };
+const janelaHora = () => new Date().toISOString().slice(0, 13);
+
+/** Conta um pedido do IP (CF-Connecting-IP) e recusa acima do limite. Sem IP (testes locais), não limita. */
+async function contar(env, req, tipo) {
+  const ip = req.headers.get("cf-connecting-ip");
+  if (!ip) return 0;
+  const r = await env.DB.prepare(
+    `INSERT INTO limites (chave, janela, n) VALUES (?1, ?2, 1)
+     ON CONFLICT(chave) DO UPDATE SET n = CASE WHEN janela = ?2 THEN n + 1 ELSE 1 END, janela = ?2
+     RETURNING n`,
+  ).bind(`${tipo}:${ip}`, janelaHora()).first();
+  // de vez em quando, esquece as horas passadas
+  if (Math.random() < 0.02) await env.DB.prepare("DELETE FROM limites WHERE janela < ?").bind(janelaHora()).run();
+  return r?.n ?? 0;
+}
+
+async function limitar(env, req, tipo) {
+  if ((await contar(env, req, tipo)) > LIMITES[tipo]) throw new Falha("Demasiados pedidos deste endereço. Tente daqui a uma hora.", 429);
+}
+
+/** O IP já passou o limite (sem contar este pedido)? */
+async function excedido(env, req, tipo) {
+  const ip = req.headers.get("cf-connecting-ip");
+  if (!ip) return false;
+  const r = await env.DB.prepare("SELECT n FROM limites WHERE chave = ? AND janela = ?").bind(`${tipo}:${ip}`, janelaHora()).first();
+  return (r?.n ?? 0) >= LIMITES[tipo];
+}
+
+const b64urlBytes = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+let chavesAccess = null; // { equipa, quando, chaves: Map(kid → CryptoKey) }
+let renovadasEm = 0;
+
+/** Chaves públicas do Cloudflare Access da equipa (uma hora em memória). */
+async function chavesDoAccess(env, renovar = false) {
+  const equipa = env.ACCESS_EQUIPA;
+  if (!renovar && chavesAccess?.equipa === equipa && Date.now() - chavesAccess.quando < 3600_000) return chavesAccess.chaves;
+  const r = await fetch(`https://${equipa}/cdn-cgi/access/certs`);
+  if (!r.ok) throw new Falha("Não foi possível confirmar o Cloudflare Access.", 503);
+  const { keys = [] } = await r.json();
+  const chaves = new Map();
+  for (const k of keys) {
+    if (k.kty !== "RSA") continue;
+    chaves.set(k.kid ?? "", await crypto.subtle.importKey("jwk", { kty: "RSA", n: k.n, e: k.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]));
+  }
+  chavesAccess = { equipa, quando: Date.now(), chaves };
+  return chaves;
+}
+
+/**
+ * Cloudflare Access à frente do painel: com ACCESS_EQUIPA e ACCESS_AUD, o pedido tem de trazer o JWT do Access
+ * (cabeçalho Cf-Access-Jwt-Assertion ou cookie CF_Authorization) assinado pela equipa, para esta aplicação e válido.
+ */
+export async function confirmarAccess(env, req) {
+  if (!env.ACCESS_EQUIPA || !env.ACCESS_AUD) return true;
+  const cookie = (req.headers.get("cookie") ?? "").split(";").map((x) => x.trim()).find((x) => x.startsWith("CF_Authorization="));
+  const token = req.headers.get("cf-access-jwt-assertion") ?? cookie?.slice("CF_Authorization=".length);
+  if (!token) return false;
+  try {
+    const [h, p, s, resto] = token.split(".");
+    if (!h || !p || !s || resto !== undefined) return false;
+    const cab = JSON.parse(new TextDecoder().decode(b64urlBytes(h)));
+    if (cab.alg !== "RS256") return false;
+    let chaves = await chavesDoAccess(env);
+    // chave nova (a Cloudflare roda-as): volta a buscá-las, no máximo de 5 em 5 minutos
+    if (!chaves.has(cab.kid ?? "") && Date.now() - renovadasEm > 300_000) {
+      renovadasEm = Date.now();
+      chaves = await chavesDoAccess(env, true);
+    }
+    const chave = chaves.get(cab.kid ?? "");
+    if (!chave || !(await crypto.subtle.verify("RSASSA-PKCS1-v1_5", chave, b64urlBytes(s), enc.encode(`${h}.${p}`)))) return false;
+    const c = JSON.parse(new TextDecoder().decode(b64urlBytes(p)));
+    const aud = Array.isArray(c.aud) ? c.aud : [c.aud];
+    const agoraS = Date.now() / 1000;
+    return aud.includes(env.ACCESS_AUD) && c.iss === `https://${env.ACCESS_EQUIPA}` && typeof c.exp === "number" && c.exp + 60 > agoraS && !(c.nbf > agoraS + 60);
+  } catch (e) {
+    if (e instanceof Falha) throw e;
+    return false;
+  }
+}
+
+/** Cabeçalhos de segurança em todas as respostas. */
+const SEGURANCA = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
+  "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()",
+  "cross-origin-opener-policy": "same-origin",
+};
 
 const limpaNif = (v) => String(v ?? "").replace(/[^0-9a-z]/gi, "").toUpperCase();
 const limpaMaquina = (v) => String(v ?? "").trim().toUpperCase();
@@ -455,10 +551,27 @@ async function tratar(req, env) {
   if (m === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (caminho === "/" && m === "GET") return json({ servico: "Licenças do KanGest", versao: VERSAO });
   if (caminho === "/v1/planos" && m === "GET") return json(await planosPublicos(env), 200, { ...CORS, "cache-control": "public, max-age=300" });
-  if (m === "POST" && caminho === "/v1/registo") return json(await registo(env, await corpoJson(req)));
-  if (m === "POST" && caminho === "/v1/confirmar") return json(await confirmar(env, await corpoJson(req)));
-  if (m === "POST" && caminho === "/v1/renovar") return json(await renovar(env, await corpoJson(req)));
+  if (m === "POST" && caminho === "/v1/registo") {
+    await limitar(env, req, "registo");
+    return json(await registo(env, await corpoJson(req)));
+  }
+  if (m === "POST" && caminho === "/v1/confirmar") {
+    await limitar(env, req, "confirmar");
+    return json(await confirmar(env, await corpoJson(req)));
+  }
+  if (m === "POST" && caminho === "/v1/renovar") {
+    await limitar(env, req, "renovar");
+    return json(await renovar(env, await corpoJson(req)));
+  }
 
+  // painel: Cloudflare Access (se configurado) e, na API, o token; as falhas contam por IP
+  if (caminho === "/admin" || caminho.startsWith("/admin/")) {
+    if (await excedido(env, req, "admin")) return erro("Demasiadas tentativas falhadas deste endereço. Tente daqui a uma hora.", 429);
+    if (!(await confirmarAccess(env, req))) {
+      await contar(env, req, "admin");
+      return erro("Acesso reservado: entre pelo Cloudflare Access.", 403);
+    }
+  }
   if (caminho === "/admin" && m === "GET") {
     return new Response(PAINEL, {
       headers: {
@@ -471,7 +584,10 @@ async function tratar(req, env) {
     });
   }
   if (caminho.startsWith("/admin/api/")) {
-    if (!autorizado(env, req)) return erro("Acesso negado.", 401);
+    if (!autorizado(env, req)) {
+      await contar(env, req, "admin");
+      return erro("Acesso negado.", 401);
+    }
     const accao = caminho.slice("/admin/api/".length);
     if (m === "GET" && accao === "resumo") return json(await resumo(env));
     if (m === "GET" && accao === "cliente") return json(await fichaCliente(env, url.searchParams.get("nif")));
@@ -484,14 +600,21 @@ async function tratar(req, env) {
   return erro("Não encontrado.", 404);
 }
 
+async function responder(req, env) {
+  try {
+    return await tratar(req, env);
+  } catch (e) {
+    if (e instanceof Falha) return erro(e.message, e.estado);
+    console.error(e);
+    return erro("Erro interno do servidor de licenças. Tente mais tarde.", 500);
+  }
+}
+
 export default {
   async fetch(req, env) {
-    try {
-      return await tratar(req, env);
-    } catch (e) {
-      if (e instanceof Falha) return erro(e.message, e.estado);
-      console.error(e);
-      return erro("Erro interno do servidor de licenças. Tente mais tarde.", 500);
-    }
+    const r = await responder(req, env);
+    const h = new Headers(r.headers);
+    for (const [k, v] of Object.entries(SEGURANCA)) if (!h.has(k)) h.set(k, v);
+    return new Response(r.body, { status: r.status, statusText: r.statusText, headers: h });
   },
 };

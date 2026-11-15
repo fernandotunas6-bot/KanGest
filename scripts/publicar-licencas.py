@@ -2,6 +2,7 @@
 """Publica o servidor de licenças (servidor-licencas/) no Cloudflare Workers + D1, sem o wrangler.
 
     CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… python3 scripts/publicar-licencas.py [--segredos] [--email-api CHAVE --remetente "KanGest <licencas@dominio>"]
+        [--access-equipa empresa.cloudflareaccess.com --access-aud <AUD>]   (Cloudflare Access à frente do painel; docs/CLOUDFLARE.md)
 
 Na primeira vez: cria a base D1 «kangest-licencas», aplica o schema.sql, envia o Worker com os segredos e liga o
 endereço *.workers.dev. Nas seguintes: aplica o schema (só cria o que falta) e envia o código, mantendo os segredos.
@@ -110,6 +111,13 @@ def main():
         segredos["RESEND_API_KEY"] = opc("--email-api")
     if opc("--remetente"):
         segredos["EMAIL_REMETENTE"] = opc("--remetente")
+    # Cloudflare Access à frente do painel /admin (docs/CLOUDFLARE.md): domínio da equipa e AUD da aplicação
+    if opc("--access-equipa") is not None or opc("--access-aud") is not None:
+        equipa, aud = (opc("--access-equipa") or "").strip(), (opc("--access-aud") or "").strip()
+        if bool(equipa) != bool(aud):
+            sys.exit("Indique --access-equipa e --access-aud juntos.")
+        segredos["ACCESS_EQUIPA"] = equipa
+        segredos["ACCESS_AUD"] = aud
     for nome, valor in segredos.items():
         api("PUT", f"/accounts/{conta}/workers/scripts/{NOME}/secrets", token, {"name": nome, "text": valor, "type": "secret_text"})
     if segredos:

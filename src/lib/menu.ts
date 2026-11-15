@@ -166,6 +166,7 @@ export const MENU: GrupoMenu[] = [
       { label: "Utilizadores e Permissões", to: "/utilizadores", perm: "sistema.utilizadores" },
       { label: "Registo de Acessos e Auditoria", to: "/utilizadores?vista=acessos", perm: "sistema.auditoria" },
       { label: "Facturação Electrónica (AGT)", to: "/facturacao-electronica", perm: "sistema.fe" },
+      { label: "API e Integrações", to: "/integracoes", perm: "sistema.api" },
       { label: "Documentos (Parametrização)", to: "/parametrizacao?vista=documentos", perm: "sistema.parametrizacao" },
       { label: "Opções de Venda", to: "/parametrizacao?vista=venda", perm: "sistema.parametrizacao" },
       { label: "Definição de Faturas e Recibos", to: "/parametrizacao?vista=impresso", perm: "sistema.parametrizacao" },

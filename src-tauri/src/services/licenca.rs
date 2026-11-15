@@ -150,7 +150,7 @@ fn so_algarismos(s: &str) -> String {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Estado {
-    /// EXPERIENCIA · ACTIVA · TOLERANCIA · EXPIRADA · RELOGIO · INVALIDA
+    /// EXPERIENCIA · ACTIVA · TOLERANCIA · EXPIRADA · RELOGIO · INVALIDA · ALTERADO · DEPURADOR
     pub modo: &'static str,
     pub pode_emitir: bool,
     /// Dias que faltam até deixar de poder emitir (0 quando já não pode).
@@ -172,16 +172,28 @@ pub struct Estado {
     pub sincronizada_em: Option<String>,
     /// Email usado no registo.
     pub email_registo: Option<String>,
+    /// Módulos extra da licença (ex.: «api» acrescenta a API de integração aos planos Essencial e Comércio).
+    pub modulos: Vec<String>,
+    /// Selo de integridade do executável: VALIDO · SEM_SELO (compilação não oficial) · A_CONFIRMAR · ALTERADO.
+    pub selo: &'static str,
 }
 
-/// Data de instalação (o início do período de experiência). Nas bases antigas, conta a partir de hoje.
-async fn instalada_em(p: &SqlitePool) -> AppResult<NaiveDate> {
-    if let Some(d) = cfg_ler(p, "licenca.instalada_em").await?.and_then(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()) {
-        return Ok(d);
+/// Módulo da licença que acrescenta a API de integração aos planos que não a incluem.
+pub const MODULO_API: &str = "api";
+
+/// A API de integração faz parte do plano Empresa e do período de experiência; nos planos Essencial e Comércio
+/// acrescenta-se com o módulo «api» na licença. O erro traz a explicação para o ecrã e para quem chama a API.
+pub fn api_incluida(e: &Estado) -> Result<(), String> {
+    if matches!(e.modo, "RELOGIO" | "ALTERADO" | "DEPURADOR") {
+        return Err(e.mensagem.clone());
     }
-    let hoje = db::hoje();
-    cfg_gravar(p, "licenca.instalada_em", &hoje).await?;
-    Ok(NaiveDate::parse_from_str(&hoje, "%Y-%m-%d").expect("data de hoje"))
+    if matches!(e.plano.as_str(), "EXPERIENCIA" | "EMPRESA") || e.modulos.iter().any(|m| m.eq_ignore_ascii_case(MODULO_API)) {
+        return Ok(());
+    }
+    Err(format!(
+        "A API de integração faz parte do plano Empresa (o desta licença é {}). Peça a mudança de plano ou o módulo API em Sistema → Licença e Assinatura.",
+        nome_plano(&e.plano)
+    ))
 }
 
 /// Marca o início da experiência ao criar a empresa.
@@ -189,19 +201,132 @@ pub async fn registar_instalacao(p: &SqlitePool) -> AppResult<()> {
     cfg_gravar(p, "licenca.instalada_em", &db::hoje()).await
 }
 
-/// O relógio só pode andar para a frente: guarda a data mais recente vista e detecta um atraso grande.
-async fn relogio_atrasado(p: &SqlitePool) -> AppResult<Option<String>> {
-    let agora_txt = db::agora();
-    let agora = NaiveDateTime::parse_from_str(&agora_txt, "%Y-%m-%dT%H:%M:%S").expect("data de agora");
-    let visto = cfg_ler(p, "licenca.ultimo_visto").await?.and_then(|v| NaiveDateTime::parse_from_str(&v, "%Y-%m-%dT%H:%M:%S").ok());
-    match visto {
-        Some(v) if agora < v - Duration::hours(HORAS_RELOGIO) => Ok(Some(v.format("%d/%m/%Y %H:%M").to_string())),
-        Some(v) if agora <= v => Ok(None),
-        _ => {
-            cfg_gravar(p, "licenca.ultimo_visto", &agora_txt).await?;
-            Ok(None)
+// ------------------------------------------------------------------ selo dos dados da licença
+//
+// O início da experiência e a data mais recente vista no relógio ficam na tabela `config` e também seladas (HMAC-SHA256)
+// em `licenca.selo`, com uma chave que não está na base. Mexer à mão na tabela só pode encurtar a experiência ou tornar
+// o relógio mais exigente: o selo prevalece. Se o selo for alterado ou apagado depois de criado, valem os registos da
+// própria base (auditoria, utilizadores, documentos emitidos) e fica um registo na auditoria.
+
+const SELO: &str = "licenca.selo";
+const MARCA_SELO: &str = "Selo dos dados da licença criado.";
+
+struct Selo {
+    i: NaiveDate,
+    v: NaiveDateTime,
+}
+
+fn chave_selo() -> [u8; 32] {
+    // a chave não está escrita por inteiro no executável: duas metades que só se juntam ao correr
+    const A: [u8; 32] = [159, 67, 17, 5, 17, 27, 109, 158, 105, 243, 98, 221, 131, 9, 109, 8, 57, 128, 167, 150, 167, 152, 180, 215, 158, 21, 197, 89, 175, 231, 56, 223];
+    const B: [u8; 32] = [232, 238, 97, 183, 255, 60, 75, 196, 251, 218, 32, 201, 242, 57, 127, 1, 9, 105, 126, 65, 20, 239, 66, 20, 154, 1, 36, 56, 171, 108, 116, 244];
+    let mut k = [0u8; 32];
+    for (i, b) in k.iter_mut().enumerate() {
+        *b = std::hint::black_box(A[i]) ^ B[31 - i];
+    }
+    let mut h = Sha256::new();
+    h.update(b"KanGest-licenca-selo-v1");
+    h.update(k);
+    h.finalize().into()
+}
+
+fn selar(s: &Selo) -> String {
+    let dados = format!("{}|{}", s.i.format("%Y-%m-%d"), s.v.format("%Y-%m-%dT%H:%M:%S"));
+    let tag = ring::hmac::sign(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &chave_selo()), dados.as_bytes());
+    format!("S1.{}.{}", URL_SAFE_NO_PAD.encode(&dados), URL_SAFE_NO_PAD.encode(tag.as_ref()))
+}
+
+fn abrir_selo(texto: &str) -> Option<Selo> {
+    let mut partes = texto.trim().split('.');
+    let (Some("S1"), Some(dados), Some(tag), None) = (partes.next(), partes.next(), partes.next(), partes.next()) else { return None };
+    let dados = URL_SAFE_NO_PAD.decode(dados).ok()?;
+    ring::hmac::verify(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &chave_selo()), &dados, &URL_SAFE_NO_PAD.decode(tag).ok()?).ok()?;
+    let dados = String::from_utf8(dados).ok()?;
+    let (i, v) = dados.split_once('|')?;
+    Some(Selo { i: data(i)?, v: data_hora(v)? })
+}
+
+/// Datas com «T» ou com espaço (o `datetime()` do SQLite).
+fn data_hora(s: &str) -> Option<NaiveDateTime> {
+    NaiveDateTime::parse_from_str(&s.get(..19)?.replacen(' ', "T", 1), "%Y-%m-%dT%H:%M:%S").ok()
+}
+
+/// O que a base mostra de uso real: o primeiro dia e o último momento (auditoria, utilizadores, documentos emitidos
+/// aqui — os importados de outro programa têm datas antigas e não contam).
+async fn vestigios(p: &SqlitePool) -> AppResult<(Option<NaiveDate>, Option<NaiveDateTime>)> {
+    let (a1, a2): (Option<String>, Option<String>) = sqlx::query_as("SELECT MIN(data_hora), MAX(data_hora) FROM auditoria").fetch_one(p).await?;
+    let u1: Option<String> = sqlx::query_scalar("SELECT MIN(criado_em) FROM utilizadores").fetch_one(p).await?;
+    let (d1, d2): (Option<String>, Option<String>) = sqlx::query_as("SELECT MIN(data_hora), MAX(data_hora) FROM documentos WHERE importado = 0").fetch_one(p).await?;
+    let primeiro = [a1, u1, d1].into_iter().flatten().filter_map(|s| data(&s)).min();
+    let ultimo = [a2, d2].into_iter().flatten().filter_map(|s| data_hora(&s)).max();
+    Ok((primeiro, ultimo))
+}
+
+async fn auditar(p: &SqlitePool, detalhe: &str) -> AppResult<()> {
+    sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (NULL, 'LICENCA', ?)").bind(detalhe).execute(p).await?;
+    Ok(())
+}
+
+/// Início da experiência e, com o relógio atrasado em relação à última utilização, a data dessa utilização.
+struct Datas {
+    inicio: NaiveDate,
+    atrasado: Option<String>,
+}
+
+/// Lê, confirma e actualiza as datas da licença. O relógio só pode andar para a frente; a experiência só pode encurtar.
+async fn datas(p: &SqlitePool) -> AppResult<Datas> {
+    let agora = data_hora(&db::agora()).ok_or_else(|| AppError::msg("Data do sistema inválida."))?;
+    let hoje = agora.date();
+    let cfg_i = cfg_ler(p, "licenca.instalada_em").await?.and_then(|d| data(&d));
+    let cfg_v = cfg_ler(p, "licenca.ultimo_visto").await?.and_then(|v| data_hora(&v));
+    let texto = cfg_ler(p, SELO).await?.filter(|t| !t.trim().is_empty());
+    let selo = texto.as_deref().and_then(abrir_selo);
+
+    #[derive(PartialEq)]
+    enum Origem {
+        Selo,
+        Primeira,
+        Vestigios,
+    }
+    let (origem, base_i, base_v) = match &selo {
+        Some(s) => (Origem::Selo, s.i, s.v),
+        None => {
+            let marcado: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM auditoria WHERE acao = 'LICENCA' AND detalhe = ?)").bind(MARCA_SELO).fetch_one(p).await?;
+            if texto.is_none() && !marcado {
+                // primeira vez com selo (base nova ou de uma versão anterior): confia no que lá está
+                (Origem::Primeira, cfg_i.unwrap_or(hoje), cfg_v.unwrap_or(agora))
+            } else {
+                let (primeiro, ultimo) = vestigios(p).await?;
+                (Origem::Vestigios, cfg_i.into_iter().chain(primeiro).min().unwrap_or(hoje), cfg_v.into_iter().chain(ultimo).max().unwrap_or(agora))
+            }
+        }
+    };
+    let inicio = cfg_i.map_or(base_i, |c| c.min(base_i));
+    let visto = cfg_v.map_or(base_v, |c| c.max(base_v));
+    let atrasado = agora < visto - Duration::hours(HORAS_RELOGIO);
+    // o selo acompanha o relógio para a frente (no máximo uma escrita por minuto); atrasado, não se mexe em nada
+    let novo_v = if atrasado { base_v } else { base_v.max(agora) };
+    if origem != Origem::Selo || inicio != base_i || novo_v > base_v + Duration::seconds(60) {
+        cfg_gravar(p, SELO, &selar(&Selo { i: inicio, v: novo_v })).await?;
+        match origem {
+            Origem::Primeira => auditar(p, MARCA_SELO).await?,
+            Origem::Vestigios => auditar(p, "Os dados da licença foram alterados fora do KanGest: repostos a partir dos registos da base.").await?,
+            Origem::Selo => {}
         }
     }
+    if cfg_i != Some(inicio) {
+        cfg_gravar(p, "licenca.instalada_em", &inicio.format("%Y-%m-%d").to_string()).await?;
+    }
+    if !atrasado && cfg_v.is_none_or(|c| agora > c + Duration::seconds(60)) {
+        cfg_gravar(p, "licenca.ultimo_visto", &agora.format("%Y-%m-%dT%H:%M:%S").to_string()).await?;
+    }
+    Ok(Datas { inicio, atrasado: atrasado.then(|| visto.format("%d/%m/%Y %H:%M").to_string()) })
+}
+
+/// Para os testes: um selo válido com as datas dadas (o que só o KanGest consegue fazer).
+#[cfg(test)]
+pub fn selo_teste(inicio: &str, visto: &str) -> String {
+    selar(&Selo { i: data(inicio).unwrap(), v: data_hora(visto).unwrap() })
 }
 
 fn data(s: &str) -> Option<NaiveDate> {
@@ -214,7 +339,7 @@ fn dmy(d: NaiveDate) -> String {
 
 pub async fn calcular(st: &AppState) -> AppResult<Estado> {
     let p = &st.pool;
-    let hoje = data(&db::hoje()).expect("hoje");
+    let hoje = data(&db::hoje()).ok_or_else(|| AppError::msg("Data do sistema inválida."))?;
     let nif_empresa: Option<String> = sqlx::query_scalar("SELECT nif FROM empresa WHERE id = 1").fetch_optional(p).await?;
     let maquina = id_maquina();
     let pedido = format!("KG-{}-{}", nif_empresa.as_deref().map(so_algarismos).unwrap_or_default(), maquina.replace('-', ""));
@@ -235,9 +360,28 @@ pub async fn calcular(st: &AppState) -> AppResult<Estado> {
         registada: cfg_ler(p, "licenca.registada").await?.as_deref() == Some("1"),
         sincronizada_em: cfg_ler(p, "licenca.sincronizada_em").await?,
         email_registo: cfg_ler(p, "licenca.registo_email").await?,
+        modulos: Vec::new(),
+        selo: crate::selo::estado().codigo(),
     };
 
-    if let Some(visto) = relogio_atrasado(p).await? {
+    // o próprio programa: alterado depois de publicado, ou a ser examinado com um depurador
+    if crate::selo::oficial() {
+        if let crate::selo::Selo::Alterado(motivo) = crate::selo::estado() {
+            e.modo = "ALTERADO";
+            e.pode_emitir = false;
+            e.mensagem = format!("Este KanGest foi alterado depois de publicado ({motivo}). Volte a instalá-lo a partir do site oficial para voltar a facturar.");
+            return Ok(e);
+        }
+        if crate::selo::depurador() {
+            e.modo = "DEPURADOR";
+            e.pode_emitir = false;
+            e.mensagem = "Há uma ferramenta de depuração ligada ao KanGest. Feche-a para voltar a facturar.".into();
+            return Ok(e);
+        }
+    }
+
+    let datas = datas(p).await?;
+    if let Some(visto) = datas.atrasado {
         e.modo = "RELOGIO";
         e.pode_emitir = false;
         e.mensagem = format!("A data deste computador está atrasada em relação à última utilização ({visto}). Acerte a data e a hora do sistema para voltar a facturar.");
@@ -259,6 +403,7 @@ pub async fn calcular(st: &AppState) -> AppResult<Estado> {
                 } else if let (Some(inicio), Some(fim)) = (data(&lic.inicio), data(&lic.fim)) {
                     e.plano = lic.plano.clone();
                     e.postos = lic.postos;
+                    e.modulos = lic.modulos.clone();
                     e.licenca_id = Some(lic.id.clone());
                     e.empresa = Some(lic.empresa.clone());
                     e.fim = Some(lic.fim.clone());
@@ -298,7 +443,7 @@ pub async fn calcular(st: &AppState) -> AppResult<Estado> {
     }
 
     // período de experiência
-    let inicio = instalada_em(p).await?;
+    let inicio = datas.inicio;
     let fim = inicio + Duration::days(DIAS_EXPERIENCIA - 1);
     e.fim = Some(fim.format("%Y-%m-%d").to_string());
     if hoje <= fim {

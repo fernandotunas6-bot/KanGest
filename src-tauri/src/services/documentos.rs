@@ -1215,12 +1215,17 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
 
     // ---------- pagamentos ----------
     let mut pagamentos: Vec<(String, i64)> = i.pagamentos.iter().filter(|p| p.valor > 0).map(|p| (p.modo.clone(), p.valor)).collect();
-    // Compensação de saldo (CS): usa adiantamentos e notas de crédito ainda por utilizar.
+    // Compensação de saldo (CS): usa adiantamentos e notas de crédito ainda por utilizar — nos recibos e pagamentos
+    // e, como nos grandes POS, para pagar uma Factura/Recibo do cliente (o POS oferece-a ao cliente identificado).
     let compensacao: i64 = pagamentos.iter().filter(|p| p.0 == "CS").map(|p| p.1).sum();
     let mut creditos_usar: Vec<(i64, i64)> = Vec::new();
     if compensacao > 0 {
-        if !liquida {
-            return Err(AppError::msg("A compensação de saldo só se usa em recibos de cliente e pagamentos a fornecedor."));
+        let venda_a_pronto = tipo.pago_no_acto && tipo.grupo == "VENDAS" && tipo.classe == "VENDA";
+        if !liquida && !venda_a_pronto {
+            return Err(AppError::msg("A compensação de saldo só se usa em recibos, pagamentos a fornecedor e facturas/recibo."));
+        }
+        if entidade_id.is_none_or(|e| e == 1) {
+            return Err(AppError::msg("Identifique o cliente para pagar com o crédito dele (adiantamentos e notas de crédito)."));
         }
         let disponiveis: Vec<(i64, i64)> = sqlx::query_as(
             "SELECT d.id, d.credito_disponivel FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo
@@ -1336,8 +1341,10 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         .execute(&mut *tx)
         .await?;
 
-    // Dinheiro recebido no POS fica associado ao caixa aberto do posto (não nos documentos manuais recuperados).
-    let sessao_caixa: Option<i64> = if manual.is_none() && tipo.grupo == "VENDAS" && (tipo.pago_no_acto || tipo.credito) {
+    // Dinheiro recebido no POS fica associado ao caixa aberto do posto (não nos documentos manuais recuperados,
+    // nem nos emitidos pela API de integração: uma venda da loja online não passa pela gaveta de nenhum posto).
+    let api_chave = crate::state::contexto().and_then(|c| c.api_chave);
+    let sessao_caixa: Option<i64> = if manual.is_none() && api_chave.is_none() && tipo.grupo == "VENDAS" && (tipo.pago_no_acto || tipo.credito) {
         sqlx::query_scalar("SELECT id FROM caixa_sessoes WHERE posto_id = ? AND estado = 'ABERTA' ORDER BY id DESC LIMIT 1")
             .bind(posto.id)
             .fetch_optional(&mut *tx)
@@ -1397,7 +1404,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     .execute(&mut *tx)
     .await?
     .last_insert_rowid();
-    sqlx::query("UPDATE documentos SET origem = ?, doc_manual = ?, credito_disponivel = ?, vendedor_id = ?, endereco_entrega = ?, hash_versao = ?, cupao = ? WHERE id = ?")
+    sqlx::query("UPDATE documentos SET origem = ?, doc_manual = ?, credito_disponivel = ?, vendedor_id = ?, endereco_entrega = ?, hash_versao = ?, cupao = ?, api_chave_id = ? WHERE id = ?")
         .bind(if manual.is_some() { "M" } else { "P" })
         .bind(manual.as_ref().map(|m| m.0.clone()))
         .bind(if adiantamento { total } else { 0 })
@@ -1405,6 +1412,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         .bind(txt(&i.endereco_entrega))
         .bind(if tipo.assinado { Some(versao_chave.as_str()) } else { None })
         .bind(cupao.as_ref().map(|c| c.0.clone()))
+        .bind(api_chave)
         .bind(doc_id)
         .execute(&mut *tx)
         .await?;

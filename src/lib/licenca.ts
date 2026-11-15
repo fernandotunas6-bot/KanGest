@@ -5,7 +5,7 @@ import { call } from "@/lib/api";
 import { useSession } from "@/store/session";
 
 export interface LicencaEstado {
-  modo: "EXPERIENCIA" | "ACTIVA" | "TOLERANCIA" | "EXPIRADA" | "RELOGIO" | "INVALIDA";
+  modo: "EXPERIENCIA" | "ACTIVA" | "TOLERANCIA" | "EXPIRADA" | "RELOGIO" | "INVALIDA" | "ALTERADO" | "DEPURADOR";
   pode_emitir: boolean;
   /** dias até deixar de poder emitir */
   dias: number;
@@ -26,6 +26,8 @@ export interface LicencaEstado {
   registada: boolean;
   sincronizada_em: string | null;
   email_registo: string | null;
+  /** selo de integridade do executável (SEM_SELO: compilação não oficial) */
+  selo: "VALIDO" | "SEM_SELO" | "A_CONFIRMAR" | "ALTERADO";
 }
 
 export interface Sincronizacao {

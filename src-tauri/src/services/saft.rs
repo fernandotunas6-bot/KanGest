@@ -52,6 +52,12 @@ pub struct SaftIn {
     ate: String,
 }
 
+impl SaftIn {
+    pub fn novo(de: &str, ate: &str) -> Self {
+        Self { de: de.trim().to_string(), ate: ate.trim().to_string() }
+    }
+}
+
 struct Doc {
     id: i64,
     tipo: String,
@@ -305,7 +311,35 @@ pub async fn exportar_estado(st: &AppState, i: SaftIn) -> AppResult<Value> {
 }
 
 async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResult<Value> {
-    let (emp, nif, cert) = preparar(st, &i).await?;
+    gravar_gerado(st, gerar_facturacao(st, &i, estado).await?)
+}
+
+/// SAF-T gerado em memória: nome do ficheiro, XML e resumo (a API devolve-o sem gravar).
+pub struct Gerado {
+    pub nome: String,
+    pub xml: String,
+    pub resumo: Value,
+}
+
+fn gravar_gerado(st: &AppState, g: Gerado) -> AppResult<Value> {
+    let ficheiro = gravar(st, &g.nome, &g.xml)?;
+    let mut r = g.resumo;
+    r["ficheiro"] = json!(ficheiro);
+    Ok(r)
+}
+
+/// Gera o SAF-T de um período sem gravar ficheiro: `tipo` = facturacao | estado | aquisicao.
+pub async fn gerar(st: &AppState, i: &SaftIn, tipo: &str) -> AppResult<Gerado> {
+    match tipo {
+        "facturacao" => gerar_facturacao(st, i, false).await,
+        "estado" => gerar_facturacao(st, i, true).await,
+        "aquisicao" => gerar_compras(st, i).await,
+        _ => Err(AppError::msg("Tipo de SAF-T inválido (facturacao, estado ou aquisicao).")),
+    }
+}
+
+async fn gerar_facturacao(st: &AppState, i: &SaftIn, estado: bool) -> AppResult<Gerado> {
+    let (emp, nif, cert) = preparar(st, i).await?;
     let p = &st.pool;
     // HashControl: versão da chave; "0" enquanto o programa não estiver validado pela AGT.
     let hc = if cert.trim().is_empty() || cert.trim() == "0" { "0" } else { "1" };
@@ -536,15 +570,14 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
     x.push_str("  </SourceDocuments>\n");
     x.push_str("</AuditFile>\n");
 
-    let ficheiro = gravar(st, &format!("SAFT_AO_{}{nif}_{}_{}.xml", if estado { "ESTADO_" } else { "" }, i.de, i.ate), &x)?;
-    Ok(json!({
-        "ficheiro": ficheiro,
+    let resumo = json!({
         "facturas": vendas.len(),
         "documentos_trabalho": trabalho.len(),
         "guias": guias.len(),
         "recibos": recibos.len(),
         "bytes": x.len(),
-    }))
+    });
+    Ok(Gerado { nome: format!("SAFT_AO_{}{nif}_{}_{}.xml", if estado { "ESTADO_" } else { "" }, i.de, i.ate), xml: x, resumo })
 }
 
 // =====================================================================================
@@ -582,7 +615,11 @@ fn pais(c: Option<String>) -> String {
 }
 
 pub async fn exportar_compras(st: &AppState, i: SaftIn) -> AppResult<Value> {
-    let (emp, nif, cert) = preparar(st, &i).await?;
+    gravar_gerado(st, gerar_compras(st, &i).await?)
+}
+
+async fn gerar_compras(st: &AppState, i: &SaftIn) -> AppResult<Gerado> {
+    let (emp, nif, cert) = preparar(st, i).await?;
     let p = &st.pool;
 
     // Documentos registados no período (o período contabilístico é o do registo; a data é a do fornecedor).
@@ -734,14 +771,14 @@ pub async fn exportar_compras(st: &AppState, i: SaftIn) -> AppResult<Value> {
     x.push_str("  </SourceDocuments>\n");
     x.push_str("</AuditFile>\n");
 
-    let ficheiro = gravar(st, &format!("SAFT_AO_AQUISICAO_{nif}_{}_{}.xml", i.de, i.ate), &x)?;
-    Ok(json!({
-        "ficheiro": ficheiro,
+    let nome = format!("SAFT_AO_AQUISICAO_{nif}_{}_{}.xml", i.de, i.ate);
+    let resumo = json!({
         "documentos": docs.len(),
         "fornecedores": ids.len(),
         "sem_assinatura": docs.iter().filter(|d| d.get::<String, _>("tipo_codigo") != "AF" && d.get::<Option<String>, _>("doc_externo_hash").filter(|h| !h.is_empty()).is_none()).count(),
         "total_liquido": total_liquido,
         "total_iva": total_iva,
         "bytes": x.len(),
-    }))
+    });
+    Ok(Gerado { nome, xml: x, resumo })
 }

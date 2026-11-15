@@ -15,6 +15,15 @@ const MODOS: Record<LicencaEstado["modo"], { rotulo: string; tom: "ok" | "accent
   EXPIRADA: { rotulo: "Modo de consulta", tom: "danger" },
   RELOGIO: { rotulo: "Data do computador atrasada", tom: "danger" },
   INVALIDA: { rotulo: "Licença por resolver", tom: "danger" },
+  ALTERADO: { rotulo: "Programa alterado", tom: "danger" },
+  DEPURADOR: { rotulo: "Depurador ligado", tom: "danger" },
+};
+
+const SELO: Record<LicencaEstado["selo"], string> = {
+  VALIDO: "Confirmada (selo do produtor)",
+  SEM_SELO: "Sem selo (compilação não oficial)",
+  A_CONFIRMAR: "A confirmar…",
+  ALTERADO: "Programa alterado",
 };
 
 async function abrirPedido(e?: LicencaEstado | null) {
@@ -188,10 +197,18 @@ export default function Licenca() {
           <div><dt className="text-ink-3">Empresa (NIF)</dt><dd className="font-medium">{e.nif ?? "—"}</dd></div>
           {e.licenca_id && <div><dt className="text-ink-3">Licença</dt><dd className="font-mono text-[12.5px]">{e.licenca_id}</dd></div>}
           <div><dt className="text-ink-3">Este computador</dt><dd className="font-mono text-[12.5px]">{e.maquina}</dd></div>
+          <div>
+            <dt className="text-ink-3">Integridade do programa</dt>
+            <dd className={cn("inline-flex items-center gap-1 font-medium", e.selo === "VALIDO" ? "text-ok" : e.selo === "ALTERADO" ? "text-danger" : "text-ink-2")}>
+              {e.selo === "VALIDO" && <ShieldCheck className="size-4" />}
+              {SELO[e.selo] ?? e.selo}
+            </dd>
+          </div>
         </dl>
         {!e.pode_emitir && (
           <p className="mt-5 rounded-lg bg-sunken px-4 py-3 text-[13px] text-ink-2">
-            Em modo de consulta continua a ver e imprimir todos os documentos, os relatórios e o SAF-T. Só a emissão de documentos novos fica parada até activar uma licença válida.
+            Em modo de consulta continua a ver e imprimir todos os documentos, os relatórios e o SAF-T. Só a emissão de documentos novos fica parada
+            {e.modo === "ALTERADO" ? " até reinstalar o KanGest a partir do site oficial." : e.modo === "DEPURADOR" ? " enquanto a ferramenta de depuração estiver ligada." : e.modo === "RELOGIO" ? " até acertar a data e a hora do computador." : " até activar uma licença válida."}
           </p>
         )}
       </Card>

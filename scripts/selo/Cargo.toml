@@ -1,0 +1,15 @@
+[package]
+name = "kangest-selo"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Selo de integridade do executável do KanGest (compilação oficial)"
+
+[dependencies]
+sha2 = "0.10"
+ring = "0.17"
+base64 = "0.22"
+serde_json = "1"
+
+# projecto à parte (não faz parte do KanGest nem vai nos instaladores)
+[workspace]

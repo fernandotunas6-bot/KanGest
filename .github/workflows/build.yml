@@ -8,6 +8,10 @@
 #            APPLE_PASSWORD (palavra-passe de aplicação), APPLE_TEAM_ID. Sem eles: assinatura «ad-hoc».
 #   Windows: WINDOWS_ASSINATURA_CONTA, WINDOWS_ASSINATURA_SEGREDO, WINDOWS_ASSINATURA_CERTIFICADO
 #            (SSL.com eSigner, via jsign); WINDOWS_ASSINATURA_TIPO muda o serviço. Sem eles: não assina.
+#
+# Selo de integridade do executável (docs/SEGURANCA.md): KANGEST_SELO_PRIVADA e KANGEST_SELO_PUBLICA, gerados com
+#   cargo run --manifest-path scripts/selo/Cargo.toml -- chaves
+# Sem eles, os instaladores saem sem selo (como até aqui).
 name: Build
 
 on:
@@ -161,6 +165,9 @@ jobs:
           # públicos: variáveis do repositório (Settings → Secrets and variables → Actions → Variables)
           KANGEST_CHAVE_ACTUALIZACOES: ${{ vars.KANGEST_CHAVE_ACTUALIZACOES }}
           KANGEST_EXIGIR_CERTIFICACAO: ${{ vars.KANGEST_EXIGIR_CERTIFICACAO }}
+          # Selo de integridade: a pública vai compilada no executável; a privada só serve ao scripts/selar-executavel.mjs
+          KANGEST_SELO_PUBLICA: ${{ secrets.KANGEST_SELO_PUBLICA }}
+          KANGEST_SELO_PRIVADA: ${{ secrets.KANGEST_SELO_PRIVADA }}
         with:
           args: ${{ matrix.args }} ${{ env.ARGS_ASSINATURA }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
@@ -175,6 +182,25 @@ jobs:
           for app in src-tauri/target/*/release/bundle/macos/*.app; do
             codesign --verify --deep --strict --verbose=2 "$app" && codesign -dv "$app" 2>&1 | grep -E "Authority|Signature|TeamIdentifier" || true
           done
+
+      # um selo errado impediria todas as instalações de facturar: confirma-se antes de publicar
+      - name: Confirmar o selo de integridade
+        shell: bash
+        env:
+          KANGEST_SELO_PUBLICA: ${{ secrets.KANGEST_SELO_PUBLICA }}
+        run: |
+          if [ -z "$KANGEST_SELO_PUBLICA" ]; then
+            echo "::warning::Sem KANGEST_SELO_PRIVADA/KANGEST_SELO_PUBLICA: instaladores sem selo de integridade (docs/SEGURANCA.md)."
+            exit 0
+          fi
+          selo() { cargo run --quiet --release --manifest-path scripts/selo/Cargo.toml -- verificar "$1" "$2"; }
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            for app in src-tauri/target/*/release/bundle/macos/*.app; do
+              for exe in "$app"/Contents/MacOS/*; do selo "$exe" "$app/Contents/Resources/selo.json"; done
+            done
+          else
+            selo src-tauri/target/release/kigest.exe src-tauri/selo/selo.json
+          fi
 
       - name: Confirmar a assinatura (Windows)
         if: runner.os == 'Windows' && env.ARGS_ASSINATURA != ''

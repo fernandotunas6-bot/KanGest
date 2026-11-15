@@ -1,13 +1,16 @@
 mod agt;
+pub mod api;
 mod db;
 mod error;
 pub mod http;
 mod produtor;
 mod rede;
 mod segredos;
+pub mod selo;
 mod services;
 mod smtp;
 mod state;
+pub mod webhooks;
 
 use std::sync::Arc;
 
@@ -49,6 +52,12 @@ fn posto_local(dir: &std::path::Path) -> i64 {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            // selo de integridade do executável (só nas compilações oficiais; corre numa thread à parte)
+            if let Ok(recursos) = app.path().resource_dir() {
+                selo::iniciar(recursos);
+            } else {
+                selo::iniciar(std::path::PathBuf::new());
+            }
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let caminho = dir.join("kigest.db");
@@ -78,6 +87,7 @@ pub fn run() {
             // Postos em rede: abre o servidor ou liga-se a ele conforme o `rede.json` desta máquina.
             let estado = Arc::new(estado);
             rede::registar_estado(estado.clone());
+            api::registar_estado(estado.clone());
             let config_rede = rede::carregar(&dir);
             if config_rede.modo == "servidor" {
                 if let Err(e) = rede::iniciar_servidor(estado.clone(), &config_rede) {
@@ -91,6 +101,12 @@ pub fn run() {
                     }
                 });
             }
+            // API de integração para outros sistemas: só na máquina que guarda a base de dados.
+            if !config_rede.cliente() {
+                api::arrancar(estado.clone());
+            }
+            // avisos automáticos da API (webhooks) às lojas online e outros sistemas
+            webhooks::iniciar(estado.clone());
             // Facturação electrónica da AGT: envia e consulta os documentos em segundo plano.
             services::fe::iniciar(estado.clone());
             // Cópias de segurança periódicas enquanto o programa está aberto.

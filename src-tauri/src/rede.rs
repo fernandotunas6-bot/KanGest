@@ -465,7 +465,7 @@ fn executar(st: &AppState, p: Pedido, endereco: &str) -> Value {
 
     let r = tauri::async_runtime::block_on(async {
         let posto = st.ler_posto(p.posto).await?;
-        let ctx = Contexto { sessao: sessao.clone(), posto };
+        let ctx = Contexto { sessao: sessao.clone(), posto, api_chave: None };
         CONTEXTO.scope(ctx, services::dispatch(st, &p.metodo, p.params)).await
     });
 
@@ -670,7 +670,7 @@ pub async fn sincronizar_posto(st: &AppState) -> AppResult<PostoAtual> {
 // ============================== métodos para o interface ==============================
 
 /// Endereços desta máquina na rede local, para ditar aos outros postos.
-fn enderecos_locais() -> Vec<String> {
+pub(crate) fn enderecos_locais() -> Vec<String> {
     let mut v = Vec::new();
     // truque sem dependências: "ligar" um socket UDP não envia nada, mas revela o IP da interface usada
     if let Ok(s) = std::net::UdpSocket::bind("0.0.0.0:0") {

@@ -84,6 +84,42 @@ def url_de(cfg, ficheiro):
     return cfg["site"] + "/" + ("" if ficheiro == "index.html" else ficheiro.removesuffix(".html"))
 
 
+def cabecalhos(scripts_em_linha, site):
+    """Cabeçalhos de segurança do Cloudflare Pages (_headers). Os scripts em linha entram na CSP pelo hash SHA-256;
+    os formulários vão para o formsubmit.co; a Web Analytics da Cloudflare pode ser ligada no painel do Pages."""
+    import base64
+    hashes = " ".join(sorted(f"'sha256-{base64.b64encode(hashlib.sha256(s.encode()).digest()).decode()}'" for s in scripts_em_linha))
+    # o endereço público do site também conta como «próprio»: a página 404 carrega por ele (<base href>)
+    proprio = f"'self' {site.rstrip('/')}"
+    csp = "; ".join([
+        "default-src 'self'",
+        f"script-src {proprio} {hashes} https://static.cloudflareinsights.com",
+        f"style-src {proprio} 'unsafe-inline'",
+        f"img-src {proprio} data:",
+        f"font-src {proprio}",
+        "connect-src 'self' https://formsubmit.co https://cloudflareinsights.com",
+        "form-action 'self' https://formsubmit.co",
+        "frame-ancestors 'none'",
+        # a página 404 usa <base href> com o endereço público do site
+        f"base-uri 'self' {site.rstrip('/')}/",
+        "object-src 'none'",
+        "upgrade-insecure-requests",
+    ])
+    return f"""# Gerado por scripts/gerar-site.py: cabeçalhos de segurança do Cloudflare Pages.
+/*
+  Content-Security-Policy: {csp}
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin
+
+/assets/*
+  Cache-Control: public, max-age=604800
+"""
+
+
 def main():
     cfg = json.loads((FONTE / "config.json").read_text())
     base = (FONTE / "base.html").read_text()
@@ -99,6 +135,7 @@ def main():
     (SAIDA / "site.js").write_text(js)
 
     paginas = []
+    scripts_em_linha = set()
     for f in sorted((FONTE / "paginas").glob("*.html")):
         texto = f.read_text()
         m = re.match(r"\s*<!--\s*(\{.*?\})\s*-->\s*", texto, re.S)
@@ -129,6 +166,7 @@ def main():
             },
         )
         (SAIDA / f.name).write_text(pagina)
+        scripts_em_linha.update(re.findall(r"<script>(.*?)</script>", pagina, flags=re.S))
         if f.name != "404.html":
             paginas.append(f.name)
 
@@ -136,6 +174,7 @@ def main():
     urls = "\n".join(f"  <url><loc>{url_de(cfg, p)}</loc><lastmod>{hoje}</lastmod></url>" for p in paginas)
     (SAIDA / "sitemap.xml").write_text(f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}\n</urlset>\n')
     (SAIDA / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {cfg['site']}/sitemap.xml\n")
+    (SAIDA / "_headers").write_text(cabecalhos(scripts_em_linha, cfg["site"]))
     print(f"Site gerado em {SAIDA.relative_to(RAIZ)}/: {len(paginas)} páginas + 404, sitemap e robots ({versao_ficheiros}).")
 
 
