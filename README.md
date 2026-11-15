@@ -46,6 +46,8 @@ CI=true npm run tauri build -- --bundles app,dmg   # macOS → src-tauri/target/
 
 Cada instalador tem de ser gerado no respectivo sistema operativo ou no GitHub Actions (`.github/workflows/build.yml`).
 O passo a passo, incluindo a instalação no PC do KIGEST e a importação dos dados, está em [docs/BUILD.md](docs/BUILD.md).
+O guia para quem instala (requisitos, qual instalador, postos em rede, actualizações e problemas comuns) está em
+[docs/INSTALACAO.md](docs/INSTALACAO.md).
 A comparação entre o KIGEST e o KanGest (funções e dados) está em [docs/COMPARACAO-KIGEST.md](docs/COMPARACAO-KIGEST.md).
 O equipamento do posto de venda (impressora térmica, gaveta, leitor, visor de cliente, terminal táctil) está em [docs/EQUIPAMENTO-POS.md](docs/EQUIPAMENTO-POS.md).
 A **API de integração** (loja online, contabilidade, BI e outras aplicações, com chaves de acesso) está em [docs/API.md](docs/API.md)

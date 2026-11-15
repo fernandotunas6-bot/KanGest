@@ -61,6 +61,22 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      # numa etiqueta, os instaladores têm de sair com o número da etiqueta (é por ele que as actualizações e o site os
+      # encontram): pára já, antes de compilar, se package.json, tauri.conf.json e Cargo.toml dizem outra coisa
+      - name: Versão da etiqueta igual à do programa
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          p=$(node -p "require('./package.json').version")
+          t=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          c=$(sed -n 's/^version *= *"\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
+          echo "etiqueta $v · package.json $p · tauri.conf.json $t · Cargo.toml $c"
+          if [ "$v" != "$p" ] || [ "$v" != "$t" ] || [ "$v" != "$c" ]; then
+            echo "::error::A etiqueta $GITHUB_REF_NAME não corresponde à versão do programa ($p / $t / $c). Acerte as três e volte a etiquetar."
+            exit 1
+          fi
+
       - run: npm ci
 
       # os testes correm no Windows (código só de Windows: impressão, consola, instalador) e no Apple Silicon;
@@ -141,11 +157,14 @@ jobs:
         shell: bash
         run: |
           f="docs/versoes/${GITHUB_REF_NAME}.md"
-          if [ -f "$f" ]; then
-            { echo "corpo<<FIM_DAS_NOTAS"; cat "$f"; echo; echo "FIM_DAS_NOTAS"; } >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::Sem notas da versão em $f: a release fica sem texto."
-          fi
+          [ -f "$f" ] || echo "::warning::Sem notas da versão em $f: a release fica só com o quadro dos instaladores."
+          {
+            echo "corpo<<FIM_DAS_NOTAS"
+            [ -f "$f" ] && cat "$f" && echo
+            # quadro «Qual instalador escolher», igual em todas as versões
+            sed "s/{{VERSAO}}/${GITHUB_REF_NAME#v}/g" docs/versoes/_instaladores.md
+            echo "FIM_DAS_NOTAS"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -219,3 +238,43 @@ jobs:
             src-tauri/target/**/release/bundle/nsis/*.exe
             src-tauri/target/**/release/bundle/dmg/*.dmg
           if-no-files-found: ignore
+
+  # Depois dos três instaladores: assina-os para as actualizações automáticas e anexa à release o manifesto
+  # (kangest-atualizacao.json) e as somas SHA-256. O KanGest com a origem
+  # https://github.com/fernandotunas6-bot/KanGest/releases/latest/download passa a encontrar sozinho cada versão nova.
+  manifesto:
+    name: manifesto das actualizações
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kangest-*
+          path: instaladores
+          merge-multiple: true
+
+      - name: Assinar, gerar o manifesto e anexar à release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          mkdir -p publicar
+          find instaladores -type f \( -name '*.exe' -o -name '*.dmg' \) -exec cp {} publicar/ \;
+          ls -l publicar
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            npm ci --ignore-scripts
+            for f in publicar/*.exe publicar/*.dmg; do npx tauri signer sign "$f"; done
+          else
+            echo "::warning::Sem TAURI_SIGNING_PRIVATE_KEY: o manifesto sai só com o SHA-256 (sem assinaturas)."
+          fi
+          python3 scripts/manifesto-atualizacao.py publicar "$GITHUB_REF_NAME" "docs/versoes/$GITHUB_REF_NAME.md"
+          gh release upload "$GITHUB_REF_NAME" publicar/kangest-atualizacao.json publicar/SHA256SUMS.txt $(ls publicar/*.sig 2>/dev/null) --clobber
