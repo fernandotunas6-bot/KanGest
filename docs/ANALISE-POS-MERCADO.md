@@ -125,5 +125,6 @@ variantes (tamanho/cor) e o módulo de restauração.
 
 - A API pode ser vendida como parte de um plano de licença (por exemplo, só no plano «Empresa»); hoje fica disponível
   em todos os planos e desligada por omissão.
-- Os postos em rede falam HTTP sem cifra na rede local ([REDE.md](REDE.md)). A API segue a mesma regra e, para ser usada
-  pela Internet, deve ficar atrás de um túnel ou proxy com HTTPS (ver [API.md](API.md)).
+- Os postos em rede falam cifrado (AES-256-GCM com chave derivada da chave de rede, [REDE.md](REDE.md)). A API fala
+  HTTP na rede local e, para ser usada pela Internet, deve ficar atrás de um túnel com HTTPS (ver
+  [CLOUDFLARE.md](CLOUDFLARE.md)).

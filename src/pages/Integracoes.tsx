@@ -436,7 +436,7 @@ function Servidor({ e, base, onGuardado }: { e: EstadoApi; base: string; onGuard
           </div>
         )}
         <p className="text-[12.5px] text-ink-3">
-          A API fala HTTP sem cifra, como os postos em rede: na rede local está protegida pelas chaves. Para a Internet, escolha «Só desta máquina» e publique-a através de um túnel com HTTPS
+          A API fala HTTP sem cifra (os postos em rede, esses, vão cifrados): na rede local está protegida pelas chaves. Para a Internet, escolha «Só desta máquina» e publique-a através de um túnel com HTTPS
           (por exemplo, Cloudflare Tunnel). Não encaminhe esta porta no router.
         </p>
         <div className="rounded-xl border border-line p-4">

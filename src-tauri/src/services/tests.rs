@@ -1327,45 +1327,89 @@ async fn rede_multiposto() {
     // ---- abre o servidor numa porta livre ----
     let porta = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let arc = std::sync::Arc::new(st);
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta, servidor: String::new(), chave: "segredo123".into() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta, chave: "segredo123".into(), ..Default::default() };
     crate::rede::registar_estado(arc.clone());
     assert!(crate::rede::iniciar_servidor(arc.clone(), &crate::rede::Config { chave: "curta".into(), ..cfg.clone() }).is_err(), "a chave tem de ter 6 caracteres");
     assert_eq!(crate::rede::iniciar_servidor(arc.clone(), &cfg).unwrap(), porta);
+    let gravado: Value = serde_json::from_str(&std::fs::read_to_string(pasta.join("rede.json")).unwrap()).unwrap();
+    assert_eq!(B64.decode(gravado["sal"].as_str().unwrap()).unwrap().len(), 16, "o servidor cria e guarda o sal da cifra");
 
-    let pedir = |corpo: Value| -> Value {
+    // o posto 2, noutra máquina: pedidos cifrados com a chave de rede
+    let cliente = crate::rede::Config { modo: "cliente".into(), porta, servidor: format!("127.0.0.1:{porta}"), chave: "segredo123".into(), ..Default::default() };
+    let pedir_cfg = |c: &crate::rede::Config, token: &str, metodo: &str, params: Value| -> Value {
+        match crate::rede::pedir_com_token(c, token, metodo, params, posto2, "Caixa 2") {
+            Ok(d) => json!({ "ok": true, "dados": d }),
+            Err(e) => json!({ "ok": false, "erro": e.to_string() }),
+        }
+    };
+    let como = |token: &str, metodo: &str, params: Value| pedir_cfg(&cliente, token, metodo, params);
+    let http = |metodo: &str, corpo: &str| -> (String, Value) {
         let mut s = std::net::TcpStream::connect(("127.0.0.1", porta)).expect("ligar ao servidor");
-        let b = corpo.to_string();
-        s.write_all(format!("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes()).unwrap();
+        s.write_all(format!("{metodo} / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}", corpo.len()).as_bytes()).unwrap();
         let mut r = String::new();
         s.read_to_string(&mut r).unwrap();
-        serde_json::from_str(r.split_once("\r\n\r\n").expect("resposta HTTP").1.trim()).expect("JSON")
-    };
-    let como = |token: &str, metodo: &str, params: Value| {
-        json!({ "chave": "segredo123", "token": token, "posto": posto2, "metodo": metodo, "params": params, "descricao_posto": "Caixa 2" })
+        let (cab, corpo) = r.split_once("\r\n\r\n").expect("resposta HTTP");
+        (cab.lines().next().unwrap().to_string(), serde_json::from_str(corpo.trim()).expect("JSON"))
     };
 
-    // ---- a chave de rede é obrigatória ----
-    let mau = pedir(json!({ "chave": "errada", "token": "t1", "posto": posto2, "metodo": "setup.estado", "params": null }));
+    // ---- a chave de rede é obrigatória e nunca viaja ----
+    let mau = pedir_cfg(&crate::rede::Config { chave: "errada123".into(), ..cliente.clone() }, "t1", "setup.estado", Value::Null);
     assert_eq!(mau["ok"], false);
-    assert!(mau["erro"].as_str().unwrap().contains("Chave de rede"));
+    assert!(mau["erro"].as_str().unwrap().contains("Chave de rede"), "{mau}");
+    assert_eq!(como("t1", "setup.estado", Value::Null)["ok"], true, "com a chave certa, o posto volta a ligar-se");
+    // um posto antigo (pedido em claro, com a chave no corpo) é recusado com uma explicação
+    let (linha, antigo) = http("POST", &json!({ "chave": "segredo123", "token": "t9", "posto": posto2, "metodo": "setup.estado", "params": null }).to_string());
+    assert!(linha.contains("400") && antigo["erro"].as_str().unwrap().contains("versão antiga"), "{linha} {antigo}");
+
+    // ---- o que passa na rede vai cifrado: nem o método nem os dados se lêem ----
+    let pedido = json!({ "token": "t9", "posto": posto2, "metodo": "setup.estado", "params": null, "t": crate::rede::teste::agora() });
+    let (n, envelope) = crate::rede::teste::envelope(&cliente, &pedido);
+    let texto = envelope.to_string();
+    assert!(!texto.contains("setup") && !texto.contains("t9") && !texto.contains("segredo123"), "{texto}");
+    let (_, resposta) = http("POST", &texto);
+    assert!(resposta.get("ok").is_none() && resposta["c"].is_string(), "a resposta também vai cifrada: {resposta}");
+    assert_eq!(crate::rede::teste::abrir_resposta(&cliente, n, &resposta).unwrap()["ok"], true);
+    // a resposta só se abre com o número do pedido a que responde
+    let (n2, _) = crate::rede::teste::envelope(&cliente, &pedido);
+    assert!(crate::rede::teste::abrir_resposta(&cliente, n2, &resposta).is_none());
+    // o mesmo pedido copiado da rede não se repete
+    let (_, outra_vez) = http("POST", &texto);
+    let outra_vez = crate::rede::teste::abrir_resposta(&cliente, n, &outra_vez).unwrap();
+    assert_eq!(outra_vez["ok"], false);
+    assert!(outra_vez["erro"].as_str().unwrap().contains("repetido"), "{outra_vez}");
+    // um byte mexido e o servidor recusa
+    let (_, envelope) = crate::rede::teste::envelope(&cliente, &pedido);
+    let mut c = B64.decode(envelope["c"].as_str().unwrap()).unwrap();
+    c[3] ^= 1;
+    let (linha, mexido) = http("POST", &json!({ "v": 2, "n": envelope["n"], "c": B64.encode(&c) }).to_string());
+    assert!(linha.contains("401") && mexido["erro"].as_str().unwrap().contains("adulterado"), "{linha} {mexido}");
+    // um pedido antigo (hora fora dos 5 minutos) é recusado, mesmo com a cifra certa
+    let velho = json!({ "token": "t9", "posto": posto2, "metodo": "setup.estado", "params": null, "t": crate::rede::teste::agora() - 600_000 });
+    let (n, envelope) = crate::rede::teste::envelope(&cliente, &velho);
+    let (_, r) = http("POST", &envelope.to_string());
+    let r = crate::rede::teste::abrir_resposta(&cliente, n, &r).unwrap();
+    assert!(r["ok"] == false && r["relogio"].is_u64(), "{r}");
+    // um posto com o relógio adiantado acerta-se pelo servidor e o pedido passa
+    crate::rede::teste::desacertar(3_600_000);
+    assert_eq!(como("t9", "setup.estado", Value::Null)["ok"], true, "o posto acerta a hora pela do servidor");
 
     // ---- sem sessão não se lê nada; cada posto tem a sua ----
-    let sem = pedir(como("t1", "artigos.listar", json!({})));
+    let sem = como("t1", "artigos.listar", json!({}));
     assert_eq!(sem["ok"], false);
     assert!(sem["erro"].as_str().unwrap().contains("Sessão"));
-    let entrada = pedir(como("t1", "auth.login", json!({ "login": "joana", "senha": "432100" })));
+    let entrada = como("t1", "auth.login", json!({ "login": "joana", "senha": "432100" }));
     assert_eq!(entrada["ok"], true);
     assert_eq!(entrada["dados"]["nome"], "Joana");
-    assert_eq!(pedir(como("t1", "artigos.listar", json!({})))["dados"].as_array().unwrap().len(), 1);
-    let outro = pedir(como("t2", "artigos.listar", json!({})));
+    assert_eq!(como("t1", "artigos.listar", json!({}))["dados"].as_array().unwrap().len(), 1);
+    let outro = como("t2", "artigos.listar", json!({}));
     assert_eq!(outro["ok"], false, "a sessão de um posto não serve outro posto");
     // e a máquina do servidor continua sem sessão
     assert!(arc.sessao_opcional().is_none(), "o login de um posto em rede não entra na máquina do servidor");
 
     // ---- o posto do pedido é o que manda: série e caixa são do posto 2 ----
-    assert_eq!(pedir(como("t1", "posto.obter", Value::Null))["dados"]["atual"]["descricao"], "Caixa 2");
-    assert_eq!(pedir(como("t1", "caixa.abrir", json!({ "valor_inicial": 500000 })))["ok"], true);
-    let venda = pedir(como("t1", "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 2 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })));
+    assert_eq!(como("t1", "posto.obter", Value::Null)["dados"]["atual"]["descricao"], "Caixa 2");
+    assert_eq!(como("t1", "caixa.abrir", json!({ "valor_inicial": 500000 }))["ok"], true);
+    let venda = como("t1", "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 2 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] }));
     assert_eq!(venda["ok"], true, "{venda}");
     let numero = venda["dados"]["documento"]["numero_doc"].as_str().unwrap().to_string();
     assert!(numero.contains("P2"), "o documento tem de sair na série do posto 2: {numero}");
@@ -1378,6 +1422,7 @@ async fn rede_multiposto() {
     let mut r = String::new();
     s.read_to_string(&mut r).unwrap();
     assert!(r.contains("\"app\":\"kigest\""), "{r}");
+    assert!(r.contains("\"sal\":") && r.contains("\"cifra\":\"aes-256-gcm\""), "{r}");
 
     // ---- os postos ligados aparecem no estado da rede ----
     rpc(&arc, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
@@ -1913,7 +1958,8 @@ async fn servidor_demo() {
     // servidor de rede + posto da auditoria já autenticado
     let arc = std::sync::Arc::new(st);
     crate::rede::registar_estado(arc.clone());
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into() };
+    // o interface de auditoria (navegador) fala em claro: só aceite nas compilações de desenvolvimento
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, chave: "auditoria123".into(), sem_cifra: true, ..Default::default() };
     crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
     let corpo = json!({ "chave": "auditoria123", "token": "auditoria", "posto": 1, "metodo": "auth.login", "params": { "login": "admin", "senha": "1234" } }).to_string();
     let mut s = std::net::TcpStream::connect(("127.0.0.1", 7799)).unwrap();
@@ -2092,7 +2138,8 @@ async fn servidor_base() {
     st.carregar_posto(1).await.unwrap();
     let arc = std::sync::Arc::new(st);
     crate::rede::registar_estado(arc.clone());
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into() };
+    // o interface de auditoria (navegador) fala em claro: só aceite nas compilações de desenvolvimento
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, chave: "auditoria123".into(), sem_cifra: true, ..Default::default() };
     crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
     let corpo = json!({ "chave": "auditoria123", "token": "auditoria", "posto": 1, "metodo": "auth.login", "params": { "login": "admin", "senha": "1234" } }).to_string();
     let mut s = std::net::TcpStream::connect(("127.0.0.1", 7799)).unwrap();

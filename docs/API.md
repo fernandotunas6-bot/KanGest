@@ -79,7 +79,8 @@ chave se perder, **Renovar segredo** gera outra (a antiga deixa logo de funciona
 
 ## 3. Segurança
 
-- A API fala **HTTP sem cifra**, como os postos em rede. Na rede local fica protegida pelas chaves.
+- A API fala **HTTP sem cifra** (ao contrário dos postos em rede, que vão cifrados). Na rede local fica protegida
+  pelas chaves.
 - **Para a Internet**, escolha «Só desta máquina» e publique a API com um túnel que dê HTTPS, por exemplo o
   [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) instalado no mesmo
   computador. Para experimentar: `cloudflared tunnel --url http://127.0.0.1:7800` (dá um endereço `https://….trycloudflare.com`);
