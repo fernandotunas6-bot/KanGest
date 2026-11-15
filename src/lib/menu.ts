@@ -151,6 +151,7 @@ export const MENU: GrupoMenu[] = [
     icon: Contact,
     itens: [
       { label: "Clientes", to: "/clientes", perm: "clientes" },
+      { label: "Fidelização de Clientes", to: "/fidelizacao", perm: "relatorios.ver" },
       { label: "Fornecedores", to: "/fornecedores", perm: "fornecedores" },
       { label: "Artigos", to: "/artigos" },
     ],

@@ -554,6 +554,23 @@ fn render(cfg: &Config, d: &Value, via: &str) -> Vec<u8> {
             t.par(&txt(p, "descricao"), &kz(num(p, "valor") + extra));
         }
     }
+    // pontos de fidelização: ganhos e usados neste documento e o saldo do cliente
+    let fid = &d["fidelizacao"];
+    if fid.is_object() && (num(fid, "ganhos") > 0 || num(fid, "gastos") > 0) {
+        let nc = num(doc, "credito") == 1;
+        t.separador();
+        t.centrar(true);
+        t.linha("Pontos de Fidelização");
+        t.centrar(false);
+        t.separador();
+        if num(fid, "ganhos") > 0 {
+            t.par(if nc { "Pontos devolvidos" } else { "Pontos ganhos" }, &format!("+{}", num(fid, "ganhos")));
+        }
+        if num(fid, "gastos") > 0 {
+            t.par(if nc { "Pontos retirados" } else { "Pontos usados" }, &format!("-{}", num(fid, "gastos")));
+        }
+        t.par("Saldo de pontos", &num(fid, "saldo").to_string());
+    }
     let resumo = lista(d, "resumo_iva");
     if !recibo && !resumo.is_empty() {
         t.separador();

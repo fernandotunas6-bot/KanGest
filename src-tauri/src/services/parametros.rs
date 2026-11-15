@@ -36,7 +36,7 @@ pub async fn obter(st: &AppState) -> AppResult<Value> {
     let p = &st.pool;
     Ok(json!({
         "tipos": db::query_json(p, "SELECT * FROM tipos_documento ORDER BY CASE grupo WHEN 'VENDAS' THEN 0 WHEN 'COMPRAS' THEN 1 ELSE 2 END, ordem, codigo").await?,
-        "modos": db::query_json(p, "SELECT m.*, c.descricao AS conta FROM modos_pagamento m LEFT JOIN contas c ON c.id = m.conta_id WHERE m.codigo <> 'CS' ORDER BY m.ordem").await?,
+        "modos": db::query_json(p, "SELECT m.*, c.descricao AS conta FROM modos_pagamento m LEFT JOIN contas c ON c.id = m.conta_id WHERE m.codigo NOT IN ('CS', 'DE') ORDER BY m.ordem").await?,
         "contas": db::query_json(p, "SELECT id, descricao, tipo FROM contas WHERE ativo = 1 ORDER BY descricao").await?,
         "opcoes": opcoes(p).await?,
     }))

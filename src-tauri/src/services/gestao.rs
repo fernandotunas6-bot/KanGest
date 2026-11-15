@@ -118,6 +118,8 @@ fn contas_padrao() -> BTreeMap<String, String> {
         ("iva_dedutivel", "34.5.2"),
         ("retencoes_clientes", "34.1"),
         ("retencoes_fornecedores", "34.3"),
+        // pontos de fidelização usados como meio de pagamento («DE»): conta de regularização a reclassificar
+        ("fidelizacao", "37.9"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -194,7 +196,11 @@ pub async fn lancamentos(st: &AppState, i: LancamentosIn) -> AppResult<Value> {
             (d.get("total"), d.get("total_liquido"), d.get("total_iva"), d.get("total_retencao"), d.get("servicos"));
         // meios de pagamento do documento (para as vendas a pronto, recibos e pagamentos)
         let pagamentos: Vec<(String, i64)> = sqlx::query_as("SELECT modo_codigo, valor FROM documento_pagamentos WHERE documento_id = ?").bind(id).fetch_all(&st.pool).await?;
-        let conta_meio = |modo: &str| if modo == "NU" { c["caixa"].clone() } else { c["bancos"].clone() };
+        let conta_meio = |modo: &str| match modo {
+            "NU" => c["caixa"].clone(),
+            "DE" => c["fidelizacao"].clone(),
+            _ => c["bancos"].clone(),
+        };
         let mut mov: Vec<(String, i64, i64, String)> = Vec::new(); // conta, débito, crédito, descrição
         match (grupo.as_str(), classe.as_str()) {
             ("VENDAS", "VENDA") => {

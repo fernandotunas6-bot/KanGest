@@ -24,6 +24,7 @@ import {
   Percent,
   Plus,
   ScanBarcode,
+  Star,
   Tag,
   Trash2,
   UserRound,
@@ -80,6 +81,7 @@ const CONSUMIDOR: Entidade = {
 const uid = () => crypto.randomUUID();
 const precoNivel = (a: Artigo, nivel: number) => [a.preco1, a.preco2, a.preco3, a.preco4][nivel - 1] || a.preco1;
 const comIvaArt = (preco: number, a: Artigo) => Math.round(preco * (1 + a.taxa_pct / 100));
+type SaldoPontos = { pontos: number; valor: number; pode_pagar: boolean };
 const semIvaArt = (pvp: number, a: Artigo) => Math.round((pvp * 100) / (100 + a.taxa_pct));
 /** PVP com IVA do nível de preço: o guardado, se ainda bater com o preço sem IVA; senão, calculado (como o servidor). */
 const pvpNivel = (a: Artigo, nivel: number) => {
@@ -217,6 +219,13 @@ export default function Pos() {
 
   const focar = () => setTimeout(() => buscaRef.current?.focus(), 30);
   const comIva = !!tabelas.data?.precos_com_iva;
+  // fidelização: saldo de pontos do cliente identificado
+  const fid = tabelas.data?.fidelizacao;
+  const pontos = useQuery({
+    queryKey: ["pontos", cliente.id],
+    queryFn: () => call<SaldoPontos>("fidelizacao.saldo", { entidade_id: cliente.id }),
+    enabled: !!fid?.ativa && cliente.id !== 1,
+  });
   const totais = useMemo(() => calcular(linhas, descGlobal, comIva), [linhas, descGlobal, comIva]);
   const idx = sel ?? (linhas.length ? linhas.length - 1 : null); // linha activa (seleccionada ou a última)
   const linhaAtiva = idx !== null ? linhas[idx] : null;
@@ -514,6 +523,7 @@ export default function Pos() {
     setFimVenda({ documento: d.documento.numero_doc, total: d.documento.total, pago: d.documento.valor_entregue || d.documento.total, troco: d.documento.troco });
     qc.invalidateQueries({ queryKey: ["caixa"] });
     qc.invalidateQueries({ queryKey: ["pos-artigos"] });
+    qc.invalidateQueries({ queryKey: ["pontos"] });
     const id = d.documento.id;
     const imprime = opcoes.imprimir_auto && d.documento.total >= (opcoes.valor_minimo_impressao || 0);
     if (opcoes.mostrar_opcoes_impressao) {
@@ -901,7 +911,15 @@ export default function Pos() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{cliente.nome}</div>
-                <div className="text-[12px] text-ink-3">NIF {cliente.nif}</div>
+                <div className="flex items-center gap-2 text-[12px] text-ink-3">
+                  NIF {cliente.nif}
+                  {pontos.data && cliente.id !== 1 && (
+                    <span className="inline-flex items-center gap-0.5 font-medium text-accent-ink" title={`Vale ${kz(pontos.data.valor)}`}>
+                      <Star className="size-3" />
+                      {numero(pontos.data.pontos, 0)} pontos
+                    </span>
+                  )}
+                </div>
               </div>
             </button>
             <button
@@ -1229,6 +1247,7 @@ export default function Pos() {
           origemId={origem?.id ?? null}
           pin={pin}
           modos={tabelas.data?.modos_pagamento ?? []}
+          pontos={cliente.id !== 1 && pontos.data?.pode_pagar ? { ...pontos.data, valor_ponto: fid?.valor_ponto ?? 0 } : null}
           onClose={() => { setPagar(false); focar(); }}
           onEmitido={aposEmissao}
         />
@@ -1311,6 +1330,7 @@ function Pagamento({
   origemId,
   pin,
   modos,
+  pontos,
   onClose,
   onEmitido,
 }: {
@@ -1322,6 +1342,8 @@ function Pagamento({
   origemId: number | null;
   pin: string | null;
   modos: { codigo: string; descricao: string }[];
+  /** saldo de pontos do cliente, quando pode pagar com eles */
+  pontos: (SaldoPontos & { valor_ponto: number }) | null;
   onClose: () => void;
   onEmitido: (d: DocCompleto) => void;
 }) {
@@ -1333,6 +1355,18 @@ function Pagamento({
   const pago = Object.values(valores).reduce((s, v) => s + parseKz(v || "0"), 0);
   const falta = Math.max(0, total - pago);
   const troco = Math.max(0, pago - total);
+  // pagamento com pontos (SAF-T «DE»): até ao saldo e ao total; o resto fica em numerário
+  const emPontos = parseKz(valores.DE || "0");
+  const pontosUsados = pontos && pontos.valor_ponto > 0 ? Math.ceil(emPontos / pontos.valor_ponto) : 0;
+  function usarPontos() {
+    if (!pontos) return;
+    const outros = Object.entries(valores).filter(([m]) => m !== "DE" && m !== "NU").reduce((s, [, v]) => s + parseKz(v || "0"), 0);
+    const usar = Math.max(0, Math.min(pontos.valor, total - outros));
+    const fmt = (c: number) => (c / 100).toFixed(2).replace(".", ",");
+    setValores({ ...valores, DE: fmt(usar), NU: fmt(Math.max(0, total - outros - usar)) });
+    // o foco volta ao numerário: Enter emite (e não volta a carregar no botão)
+    requestAnimationFrame(() => nuRef.current?.select());
+  }
 
   useEffect(() => {
     nuRef.current?.select();
@@ -1340,6 +1374,7 @@ function Pagamento({
 
   async function emitir() {
     if (tipo === "FR" && falta > 0) return toast.error(`Falta pagar ${kz(falta)}.`);
+    if (tipo === "FR" && pontos && emPontos > pontos.valor) return toast.error(`O cliente só tem ${kz(pontos.valor)} em pontos.`);
     setBusy(true);
     try {
       const d = await call<DocCompleto>("documentos.emitir", {
@@ -1371,8 +1406,10 @@ function Pagamento({
     }
   }
 
-  const rapidos = [total, Math.ceil(total / 100000) * 100000, Math.ceil(total / 500000) * 500000, Math.ceil(total / 1000000) * 1000000]
-    .filter((v, i, a) => v >= total && a.indexOf(v) === i)
+  // numerário rápido: o que falta depois dos pontos
+  const restante = Math.max(0, total - emPontos);
+  const rapidos = [restante, Math.ceil(restante / 100000) * 100000, Math.ceil(restante / 500000) * 500000, Math.ceil(restante / 1000000) * 1000000]
+    .filter((v, i, a) => v > 0 && v >= restante && a.indexOf(v) === i)
     .slice(0, 4);
 
   return (
@@ -1444,12 +1481,35 @@ function Pagamento({
                     />
                   </label>
                 ))}
+              {pontos && (
+                <div className="mt-3 rounded-xl border border-accent/40 bg-accent-50/60 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2 text-[13px]">
+                    <span className="flex items-center gap-1.5 font-medium text-accent-ink">
+                      <Star className="size-4" />
+                      {numero(pontos.pontos, 0)} pontos · {kz(pontos.valor)}
+                    </span>
+                    <Button type="button" size="sm" variant="secondary" onClick={usarPontos}>
+                      Usar pontos
+                    </Button>
+                  </div>
+                  <label className="grid grid-cols-[minmax(0,1fr)_150px] items-center gap-3">
+                    <span className="text-[13px] text-ink-2">{pontosUsados > 0 ? `Pago com ${numero(pontosUsados, 0)} pontos` : "Pago com pontos"}</span>
+                    <Input
+                      className="num h-9 text-right"
+                      value={valores.DE ?? ""}
+                      placeholder="0,00"
+                      onChange={(e) => setValores({ ...valores, DE: e.target.value })}
+                      onFocus={(e) => e.target.select()}
+                    />
+                  </label>
+                </div>
+              )}
             </div>
             <div className="flex flex-col gap-3">
               <div className="text-[12px] font-medium uppercase tracking-wide text-ink-2">Numerário rápido</div>
               <div className="grid grid-cols-2 gap-2">
                 {rapidos.map((v) => (
-                  <Button type="button" key={v} variant="secondary" size="lg" className="num" onClick={() => setValores({ NU: (v / 100).toFixed(2).replace(".", ",") })}>
+                  <Button type="button" key={v} variant="secondary" size="lg" className="num" onClick={() => setValores({ ...(emPontos > 0 ? { DE: valores.DE } : {}), NU: (v / 100).toFixed(2).replace(".", ",") })}>
                     {kzNum(v)}
                   </Button>
                 ))}

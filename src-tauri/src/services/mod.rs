@@ -11,6 +11,7 @@ pub mod importar;
 mod integridade;
 pub mod licenca;
 mod oficina;
+mod fidelizacao;
 mod gestao;
 mod parametros;
 mod promocoes;
@@ -184,6 +185,7 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "documentos.obter" => documentos::obter(st, p(params)?).await,
         "documentos.anular" => documentos::anular(st, p(params)?).await,
         "documentos.creditavel" => documentos::creditavel(st, p(params)?).await,
+        "documentos.auxiliares" => documentos::auxiliares(st).await,
 
         // ---- promoções por regras e cupões ----
         "promocoes.calcular" => promocoes::calcular(st, p(params)?).await,
@@ -197,7 +199,14 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "contabilidade.contas" => gestao::contas_obter(st).await,
         "contabilidade.contasGuardar" => gestao::contas_guardar(st, p(params)?).await,
         "contabilidade.lancamentos" => gestao::lancamentos(st, p(params)?).await,
-        "documentos.auxiliares" => documentos::auxiliares(st).await,
+
+        // ---- fidelização de clientes (pontos) ----
+        "fidelizacao.config" => fidelizacao::config_obter(st).await,
+        "fidelizacao.configGuardar" => fidelizacao::config_guardar(st, p(params)?).await,
+        "fidelizacao.saldo" => fidelizacao::saldo(st, p(params)?).await,
+        "fidelizacao.clientes" => fidelizacao::clientes(st, p(params)?).await,
+        "fidelizacao.movimentos" => fidelizacao::movimentos(st, p(params)?).await,
+        "fidelizacao.ajustar" => fidelizacao::ajustar(st, p(params)?).await,
 
         // ---- POS: suspensos ----
         "suspensos.guardar" => suspensos::guardar(st, p(params)?).await,

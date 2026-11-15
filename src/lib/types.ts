@@ -190,6 +190,18 @@ export interface Tabelas {
   posto: Posto;
   /** Opção de venda «preços com IVA incluído»: as linhas partem do PVP com IVA. */
   precos_com_iva?: boolean;
+  /** Fidelização de clientes (cartão de pontos). */
+  fidelizacao?: FidelizacaoCfg;
+}
+
+export interface FidelizacaoCfg {
+  ativa: boolean;
+  /** compra (cêntimos, com IVA) que dá um ponto */
+  compra_por_ponto: number;
+  /** valor de cada ponto no pagamento (cêntimos) */
+  valor_ponto: number;
+  /** saldo mínimo para pagar com pontos */
+  minimo_resgate: number;
 }
 
 export type Grupo = "VENDAS" | "COMPRAS" | "STOCK";
@@ -332,6 +344,8 @@ export interface DocCompleto {
   derivados?: { id: number; numero_doc: string; tipo_codigo: string; tipo_desc: string; data_emissao: string; total: number; estado: string }[];
   resumo_iva: { taxa: number; motivo_isencao: string | null; base: number; iva: number }[];
   empresa: Empresa;
+  /** pontos de fidelização do documento (ganhos, gastos) e o saldo actual do cliente */
+  fidelizacao?: { ganhos: number; gastos: number; saldo: number } | null;
 }
 
 export interface Empresa {

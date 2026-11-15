@@ -3315,3 +3315,85 @@ async fn sugestao_de_encomendas_e_lancamentos_contabilisticos() {
     assert!(l2["balancete"].as_array().unwrap().iter().any(|c| c["conta"] == "45.1.1"));
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+#[tokio::test]
+async fn fidelizacao_pontos_ganhos_pagos_e_devolvidos() {
+    let (st, pasta) = base_com_admin("fidelizacao").await;
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço de lavagem", "tipo": "S", "taxa_iva_id": 1, "preco1": 1000000 })).await["id"].as_i64().unwrap();
+    let ana = rpc(&st, "entidades.guardar", json!({ "nome": "Ana Domingos", "nif": "5417000001" })).await["id"].as_i64().unwrap();
+    let saldo = |v: Value| v["pontos"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let venda = |cliente: i64, qtd: i64, pagamentos: Value| json!({ "tipo": "FR", "entidade_id": cliente, "linhas": [{ "artigo_id": art, "quantidade": qtd }], "pagamentos": pagamentos });
+
+    // desactivada: não dá pontos nem aceita pagamento com pontos
+    rpc(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "NU", "valor": 1140000 }]))).await;
+    assert_eq!(saldo(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await), 0);
+    assert!(rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 1000 }, { "modo": "NU", "valor": 1139000 }]))).await.contains("não está activa"));
+
+    // 1 ponto por cada 1 000 Kz, cada ponto vale 10 Kz, a partir de 50 pontos
+    assert!(rpc_err(&st, "fidelizacao.configGuardar", json!({ "ativa": true, "compra_por_ponto": 0, "valor_ponto": 1000, "minimo_resgate": 50 })).await.contains("Indique"));
+    rpc(&st, "fidelizacao.configGuardar", json!({ "ativa": true, "compra_por_ponto": 100000, "valor_ponto": 1000, "minimo_resgate": 50 })).await;
+    let t = rpc(&st, "tabelas", Value::Null).await;
+    assert_eq!(t["fidelizacao"]["ativa"], true);
+    assert!(t["modos_pagamento"].as_array().unwrap().iter().all(|m| m["codigo"] != "DE"), "os pontos têm botão próprio no POS");
+
+    // ganhos: 22 800 Kz → 22 pontos; a crédito (FT) também: 34 200 Kz → 34; consumidor final não acumula
+    rpc(&st, "documentos.emitir", venda(ana, 2, json!([{ "modo": "NU", "valor": 2280000 }]))).await;
+    let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": ana, "linhas": [{ "artigo_id": art, "quantidade": 3 }] })).await;
+    rpc(&st, "documentos.emitir", venda(1, 1, json!([{ "modo": "NU", "valor": 1140000 }]))).await;
+    assert_eq!(saldo(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await), 56);
+    assert_eq!(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await["pode_pagar"], true);
+    assert!(rpc_err(&st, "documentos.emitir", venda(1, 1, json!([{ "modo": "DE", "valor": 1000 }, { "modo": "NU", "valor": 1139000 }]))).await.contains("cliente identificado"));
+
+    // paga 560 Kz com os 56 pontos e o resto em numerário: só o numerário dá pontos (10 840 Kz → 10)
+    let pp = rpc(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 56000 }, { "modo": "NU", "valor": 1084000 }]))).await;
+    assert_eq!(pp["documento"]["total"], 1140000, "pagar com pontos não é desconto: a factura e o IVA ficam iguais");
+    assert_eq!(pp["fidelizacao"], json!({ "ganhos": 10, "gastos": 56, "saldo": 10 }));
+    assert!(pp["pagamentos"].as_array().unwrap().iter().any(|p| p["modo_codigo"] == "DE" && p["valor"] == 56000));
+
+    // abaixo do mínimo; ajuste manual; pontos insuficientes
+    assert!(rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 10000 }, { "modo": "NU", "valor": 1130000 }]))).await.contains("a partir de 50"));
+    assert!(rpc_err(&st, "fidelizacao.ajustar", json!({ "entidade_id": ana, "pontos": 100, "motivo": "" })).await.contains("motivo"));
+    assert_eq!(rpc(&st, "fidelizacao.ajustar", json!({ "entidade_id": ana, "pontos": 100, "motivo": "Campanha de aniversário" })).await["saldo"], 110);
+    let e = rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 120000 }, { "modo": "NU", "valor": 1020000 }]))).await;
+    assert!(e.contains("Pontos insuficientes") && e.contains("120"), "{e}");
+    // os pontos não dão troco
+    assert!(rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 1200000 }]))).await.contains("troco"));
+
+    // nota de crédito da venda paga com pontos: estorna os 10 ganhos, devolve os 56 em pontos e só o numerário em dinheiro
+    let nc = rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": ana, "doc_origem_id": pp["documento"]["id"], "motivo": "Serviço não prestado",
+                                                    "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
+    assert_eq!(nc["fidelizacao"], json!({ "ganhos": 56, "gastos": 10, "saldo": 156 }));
+    let devolvido: i64 = sqlx::query_scalar("SELECT valor FROM caixa_movimentos WHERE descricao = ?").bind(format!("Devolução {}", nc["documento"]["numero_doc"].as_str().unwrap())).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(devolvido, 1084000, "em dinheiro só o que foi pago em dinheiro");
+    // segunda nota de crédito da mesma venda: nada mais a creditar
+    let e = rpc_err(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": ana, "doc_origem_id": pp["documento"]["id"], "motivo": "Repetida",
+                                                      "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
+    assert!(e.contains("creditar"), "{e}");
+
+    // anular a FT tira os 34 pontos que deu
+    rpc(&st, "documentos.anular", json!({ "id": ft["documento"]["id"], "motivo": "Factura em duplicado" })).await;
+    assert_eq!(saldo(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await), 122);
+    let movs = rpc(&st, "fidelizacao.movimentos", json!({ "entidade_id": ana })).await;
+    let tipos: Vec<&str> = movs.as_array().unwrap().iter().map(|m| m["tipo"].as_str().unwrap()).collect();
+    for t in ["GANHO", "RESGATE", "AJUSTE", "ESTORNO", "DEVOLUCAO", "ANULACAO"] {
+        assert!(tipos.contains(&t), "falta o movimento {t}: {tipos:?}");
+    }
+    let lista = rpc(&st, "fidelizacao.clientes", json!({ "q": "ana" })).await;
+    assert_eq!((lista[0]["saldo"].as_i64(), lista[0]["gastos"].as_i64()), (Some(122), Some(56)));
+
+    // o pagamento com pontos não entra na tesouraria; na contabilidade vai para a conta própria e o diário fecha
+    let fluxo: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM vw_fluxo WHERE rubrica = 'Pontos de fidelização'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(fluxo, 0);
+    let hoje = db::hoje();
+    let l = rpc(&st, "contabilidade.lancamentos", json!({ "de": hoje, "ate": hoje })).await;
+    assert_eq!(l["equilibrado"], true, "{l}");
+    assert!(l["linhas"].as_array().unwrap().iter().any(|x| x["conta"] == "37.9" && x["debito"] == 56000), "{l}");
+
+    // o SAF-T leva o mecanismo «DE» (dinheiro electrónico: cartões de pontos)
+    let saft = rpc(&st, "saft.exportar", json!({ "de": "2000-01-01", "ate": "2100-12-31" })).await;
+    let xml = std::fs::read_to_string(saft["ficheiro"].as_str().unwrap()).unwrap();
+    assert!(xml.contains("<PaymentMechanism>DE</PaymentMechanism>"));
+    validar_xsd(saft["ficheiro"].as_str().unwrap());
+    let _ = std::fs::remove_dir_all(&pasta);
+}

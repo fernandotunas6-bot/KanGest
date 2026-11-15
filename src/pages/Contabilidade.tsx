@@ -29,6 +29,7 @@ const NOMES: Record<string, string> = {
   iva_dedutivel: "IVA dedutível",
   retencoes_clientes: "Retenções sofridas (clientes)",
   retencoes_fornecedores: "Retenções efectuadas (fornecedores)",
+  fidelizacao: "Pontos de fidelização usados a pagar",
 };
 
 /** Lançamentos dos documentos para o programa de contabilidade (PGC angolano, contas configuráveis). */

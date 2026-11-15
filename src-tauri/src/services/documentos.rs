@@ -785,12 +785,13 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         credito: bool,
         entidade: i64,
         pendente: i64,
+        total: i64,
         pago: bool,
     }
     let mut origem: Option<Origem> = None;
     if let Some(oid) = i.doc_origem_id {
         let row = sqlx::query(
-            "SELECT d.id, d.tipo_codigo, d.entidade_id, d.valor_pendente, d.estado, t.pago_no_acto, t.classe, t.grupo, t.credito
+            "SELECT d.id, d.tipo_codigo, d.entidade_id, d.valor_pendente, d.estado, d.total, t.pago_no_acto, t.classe, t.grupo, t.credito
              FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo WHERE d.id = ?",
         )
         .bind(oid)
@@ -808,6 +809,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
             credito: row.get::<i64, _>("credito") == 1,
             entidade: row.get::<Option<i64>, _>("entidade_id").unwrap_or(1),
             pendente: row.get("valor_pendente"),
+            total: row.get("total"),
             pago: row.get::<i64, _>("pago_no_acto") == 1,
         });
     }
@@ -1258,6 +1260,14 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     } else {
         pagamentos.clear();
     }
+    // pagamento com pontos de fidelização (SAF-T: «DE»): só em vendas e recibos de um cliente identificado
+    let fidelizacao = super::fidelizacao::cfg(&mut *tx).await?;
+    let pago_pontos: i64 = pagamentos.iter().filter(|p| p.0 == "DE").map(|p| p.1).sum();
+    let pontos_gastos = match entidade_id.filter(|e| *e != 1 && tipo.grupo == "VENDAS") {
+        Some(eid) if pago_pontos > 0 => super::fidelizacao::validar_resgate(&mut tx, &fidelizacao, eid, pago_pontos).await?,
+        None if pago_pontos > 0 => return Err(AppError::msg("O pagamento com pontos exige um cliente identificado (vendas e recibos).")),
+        _ => 0,
+    };
     let valor_pendente = if tipo.conta_corrente == 1 { a_pagar } else { 0 };
 
     // ---------- limite de crédito do cliente ----------
@@ -1610,19 +1620,26 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
                     .execute(&mut *tx)
                     .await?;
             }
+            // pontos de fidelização: estorna os ganhos e devolve em pontos a parte paga com pontos
+            let em_pontos = match entidade_id {
+                Some(eid) if tipo.grupo == "VENDAS" => {
+                    super::fidelizacao::nota_credito(&mut tx, doc_id, &numero_doc, eid, o.id, o.total, total, utilizador_id, &agora).await?
+                }
+                _ => 0,
+            };
             // Devolução em dinheiro de uma venda a pronto (POS com caixa aberto).
             let mut devolvido = 0;
-            if o.pago && tipo.grupo == "VENDAS" {
+            if o.pago && tipo.grupo == "VENDAS" && total - abate - em_pontos > 0 {
                 if let Some(sid) = sessao_caixa {
                     let cm = sqlx::query("INSERT INTO caixa_movimentos (sessao_id, data_hora, tipo, valor, descricao) VALUES (?, ?, 'SAIDA', ?, ?)")
                         .bind(sid)
                         .bind(&agora)
-                        .bind(total - abate)
+                        .bind(total - abate - em_pontos)
                         .bind(format!("Devolução {numero_doc}"))
                         .execute(&mut *tx)
                         .await?
                         .last_insert_rowid();
-                    devolvido = total - abate;
+                    devolvido = total - abate - em_pontos;
                     sqlx::query("INSERT INTO credito_devolucoes (credito_id, caixa_movimento_id, valor, data) VALUES (?, ?, ?, ?)")
                         .bind(doc_id)
                         .bind(cm)
@@ -1633,7 +1650,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
                 }
             }
             // O que não abateu à dívida nem foi devolvido fica como crédito a favor da entidade.
-            let credito = (total - abate - devolvido).max(0);
+            let credito = (total - abate - devolvido - em_pontos).max(0);
             if credito > 0 {
                 sqlx::query("UPDATE documentos SET credito_disponivel = ? WHERE id = ?").bind(credito).bind(doc_id).execute(&mut *tx).await?;
             }
@@ -1642,6 +1659,22 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
             sqlx::query("UPDATE documentos SET estado = 'F' WHERE id = ?").bind(o.id).execute(&mut *tx).await?;
         }
         let _ = &o.tipo;
+    }
+
+    // ---------- fidelização: pontos gastos no pagamento e ganhos na compra ----------
+    if let Some(eid) = entidade_id.filter(|e| *e != 1 && tipo.grupo == "VENDAS") {
+        let venda = super::fidelizacao::Venda {
+            documento_id: doc_id,
+            numero: &numero_doc,
+            entidade_id: eid,
+            ganha: tipo.classe == "VENDA" && !tipo.credito,
+            a_pagar,
+            pago_pontos,
+            pontos_gastos,
+            utilizador_id,
+            agora: &agora,
+        };
+        super::fidelizacao::registar_venda(&mut tx, &fidelizacao, venda).await?;
     }
 
     sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'EMITIR', ?)")
@@ -1798,6 +1831,7 @@ pub async fn obter(st: &AppState, i: IdIn) -> AppResult<Value> {
         "empresa": empresa,
         "opcoes": super::parametros::opcoes(p).await?,
         "fe": fe_info,
+        "fidelizacao": super::fidelizacao::do_documento(p, i.id).await?,
     }))
 }
 
@@ -1912,6 +1946,7 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
         .bind(a.id)
         .execute(&mut *tx)
         .await?;
+    super::fidelizacao::anular(&mut tx, a.id, &numero, s.id, &agora).await?;
     sqlx::query("UPDATE documentos SET estado = 'A', motivo_anulacao = ?, valor_pendente = 0, credito_disponivel = 0 WHERE id = ?")
         .bind(a.motivo.trim())
         .bind(a.id)

@@ -16,7 +16,8 @@ pub async fn tabelas(st: &AppState) -> AppResult<Value> {
         "taxas": db::query_json(p, "SELECT * FROM taxas_iva WHERE ativo = 1 ORDER BY percentagem DESC").await?,
         "motivos": db::query_json(p, "SELECT * FROM motivos_isencao ORDER BY codigo").await?,
         "armazens": db::query_json(p, "SELECT * FROM armazens WHERE ativo = 1 ORDER BY id").await?,
-        "modos_pagamento": db::query_json(p, "SELECT * FROM modos_pagamento WHERE ativo = 1 ORDER BY ordem").await?,
+        // os pontos de fidelização («DE») pagam-se pelo botão próprio do POS, não por um campo livre
+        "modos_pagamento": db::query_json(p, "SELECT * FROM modos_pagamento WHERE ativo = 1 AND codigo <> 'DE' ORDER BY ordem").await?,
         "tipos_documento": db::query_json(p, "SELECT * FROM tipos_documento WHERE ativo = 1 ORDER BY ordem").await?,
         "postos": db::query_json(p, "SELECT id, descricao, armazem_id, serie_prefixo FROM postos ORDER BY id").await?,
         "posto_id": st.posto().id,
@@ -24,6 +25,7 @@ pub async fn tabelas(st: &AppState) -> AppResult<Value> {
         "posto": st.posto(),
         // vendas calculadas a partir do PVP com IVA (Parametrização → Opções de venda)
         "precos_com_iva": super::documentos::precos_com_iva(p).await?,
+        "fidelizacao": super::fidelizacao::cfg(p).await?,
     }))
 }
 
