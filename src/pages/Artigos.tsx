@@ -199,6 +199,14 @@ function ArtigoForm({
   const [custo, setCusto] = useState(toInputKz(a.custo ?? 0));
   const [busy, setBusy] = useState(false);
   const [comps, setComps] = useState<Componente[]>([]);
+  // outros códigos de barras (embalagens): carregados da ficha; só se gravam depois de carregados
+  const [codigos, setCodigos] = useState<{ codigo: string; descricao: string; quantidade: number }[] | null>(inicial.id ? null : []);
+  useEffect(() => {
+    if (!inicial.id) return;
+    call<{ codigos: { codigo: string; descricao: string | null; quantidade: number }[] }>("artigos.obter", { id: inicial.id })
+      .then((x) => setCodigos(x.codigos.map((c) => ({ codigo: c.codigo, descricao: c.descricao ?? "", quantidade: c.quantidade }))))
+      .catch(() => {});
+  }, [inicial.id]);
   useEffect(() => {
     const fonte = inicial.id ?? origem;
     if (fonte && inicial.composto) call<Componente[]>("artigos.componentes", { id: fonte }).then(setComps).catch(() => {});
@@ -255,6 +263,8 @@ function ArtigoForm({
         promo_inicio: a.promo_inicio || null,
         promo_fim: a.promo_fim || null,
         componentes: a.composto ? comps.map((c) => ({ componente_id: c.componente_id, quantidade: c.quantidade })) : null,
+        codigos: codigos ? codigos.filter((c) => c.codigo.trim()).map((c) => ({ codigo: c.codigo.trim(), descricao: c.descricao || null, quantidade: c.quantidade || 1 })) : undefined,
+        codigo_balanca: a.codigo_balanca ?? "",
       });
       toast.success("Artigo guardado.");
       qc.invalidateQueries({ queryKey: ["artigos"] });
@@ -389,6 +399,37 @@ function ArtigoForm({
             );
           })}
         </div>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-line p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <span>
+            <span className="font-medium">Outros códigos e balança</span>
+            <span className="block text-[12px] text-ink-3">Códigos de embalagens (ex.: o pack de 12 vende 12 unidades) e o código do artigo nas etiquetas da balança.</span>
+          </span>
+          <Field label="Código na balança (PLU)" className="w-48">
+            <Input className="num" inputMode="numeric" value={a.codigo_balanca ?? ""} onChange={(e) => set("codigo_balanca", e.target.value.replace(/\D/g, "").slice(0, 6))} />
+          </Field>
+        </div>
+        {codigos === null ? (
+          <p className="text-[13px] text-ink-3">A carregar…</p>
+        ) : (
+          <div className="space-y-2">
+            {codigos.map((c, i) => (
+              <div key={i} className="grid grid-cols-[1fr_1fr_110px_36px] items-center gap-2">
+                <Input className="font-mono" placeholder="Código de barras" value={c.codigo} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, codigo: e.target.value } : x)))} />
+                <Input placeholder="Descrição (ex.: Pack de 12)" value={c.descricao} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, descricao: e.target.value } : x)))} />
+                <Input className="num text-right" type="number" min={0} step="any" title="Unidades que este código vende" value={c.quantidade} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, quantidade: Number(e.target.value) } : x)))} />
+                <button type="button" className="rounded-md p-1.5 text-ink-3 hover:bg-danger-50 hover:text-danger" title="Retirar" onClick={() => setCodigos(codigos.filter((_, j) => j !== i))}>
+                  ×
+                </button>
+              </div>
+            ))}
+            <Button type="button" size="sm" variant="secondary" onClick={() => setCodigos([...codigos, { codigo: "", descricao: "", quantidade: 1 }])}>
+              Acrescentar código
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 rounded-xl border border-line p-4">

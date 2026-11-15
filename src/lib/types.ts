@@ -91,6 +91,11 @@ export interface Artigo {
   preco2: number;
   preco3: number;
   preco4: number;
+  /** Código do artigo na balança (PLU) das etiquetas EAN-13. */
+  codigo_balanca?: string | null;
+  /** Leitura no POS: quantidade que o código trouxe (embalagem ou etiqueta de balança). */
+  quantidade_lida?: number;
+  etiqueta?: { tipo: "PESO" | "PRECO"; valor: number };
   /** PVP com IVA guardado de cada nível (valor mestre com «preços com IVA incluído»). */
   pvp1?: number | null;
   pvp2?: number | null;

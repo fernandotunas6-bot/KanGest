@@ -3196,3 +3196,38 @@ async fn precos_com_iva_incluido() {
     assert_eq!(rpc(&st, "agt.verificarIntegridade", Value::Null).await["ok"], true);
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+#[tokio::test]
+async fn codigos_de_barras_embalagens_e_balanca() {
+    let (st, pasta) = base_com_admin("codigos").await;
+    let agua = rpc(&st, "artigos.guardar", json!({ "descricao": "Água 1,5L", "taxa_iva_id": 1, "preco1": 10000, "codigo_barras": "5601234567890",
+        "codigos": [{ "codigo": "15601234567897", "descricao": "Pack de 12", "quantidade": 12 }] })).await["id"].as_i64().unwrap();
+    let lido = rpc(&st, "artigos.codigo", json!({ "codigo": "15601234567897" })).await;
+    assert_eq!((lido["id"].as_i64(), lido["quantidade_lida"].as_f64()), (Some(agua), Some(12.0)));
+    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": "5601234567890" })).await["quantidade_lida"].is_null());
+    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": agua })).await["codigos"][0]["quantidade"].as_f64(), Some(12.0));
+    // o mesmo código não pode ser de dois artigos
+    let e = rpc_err(&st, "artigos.guardar", json!({ "descricao": "Outra", "taxa_iva_id": 1, "preco1": 100, "codigos": [{ "codigo": "5601234567890" }] })).await;
+    assert!(e.contains("já está em uso"), "{e}");
+
+    // balança: carne a 3 000,00 Kz/kg, PLU 123
+    let carne = rpc(&st, "artigos.guardar", json!({ "descricao": "Carne de vaca", "taxa_iva_id": 1, "preco1": 0, "pvp1": 300000, "codigo_balanca": "123" })).await["id"].as_i64().unwrap();
+    let ean = |doze: &str| format!("{doze}{}", super::catalogo::ean13_controlo(doze).unwrap());
+    // etiqueta de peso: 21 00123 01250 → 1,250 kg
+    let peso = rpc(&st, "artigos.codigo", json!({ "codigo": ean("210012301250") })).await;
+    assert_eq!((peso["id"].as_i64(), peso["quantidade_lida"].as_f64()), (Some(carne), Some(1.25)));
+    // etiqueta de preço: 22 00123 03750 → 3 750 Kz → 1,25 kg
+    let preco = rpc(&st, "artigos.codigo", json!({ "codigo": ean("220012303750") })).await;
+    assert_eq!(preco["quantidade_lida"].as_f64(), Some(1.25));
+    // algarismo de controlo errado: não é uma etiqueta
+    let certo = ean("210012301250");
+    let errado = format!("{}{}", &certo[..12], (certo[12..].parse::<u32>().unwrap() + 1) % 10);
+    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": errado })).await.is_null());
+    // vender pela etiqueta: o total bate com o preço da etiqueta
+    rpc(&st, "parametros.opcoesGuardar", json!({ "precos_com_iva": true })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": carne, "quantidade": 50, "preco_unitario": 150000 }] })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let v = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": carne, "quantidade": 1.25 }], "pagamentos": [{ "modo": "NU", "valor": 375000 }] })).await;
+    assert_eq!(v["documento"]["total"], 375000);
+    let _ = std::fs::remove_dir_all(&pasta);
+}

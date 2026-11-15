@@ -257,7 +257,9 @@ export default function Pos() {
     try {
       const a = await call<Artigo | null>("artigos.codigo", { codigo });
       if (a) {
-        adicionar(a, quantidade);
+        // embalagem (ex.: pack de 12) ou etiqueta de balança: a quantidade vem no código
+        adicionar(a, a.quantidade_lida ? +(quantidade * a.quantidade_lida).toFixed(6) : quantidade);
+        if (a.etiqueta) toast.info(`${a.descricao}: ${a.etiqueta.tipo === "PESO" ? `${qtd(a.etiqueta.valor)} kg` : kz(a.etiqueta.valor)} (etiqueta da balança)`);
         setBusca("");
       } else if (artigos.data?.length === 1) {
         adicionar(artigos.data[0], quantidade);
