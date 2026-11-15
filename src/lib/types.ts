@@ -91,6 +91,16 @@ export interface Artigo {
   preco2: number;
   preco3: number;
   preco4: number;
+  /** Código do artigo na balança (PLU) das etiquetas EAN-13. */
+  codigo_balanca?: string | null;
+  /** Leitura no POS: quantidade que o código trouxe (embalagem ou etiqueta de balança). */
+  quantidade_lida?: number;
+  etiqueta?: { tipo: "PESO" | "PRECO"; valor: number };
+  /** PVP com IVA guardado de cada nível (valor mestre com «preços com IVA incluído»). */
+  pvp1?: number | null;
+  pvp2?: number | null;
+  pvp3?: number | null;
+  pvp4?: number | null;
   qtd_minima: number;
   qtd_maxima: number;
   controla_stock: number;
@@ -178,6 +188,20 @@ export interface Tabelas {
   posto_id: number;
   armazem_id: number;
   posto: Posto;
+  /** Opção de venda «preços com IVA incluído»: as linhas partem do PVP com IVA. */
+  precos_com_iva?: boolean;
+  /** Fidelização de clientes (cartão de pontos). */
+  fidelizacao?: FidelizacaoCfg;
+}
+
+export interface FidelizacaoCfg {
+  ativa: boolean;
+  /** compra (cêntimos, com IVA) que dá um ponto */
+  compra_por_ponto: number;
+  /** valor de cada ponto no pagamento (cêntimos) */
+  valor_ponto: number;
+  /** saldo mínimo para pagar com pontos */
+  minimo_resgate: number;
 }
 
 export type Grupo = "VENDAS" | "COMPRAS" | "STOCK";
@@ -209,6 +233,8 @@ export interface OpcoesImpresso {
   valor_extenso: boolean;
   assinaturas: boolean;
   mostrar_operador: boolean;
+  /** Vendas calculadas a partir do PVP com IVA (3 × 1 000,00 = 3 000,00). */
+  precos_com_iva?: boolean;
 }
 
 export interface Transporte {
@@ -254,6 +280,8 @@ export interface DocLinha {
   quantidade: number;
   unidade: string | null;
   preco_unitario: number;
+  /** Preço unitário com IVA (linhas vendidas com «preços com IVA incluído»). */
+  pvp_unitario?: number | null;
   desconto_pct: number;
   valor_desconto: number;
   taxa_iva_pct: number;
@@ -316,6 +344,8 @@ export interface DocCompleto {
   derivados?: { id: number; numero_doc: string; tipo_codigo: string; tipo_desc: string; data_emissao: string; total: number; estado: string }[];
   resumo_iva: { taxa: number; motivo_isencao: string | null; base: number; iva: number }[];
   empresa: Empresa;
+  /** pontos de fidelização do documento (ganhos, gastos) e o saldo actual do cliente */
+  fidelizacao?: { ganhos: number; gastos: number; saldo: number } | null;
 }
 
 export interface Empresa {

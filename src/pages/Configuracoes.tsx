@@ -6,6 +6,7 @@ import { DatabaseBackup, ImagePlus, Inbox, Monitor, MonitorSmartphone, Network, 
 import { abrirVisorEcra, logoParaRaster } from "@/lib/equipamento";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { PrintPortal } from "@/components/DocumentoPrint";
+import EmailConfig from "@/components/EmailConfig";
 import { imprimir } from "@/lib/print";
 import { call, reiniciar } from "@/lib/api";
 import { useTabelas } from "@/lib/hooks";
@@ -14,7 +15,7 @@ import type { Empresa, EscPos, Posto, PostoOpcoes, VisorOpcoes } from "@/lib/typ
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 
-const ABAS = ["Empresa", "Postos e impressão", "Rede", "Tabelas", "Sistema", "Certificação AGT"] as const;
+const ABAS = ["Empresa", "Postos e impressão", "Rede", "Email", "Tabelas", "Sistema", "Certificação AGT"] as const;
 
 export default function Configuracoes() {
   const { tem } = useSession();
@@ -23,6 +24,7 @@ export default function Configuracoes() {
     Empresa: tem("sistema.configuracoes"),
     "Postos e impressão": true,
     Rede: tem("sistema.configuracoes"),
+    Email: tem("sistema.configuracoes"),
     Tabelas: tem("sistema.tabelas"),
     Sistema: tem("sistema.backup"),
     "Certificação AGT": tem("sistema.certificacao"),
@@ -31,7 +33,7 @@ export default function Configuracoes() {
   const [aba, setAba] = useState<(typeof ABAS)[number]>(visiveis[0] ?? "Postos e impressão");
   // ?aba=…: «Cadastro de Empresa», «Utilizadores», «Cópia de Segurança», «Armazém» abrem o separador certo
   const [sp] = useSearchParams();
-  const pedida = ({ empresa: "Empresa", postos: "Postos e impressão", rede: "Rede", tabelas: "Tabelas", sistema: "Sistema", agt: "Certificação AGT" } as const)[
+  const pedida = ({ empresa: "Empresa", postos: "Postos e impressão", rede: "Rede", email: "Email", tabelas: "Tabelas", sistema: "Sistema", agt: "Certificação AGT" } as const)[
     sp.get("aba") as "empresa"
   ];
   // os utilizadores passaram para o seu próprio módulo
@@ -44,7 +46,7 @@ export default function Configuracoes() {
   }, [pedida]);
   return (
     <>
-      <PageHeader title="Configurações" subtitle="Empresa, utilizadores, postos, tabelas auxiliares, cópias de segurança e certificação" />
+      <PageHeader title="Configurações" subtitle="Empresa, postos, rede, email, tabelas auxiliares, cópias de segurança e certificação" />
       <div className="mb-5 flex gap-1 overflow-x-auto border-b border-line">
         {visiveis.map((a) => (
           <button
@@ -59,6 +61,7 @@ export default function Configuracoes() {
       {aba === "Empresa" && <EmpresaForm />}
       {aba === "Postos e impressão" && <Postos />}
       {aba === "Rede" && <Rede />}
+      {aba === "Email" && <EmailConfig />}
       {aba === "Tabelas" && <Tabelas />}
       {aba === "Sistema" && <Sistema />}
       {aba === "Certificação AGT" && <Agt />}

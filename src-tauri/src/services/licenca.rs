@@ -530,18 +530,25 @@ pub async fn abrir_site(i: AbrirIn) -> AppResult<Value> {
     if !i.url.starts_with("https://kangest.pages.dev/") || i.url.chars().any(|c| c.is_whitespace() || c == '"') {
         return Err(AppError::msg("Endereço não permitido."));
     }
+    abrir_no_navegador(&i.url)?;
+    Ok(Value::Null)
+}
+
+/// Abre um endereço (já validado por quem chama) no navegador do sistema, sem passar pelo
+/// interpretador de comandos (no Windows, o `%` e o `&` dos endereços não são reinterpretados).
+pub(super) fn abrir_no_navegador(url: &str) -> AppResult<()> {
     #[cfg(target_os = "windows")]
     let r = {
         let mut c = std::process::Command::new("rundll32");
         super::impressao::sem_consola(&mut c);
-        c.args(["url.dll,FileProtocolHandler", &i.url]).spawn()
+        c.args(["url.dll,FileProtocolHandler", url]).spawn()
     };
     #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg(&i.url).spawn();
+    let r = std::process::Command::new("open").arg(url).spawn();
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let r = std::process::Command::new("xdg-open").arg(&i.url).spawn();
+    let r = std::process::Command::new("xdg-open").arg(url).spawn();
     r.map_err(|e| AppError::msg(format!("Não foi possível abrir o navegador: {e}")))?;
-    Ok(Value::Null)
+    Ok(())
 }
 
 #[cfg(test)]

@@ -467,10 +467,15 @@ pub fn aplicar_restauro_pendente(pasta_dados: &Path) -> AppResult<Option<String>
     let _ = std::fs::remove_file(&marca);
     let Some(pronto) = v["ficheiro"].as_str().map(PathBuf::from).filter(|p| p.is_file()) else { return Ok(None) };
     let base = pasta_dados.join("kigest.db");
+    // o WAL e o índice da base antiga não podem ser aplicados à cópia restaurada
     for ext in ["db-wal", "db-shm"] {
         let _ = std::fs::remove_file(base.with_extension(ext));
     }
-    std::fs::copy(&pronto, &base).map_err(|e| AppError::msg(format!("Não foi possível restaurar a cópia: {e}")))?;
+    // troca o ficheiro (rename) em vez de escrever por cima: uma ligação à base antiga que ainda esteja a
+    // fechar escreve no ficheiro antigo, nunca na cópia restaurada
+    let novo = base.with_extension("db-restaurar");
+    std::fs::copy(&pronto, &novo).map_err(|e| AppError::msg(format!("Não foi possível restaurar a cópia: {e}")))?;
+    std::fs::rename(&novo, &base).map_err(|e| AppError::msg(format!("Não foi possível restaurar a cópia: {e}")))?;
     let _ = std::fs::remove_file(&pronto);
     Ok(v["origem"].as_str().map(String::from))
 }

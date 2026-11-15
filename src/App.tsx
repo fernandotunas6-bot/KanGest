@@ -33,6 +33,10 @@ import AvisoVencimento from "@/pages/AvisoVencimento";
 import Estorno from "@/pages/Estorno";
 import Adiantamento from "@/pages/Adiantamento";
 import Etiquetas from "@/pages/Etiquetas";
+import Promocoes from "@/pages/Promocoes";
+import SugestaoEncomendas from "@/pages/SugestaoEncomendas";
+import Contabilidade from "@/pages/Contabilidade";
+import Fidelizacao from "@/pages/Fidelizacao";
 import Sobre from "@/pages/Sobre";
 import Parametrizacao from "@/pages/Parametrizacao";
 import FacturacaoElectronica from "@/pages/FacturacaoElectronica";
@@ -111,6 +115,10 @@ export default function App() {
         <Route path="/configuracoes" element={<Configuracoes />} />
         <Route path="/lotes" element={<Lotes />} />
         <Route path="/etiquetas" element={<Etiquetas />} />
+        <Route path="/promocoes" element={<Promocoes />} />
+        <Route path="/compras/sugestao" element={<SugestaoEncomendas />} />
+        <Route path="/contabilidade" element={<Contabilidade />} />
+        <Route path="/fidelizacao" element={<Fidelizacao />} />
         <Route path="/sobre" element={<Sobre />} />
         <Route path="/parametrizacao" element={<Parametrizacao />} />
         <Route path="/facturacao-electronica" element={<FacturacaoElectronica />} />

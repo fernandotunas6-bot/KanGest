@@ -11,7 +11,11 @@ pub mod importar;
 mod integridade;
 pub mod licenca;
 mod oficina;
+mod fidelizacao;
+mod gestao;
 mod parametros;
+mod partilha;
+mod promocoes;
 mod posto;
 mod rh;
 mod tesouraria;
@@ -183,6 +187,36 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "documentos.anular" => documentos::anular(st, p(params)?).await,
         "documentos.creditavel" => documentos::creditavel(st, p(params)?).await,
         "documentos.auxiliares" => documentos::auxiliares(st).await,
+
+        // ---- promoções por regras e cupões ----
+        "promocoes.calcular" => promocoes::calcular(st, p(params)?).await,
+        "promocoes.listar" => promocoes::listar(st).await,
+        "promocoes.regraGuardar" => promocoes::regra_guardar(st, p(params)?).await,
+        "promocoes.cupaoGuardar" => promocoes::cupao_guardar(st, p(params)?).await,
+        "cupoes.validar" => promocoes::validar(st, p(params)?).await,
+
+        // ---- sugestão de encomendas e lançamentos para a contabilidade ----
+        "compras.sugestao" => gestao::sugestao(st, p(params)?).await,
+        "contabilidade.contas" => gestao::contas_obter(st).await,
+        "contabilidade.contasGuardar" => gestao::contas_guardar(st, p(params)?).await,
+        "contabilidade.lancamentos" => gestao::lancamentos(st, p(params)?).await,
+
+        // ---- fidelização de clientes (pontos) ----
+        "fidelizacao.config" => fidelizacao::config_obter(st).await,
+        "fidelizacao.configGuardar" => fidelizacao::config_guardar(st, p(params)?).await,
+        "fidelizacao.saldo" => fidelizacao::saldo(st, p(params)?).await,
+        "fidelizacao.clientes" => fidelizacao::clientes(st, p(params)?).await,
+        "fidelizacao.movimentos" => fidelizacao::movimentos(st, p(params)?).await,
+        "fidelizacao.ajustar" => fidelizacao::ajustar(st, p(params)?).await,
+
+        // ---- recibo digital: email e WhatsApp ----
+        "email.config" => partilha::config_obter(st).await,
+        "email.configGuardar" => partilha::config_guardar(st, p(params)?).await,
+        "email.testar" => partilha::testar(st, p(params)?).await,
+        "documentos.enviarEmail" => partilha::enviar_documento(st, p(params)?).await,
+        "documentos.mensagem" => partilha::mensagem(st, p(params)?).await,
+        // local: a ligação abre-se no posto onde está o operador
+        "partilha.abrir" => partilha::abrir(p(params)?).await,
 
         // ---- POS: suspensos ----
         "suspensos.guardar" => suspensos::guardar(st, p(params)?).await,

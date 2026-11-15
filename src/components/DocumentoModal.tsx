@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Ban, Printer, Receipt, FileText, Truck, Undo2 } from "lucide-react";
+import { Ban, Printer, Receipt, FileText, Send, Truck, Undo2 } from "lucide-react";
 import { call } from "@/lib/api";
 import { useTabelas, useTalao58 } from "@/lib/hooks";
 import { imprimir, NOMES_VIAS } from "@/lib/print";
@@ -10,6 +10,7 @@ import type { DocCompleto } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { A4, NotaEntrega, PrintPortal, Ticket } from "./DocumentoPrint";
 import { EstadoDocumento } from "./EstadoDocumento";
+import EnviarDocumento from "./EnviarDocumento";
 import { Badge, Button, Field, Input, Modal, Select, cn } from "./ui";
 
 export { imprimir };
@@ -79,6 +80,7 @@ export default function DocumentoModal({
   const [vias, setVias] = useState(1);
   const [segundaVia, setSegundaVia] = useState(false);
   const [anular, setAnular] = useState(false);
+  const [enviar, setEnviar] = useState(false);
   const [motivo, setMotivo] = useState("");
   const tem = useSession((s) => s.tem);
   const qc = useQueryClient();
@@ -162,6 +164,11 @@ export default function DocumentoModal({
                 <Truck className="size-4" /> Nota de entrega
               </Button>
             )}
+            {d.documento.grupo === "VENDAS" && d.documento.estado !== "A" && (
+              <Button variant="secondary" title="Recibo digital: por email ou por WhatsApp" onClick={() => setEnviar(true)}>
+                <Send className="size-4" /> Enviar
+              </Button>
+            )}
             <label className="flex items-center gap-2 text-[13px] text-ink-2">
               Vias
               <Select className="h-8 w-16" value={vias} onChange={(e) => setVias(Number(e.target.value))}>
@@ -211,6 +218,7 @@ export default function DocumentoModal({
           <PrintPortal>
             {notaEntrega ? <NotaEntrega d={d} talao={formato === "ticket"} /> : <Copias d={d} formato={formato} vias={vias} segundaVia={segundaVia} />}
           </PrintPortal>
+          {enviar && <EnviarDocumento id={d.documento.id} numero={d.documento.numero_doc} onClose={() => setEnviar(false)} />}
 
           <Modal
             open={anular}

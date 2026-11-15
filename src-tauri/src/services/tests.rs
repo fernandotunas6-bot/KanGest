@@ -3138,3 +3138,321 @@ async fn fecho_de_caixa_cego_por_notas_e_formas_de_pagamento() {
     assert_eq!(rpc(&st, "caixa.estado", Value::Null).await["numerario_esperado"], 100);
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+#[tokio::test]
+async fn nif_angolano_validado() {
+    let (st, pasta) = base_com_admin("nif").await;
+    // válidos: empresa (10 algarismos), BI (com espaços e minúsculas, normalizado) e estrangeiro com outro formato
+    let a = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Empresa A", "nif": "5417 189 230" })).await;
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": a["id"] })).await["nif"], "5417189230");
+    let b = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Maria", "nif": "001234567la041" })).await;
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": b["id"] })).await["nif"], "001234567LA041");
+    rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Fornecedor PT", "nif": "PT509999999", "pais": "PT" })).await;
+    // inválidos em Angola
+    for nif in ["12345", "54171892301", "ABC1234567", "001234567L4041"] {
+        let e = rpc_err(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "X", "nif": nif })).await;
+        assert!(e.contains("NIF inválido"), "{nif}: {e}");
+    }
+    // uma ficha antiga com NIF mal escrito continua a gravar-se se o NIF não mudar
+    sqlx::query("UPDATE entidades SET nif = '123' WHERE id = ?").bind(a["id"].as_i64().unwrap()).execute(&st.pool).await.unwrap();
+    rpc(&st, "entidades.guardar", json!({ "id": a["id"], "tipo": "C", "nome": "Empresa A, Lda", "nif": "123" })).await;
+    assert!(super::entidades::nif_angolano_valido("999999999"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn precos_com_iva_incluido() {
+    let (st, pasta) = base_com_admin("iva-incluido").await;
+    // PVP de prateleira: 1 000,00 Kz com IVA (14%)
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Leite", "tipo": "S", "taxa_iva_id": 1, "preco1": 0, "pvp1": 100000 })).await["id"].as_i64().unwrap();
+    let art = rpc(&st, "artigos.obter", json!({ "id": a })).await;
+    assert_eq!((art["preco1"].as_i64(), art["pvp1"].as_i64()), (Some(87719), Some(100000)), "o preço sem IVA sai do PVP");
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let venda = |q: i64| json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": q }], "pagamentos": [{ "modo": "NU", "valor": 100000 * q }] });
+
+    // sem a opção: o cálculo antigo (a partir do preço sem IVA) dá 2 999,99
+    let antes = rpc(&st, "documentos.emitir", venda(3)).await;
+    assert_eq!(antes["documento"]["total"], 299999);
+
+    // com a opção: 3 × 1 000,00 = 3 000,00 e o IVA sai do total
+    rpc(&st, "parametros.opcoesGuardar", json!({ "precos_com_iva": true })).await;
+    assert_eq!(rpc(&st, "tabelas", Value::Null).await["precos_com_iva"], true);
+    let fr = rpc(&st, "documentos.emitir", venda(3)).await;
+    let d = &fr["documento"];
+    assert_eq!((d["total"].as_i64(), d["total_iva"].as_i64(), d["total_liquido"].as_i64()), (Some(300000), Some(36842), Some(263158)));
+    assert_eq!(fr["linhas"][0]["pvp_unitario"], 100000);
+    assert_eq!(fr["documento"]["troco"], 0);
+
+    // desconto de linha (10%) e desconto global em Kz, como o cliente os vê
+    let com_desc = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1, "desconto_pct": 10 }], "pagamentos": [{ "modo": "NU", "valor": 90000 }] })).await;
+    assert_eq!(com_desc["documento"]["total"], 90000);
+    let global = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "desconto_global_valor": 50000, "linhas": [{ "artigo_id": a, "quantidade": 3 }], "pagamentos": [{ "modo": "NU", "valor": 250000 }] })).await;
+    assert_eq!(global["documento"]["total"], 250000, "3 000,00 − 500,00");
+
+    // a nota de crédito parte do PVP da factura: 1 unidade da venda de 3 × 1 000,00 = 1 000,00
+    let nc = rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": 1, "doc_origem_id": d["id"], "motivo": "Devolução", "linhas": [{ "artigo_id": a, "quantidade": 1 }] })).await;
+    assert_eq!(nc["documento"]["total"], 100000);
+    // a cadeia e os totais continuam coerentes
+    assert_eq!(rpc(&st, "agt.verificarIntegridade", Value::Null).await["ok"], true);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn codigos_de_barras_embalagens_e_balanca() {
+    let (st, pasta) = base_com_admin("codigos").await;
+    let agua = rpc(&st, "artigos.guardar", json!({ "descricao": "Água 1,5L", "taxa_iva_id": 1, "preco1": 10000, "codigo_barras": "5601234567890",
+        "codigos": [{ "codigo": "15601234567897", "descricao": "Pack de 12", "quantidade": 12 }] })).await["id"].as_i64().unwrap();
+    let lido = rpc(&st, "artigos.codigo", json!({ "codigo": "15601234567897" })).await;
+    assert_eq!((lido["id"].as_i64(), lido["quantidade_lida"].as_f64()), (Some(agua), Some(12.0)));
+    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": "5601234567890" })).await["quantidade_lida"].is_null());
+    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": agua })).await["codigos"][0]["quantidade"].as_f64(), Some(12.0));
+    // o mesmo código não pode ser de dois artigos
+    let e = rpc_err(&st, "artigos.guardar", json!({ "descricao": "Outra", "taxa_iva_id": 1, "preco1": 100, "codigos": [{ "codigo": "5601234567890" }] })).await;
+    assert!(e.contains("já está em uso"), "{e}");
+
+    // balança: carne a 3 000,00 Kz/kg, PLU 123
+    let carne = rpc(&st, "artigos.guardar", json!({ "descricao": "Carne de vaca", "taxa_iva_id": 1, "preco1": 0, "pvp1": 300000, "codigo_balanca": "123" })).await["id"].as_i64().unwrap();
+    let ean = |doze: &str| format!("{doze}{}", super::catalogo::ean13_controlo(doze).unwrap());
+    // etiqueta de peso: 21 00123 01250 → 1,250 kg
+    let peso = rpc(&st, "artigos.codigo", json!({ "codigo": ean("210012301250") })).await;
+    assert_eq!((peso["id"].as_i64(), peso["quantidade_lida"].as_f64()), (Some(carne), Some(1.25)));
+    // etiqueta de preço: 22 00123 03750 → 3 750 Kz → 1,25 kg
+    let preco = rpc(&st, "artigos.codigo", json!({ "codigo": ean("220012303750") })).await;
+    assert_eq!(preco["quantidade_lida"].as_f64(), Some(1.25));
+    // algarismo de controlo errado: não é uma etiqueta
+    let certo = ean("210012301250");
+    let errado = format!("{}{}", &certo[..12], (certo[12..].parse::<u32>().unwrap() + 1) % 10);
+    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": errado })).await.is_null());
+    // vender pela etiqueta: o total bate com o preço da etiqueta
+    rpc(&st, "parametros.opcoesGuardar", json!({ "precos_com_iva": true })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": carne, "quantidade": 50, "preco_unitario": 150000 }] })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let v = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": carne, "quantidade": 1.25 }], "pagamentos": [{ "modo": "NU", "valor": 375000 }] })).await;
+    assert_eq!(v["documento"]["total"], 375000);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn promocoes_por_regras_e_cupoes() {
+    let (st, pasta) = base_com_admin("promocoes").await;
+    let familia = rpc(&st, "tabela.guardar", json!({ "tabela": "familias", "descricao": "Bebidas" })).await["id"].as_i64().unwrap();
+    let sumo = rpc(&st, "artigos.guardar", json!({ "descricao": "Sumo", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000, "familia_id": familia })).await["id"].as_i64().unwrap();
+    let agua = rpc(&st, "artigos.guardar", json!({ "descricao": "Água", "tipo": "S", "taxa_iva_id": 1, "preco1": 10000, "familia_id": familia })).await["id"].as_i64().unwrap();
+    // regras inválidas são recusadas
+    assert!(rpc_err(&st, "promocoes.regraGuardar", json!({ "descricao": "x", "tipo": "LEVE_PAGUE", "artigo_id": sumo, "leve": 2, "pague": 3 })).await.contains("maior"));
+    rpc(&st, "promocoes.regraGuardar", json!({ "descricao": "Leve 3 pague 2", "tipo": "LEVE_PAGUE", "artigo_id": sumo, "leve": 3, "pague": 2 })).await;
+    rpc(&st, "promocoes.regraGuardar", json!({ "descricao": "Bebidas: 5% a partir de 10", "tipo": "QUANTIDADE", "familia_id": familia, "quantidade_min": 10, "desconto_pct": 5 })).await;
+    let calc = rpc(&st, "promocoes.calcular", json!({ "linhas": [{ "artigo_id": sumo, "quantidade": 3 }, { "artigo_id": agua, "quantidade": 12 }] })).await;
+    assert_eq!(calc[0]["regra"], "Leve 3 pague 2");
+    assert!((calc[0]["desconto"].as_f64().unwrap() - 33.3333).abs() < 0.001, "{calc}");
+    assert_eq!((calc[1]["desconto"].as_f64(), calc[1]["regra"].as_str()), (Some(5.0), Some("Bebidas: 5% a partir de 10")));
+
+    // a operadora (sem permissão de desconto) vende com a promoção sem pedir PIN
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Rita", "login": "rita", "senha": "rita1234", "perfil": "CAIXA", "mudar_senha": false })).await;
+    assert!(rpc_err(&st, "cupoes.validar", json!({ "codigo": "nada", "total": 0 })).await.contains("não existe"));
+    rpc(&st, "promocoes.cupaoGuardar", json!({ "codigo": "natal10", "descricao": "Natal", "tipo": "PCT", "valor": 10, "valor_minimo": 100000, "utilizacoes_max": 1 })).await;
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "rita", "senha": "rita1234" })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let v = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": sumo, "quantidade": 3 }], "pagamentos": [{ "modo": "NU", "valor": 228000 }] })).await;
+    assert_eq!(v["documento"]["total"], 228000, "3 sumos pelo preço de 2 (2 000,00 + IVA)");
+    // mais desconto do que a promoção já pede PIN
+    let e = rpc_err(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": sumo, "quantidade": 3, "desconto_pct": 50 }], "pagamentos": [{ "modo": "NU", "valor": 300000 }] })).await;
+    assert!(e.contains("supervisor"), "{e}");
+
+    // cupão: compra mínima, desconto sem PIN, uma só utilização, devolvida ao anular
+    assert!(rpc_err(&st, "cupoes.validar", json!({ "codigo": "NATAL10", "total": 50000 })).await.contains("a partir de"));
+    assert!(rpc_err(&st, "documentos.emitir", json!({ "tipo": "FR", "cupao": "NATAL10", "linhas": [{ "artigo_id": agua, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 11400 }] })).await.contains("a partir de"));
+    let c = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "cupao": "natal10", "linhas": [{ "artigo_id": sumo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    assert_eq!((c["documento"]["total"].as_i64(), c["documento"]["cupao"].as_str()), (Some(102600), Some("NATAL10")), "1 140,00 − 10%");
+    assert!(rpc_err(&st, "documentos.emitir", json!({ "tipo": "FR", "cupao": "NATAL10", "linhas": [{ "artigo_id": sumo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await.contains("número de vezes"));
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    rpc(&st, "documentos.anular", json!({ "id": c["documento"]["id"], "motivo": "Venda repetida" })).await;
+    assert_eq!(rpc(&st, "promocoes.listar", Value::Null).await["cupoes"][0]["utilizacoes"], 0);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn sugestao_de_encomendas_e_lancamentos_contabilisticos() {
+    let (st, pasta) = base_com_admin("sugestao").await;
+    let forn = rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Fornecedor SA", "nif": "5410000000" })).await["id"].as_i64().unwrap();
+    let cli = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Cliente Lda", "nif": "5417000000" })).await["id"].as_i64().unwrap();
+    let arroz = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 100000, "qtd_minima": 10, "qtd_maxima": 50 })).await["id"].as_i64().unwrap();
+    let oleo = rpc(&st, "artigos.guardar", json!({ "descricao": "Óleo", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    // compra do arroz (5 un. a 600,00) e entrada do óleo (40 un.)
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FC", "entidade_id": forn, "doc_externo": "FT A/1", "linhas": [{ "artigo_id": arroz, "quantidade": 5, "preco_unitario": 60000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": oleo, "quantidade": 40, "preco_unitario": 50000 }] })).await;
+    // vendem-se 30 óleos (1 por dia nos últimos 30 dias, em média)
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": oleo, "quantidade": 30 }], "pagamentos": [{ "modo": "NU", "valor": 3420000 }] })).await;
+    // encomenda em curso de 3 arrozes: 5 + 3 = 8 continua abaixo do mínimo (10)
+    rpc(&st, "documentos.emitir", json!({ "tipo": "VNE", "entidade_id": forn, "doc_externo": "ENC-1", "linhas": [{ "artigo_id": arroz, "quantidade": 3, "preco_unitario": 60000 }] })).await;
+    let s = rpc(&st, "compras.sugestao", json!({ "dias": 30, "cobertura": 15 })).await;
+    let linha = |id: i64| s["linhas"].as_array().unwrap().iter().find(|l| l["artigo_id"] == id).cloned().unwrap();
+    let a = linha(arroz);
+    assert_eq!((a["sugerido"].as_f64(), a["fornecedor"].as_str(), a["custo"].as_i64()), (Some(42.0), Some("Fornecedor SA"), Some(60000)), "até ao máximo: 50 − 5 − 3; {a}");
+    let o = linha(oleo);
+    assert_eq!((o["sugerido"].as_f64(), o["motivo"].as_str()), (Some(5.0), Some("não cobre os dias pedidos")), "15 dias × 1/dia − 10 em stock; {o}");
+
+    // diário contabilístico: vendas a pronto e a crédito, recibo, nota de crédito e compra
+    let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": oleo, "quantidade": 2 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "RC", "entidade_id": cli, "liquidar": [{ "documento_id": ft["documento"]["id"], "valor": 114000 }], "pagamentos": [{ "modo": "TB", "valor": 114000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": cli, "doc_origem_id": ft["documento"]["id"], "motivo": "Devolução", "linhas": [{ "artigo_id": oleo, "quantidade": 1 }] })).await;
+    let hoje = db::hoje();
+    let l = rpc(&st, "contabilidade.lancamentos", json!({ "de": hoje, "ate": hoje })).await;
+    assert_eq!(l["equilibrado"], true, "débito = crédito: {}", l["balancete"]);
+    let saldo = |conta: &str| l["balancete"].as_array().unwrap().iter().find(|c| c["conta"] == conta).map(|c| c["saldo"].as_i64().unwrap()).unwrap_or(0);
+    // caixa: FR de 30 óleos (34 200,00); bancos: recibo (1 140,00); clientes: 2 280 − 1 140 − 1 140 = 0
+    assert_eq!((saldo("45.1"), saldo("43.1"), saldo("31.1.1")), (3420000, 114000, 0));
+    // vendas (crédito): 30 + 2 − 1 = 31 óleos a 1 000,00; IVA liquidado 14%
+    assert_eq!((saldo("61.1"), saldo("34.5.3")), (-3100000, -434000));
+    // compras: 600,00 × 5 + IVA, contra fornecedores
+    assert_eq!((saldo("21.1"), saldo("34.5.2"), saldo("32.1.1")), (300000, 42000, -342000));
+    // contas configuráveis
+    rpc(&st, "contabilidade.contasGuardar", json!({ "caixa": "45.1.1" })).await;
+    let l2 = rpc(&st, "contabilidade.lancamentos", json!({ "de": hoje, "ate": hoje })).await;
+    assert!(l2["balancete"].as_array().unwrap().iter().any(|c| c["conta"] == "45.1.1"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn fidelizacao_pontos_ganhos_pagos_e_devolvidos() {
+    let (st, pasta) = base_com_admin("fidelizacao").await;
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço de lavagem", "tipo": "S", "taxa_iva_id": 1, "preco1": 1000000 })).await["id"].as_i64().unwrap();
+    let ana = rpc(&st, "entidades.guardar", json!({ "nome": "Ana Domingos", "nif": "5417000001" })).await["id"].as_i64().unwrap();
+    let saldo = |v: Value| v["pontos"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let venda = |cliente: i64, qtd: i64, pagamentos: Value| json!({ "tipo": "FR", "entidade_id": cliente, "linhas": [{ "artigo_id": art, "quantidade": qtd }], "pagamentos": pagamentos });
+
+    // desactivada: não dá pontos nem aceita pagamento com pontos
+    rpc(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "NU", "valor": 1140000 }]))).await;
+    assert_eq!(saldo(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await), 0);
+    assert!(rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 1000 }, { "modo": "NU", "valor": 1139000 }]))).await.contains("não está activa"));
+
+    // 1 ponto por cada 1 000 Kz, cada ponto vale 10 Kz, a partir de 50 pontos
+    assert!(rpc_err(&st, "fidelizacao.configGuardar", json!({ "ativa": true, "compra_por_ponto": 0, "valor_ponto": 1000, "minimo_resgate": 50 })).await.contains("Indique"));
+    rpc(&st, "fidelizacao.configGuardar", json!({ "ativa": true, "compra_por_ponto": 100000, "valor_ponto": 1000, "minimo_resgate": 50 })).await;
+    let t = rpc(&st, "tabelas", Value::Null).await;
+    assert_eq!(t["fidelizacao"]["ativa"], true);
+    assert!(t["modos_pagamento"].as_array().unwrap().iter().all(|m| m["codigo"] != "DE"), "os pontos têm botão próprio no POS");
+
+    // ganhos: 22 800 Kz → 22 pontos; a crédito (FT) também: 34 200 Kz → 34; consumidor final não acumula
+    rpc(&st, "documentos.emitir", venda(ana, 2, json!([{ "modo": "NU", "valor": 2280000 }]))).await;
+    let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": ana, "linhas": [{ "artigo_id": art, "quantidade": 3 }] })).await;
+    rpc(&st, "documentos.emitir", venda(1, 1, json!([{ "modo": "NU", "valor": 1140000 }]))).await;
+    assert_eq!(saldo(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await), 56);
+    assert_eq!(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await["pode_pagar"], true);
+    assert!(rpc_err(&st, "documentos.emitir", venda(1, 1, json!([{ "modo": "DE", "valor": 1000 }, { "modo": "NU", "valor": 1139000 }]))).await.contains("cliente identificado"));
+
+    // paga 560 Kz com os 56 pontos e o resto em numerário: só o numerário dá pontos (10 840 Kz → 10)
+    let pp = rpc(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 56000 }, { "modo": "NU", "valor": 1084000 }]))).await;
+    assert_eq!(pp["documento"]["total"], 1140000, "pagar com pontos não é desconto: a factura e o IVA ficam iguais");
+    assert_eq!(pp["fidelizacao"], json!({ "ganhos": 10, "gastos": 56, "saldo": 10 }));
+    assert!(pp["pagamentos"].as_array().unwrap().iter().any(|p| p["modo_codigo"] == "DE" && p["valor"] == 56000));
+
+    // abaixo do mínimo; ajuste manual; pontos insuficientes
+    assert!(rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 10000 }, { "modo": "NU", "valor": 1130000 }]))).await.contains("a partir de 50"));
+    assert!(rpc_err(&st, "fidelizacao.ajustar", json!({ "entidade_id": ana, "pontos": 100, "motivo": "" })).await.contains("motivo"));
+    assert_eq!(rpc(&st, "fidelizacao.ajustar", json!({ "entidade_id": ana, "pontos": 100, "motivo": "Campanha de aniversário" })).await["saldo"], 110);
+    let e = rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 120000 }, { "modo": "NU", "valor": 1020000 }]))).await;
+    assert!(e.contains("Pontos insuficientes") && e.contains("120"), "{e}");
+    // os pontos não dão troco
+    assert!(rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 1200000 }]))).await.contains("troco"));
+
+    // nota de crédito da venda paga com pontos: estorna os 10 ganhos, devolve os 56 em pontos e só o numerário em dinheiro
+    let nc = rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": ana, "doc_origem_id": pp["documento"]["id"], "motivo": "Serviço não prestado",
+                                                    "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
+    assert_eq!(nc["fidelizacao"], json!({ "ganhos": 56, "gastos": 10, "saldo": 156 }));
+    let devolvido: i64 = sqlx::query_scalar("SELECT valor FROM caixa_movimentos WHERE descricao = ?").bind(format!("Devolução {}", nc["documento"]["numero_doc"].as_str().unwrap())).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(devolvido, 1084000, "em dinheiro só o que foi pago em dinheiro");
+    // segunda nota de crédito da mesma venda: nada mais a creditar
+    let e = rpc_err(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": ana, "doc_origem_id": pp["documento"]["id"], "motivo": "Repetida",
+                                                      "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
+    assert!(e.contains("creditar"), "{e}");
+
+    // anular a FT tira os 34 pontos que deu
+    rpc(&st, "documentos.anular", json!({ "id": ft["documento"]["id"], "motivo": "Factura em duplicado" })).await;
+    assert_eq!(saldo(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await), 122);
+    let movs = rpc(&st, "fidelizacao.movimentos", json!({ "entidade_id": ana })).await;
+    let tipos: Vec<&str> = movs.as_array().unwrap().iter().map(|m| m["tipo"].as_str().unwrap()).collect();
+    for t in ["GANHO", "RESGATE", "AJUSTE", "ESTORNO", "DEVOLUCAO", "ANULACAO"] {
+        assert!(tipos.contains(&t), "falta o movimento {t}: {tipos:?}");
+    }
+    let lista = rpc(&st, "fidelizacao.clientes", json!({ "q": "ana" })).await;
+    assert_eq!((lista[0]["saldo"].as_i64(), lista[0]["gastos"].as_i64()), (Some(122), Some(56)));
+
+    // o pagamento com pontos não entra na tesouraria; na contabilidade vai para a conta própria e o diário fecha
+    let fluxo: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM vw_fluxo WHERE rubrica = 'Pontos de fidelização'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(fluxo, 0);
+    let hoje = db::hoje();
+    let l = rpc(&st, "contabilidade.lancamentos", json!({ "de": hoje, "ate": hoje })).await;
+    assert_eq!(l["equilibrado"], true, "{l}");
+    assert!(l["linhas"].as_array().unwrap().iter().any(|x| x["conta"] == "37.9" && x["debito"] == 56000), "{l}");
+
+    // o SAF-T leva o mecanismo «DE» (dinheiro electrónico: cartões de pontos)
+    let saft = rpc(&st, "saft.exportar", json!({ "de": "2000-01-01", "ate": "2100-12-31" })).await;
+    let xml = std::fs::read_to_string(saft["ficheiro"].as_str().unwrap()).unwrap();
+    assert!(xml.contains("<PaymentMechanism>DE</PaymentMechanism>"));
+    validar_xsd(saft["ficheiro"].as_str().unwrap());
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Parte HTML (base64) de uma mensagem MIME recebida pelo servidor SMTP falso.
+fn html_da_mensagem(dados: &str) -> String {
+    use base64::Engine;
+    let i = dados.find("Content-Type: text/html").expect("parte HTML");
+    let resto = &dados[i..];
+    let corpo = &resto[resto.find("\r\n\r\n").unwrap() + 4..];
+    let b64: String = corpo.lines().take_while(|l| !l.starts_with("--")).collect::<Vec<_>>().join("");
+    String::from_utf8(base64::engine::general_purpose::STANDARD.decode(b64.trim()).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn recibo_digital_por_email_e_whatsapp() {
+    let (st, pasta) = base_com_admin("recibo-digital").await;
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Pão & Bolos <especial>", "tipo": "S", "taxa_iva_id": 1, "preco1": 50000 })).await["id"].as_i64().unwrap();
+    let cli = rpc(&st, "entidades.guardar", json!({ "nome": "Hotel Baía Azul", "nif": "5417002211", "telefone": "923 456 789", "email": "reservas@baia.ao" })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 2 }], "pagamentos": [{ "modo": "NU", "valor": 120000 }] })).await;
+    let id = fr["documento"]["id"].as_i64().unwrap();
+    let numero = fr["documento"]["numero_doc"].as_str().unwrap().to_string();
+
+    // sem configuração não envia; configuração validada; a senha fica cifrada e não volta ao ecrã
+    assert!(rpc_err(&st, "documentos.enviarEmail", json!({ "id": id, "para": "reservas@baia.ao" })).await.contains("não está configurado"));
+    assert!(rpc_err(&st, "email.configGuardar", json!({ "servidor": "", "porta": 465, "remetente": "loja@kianda.ao" })).await.contains("servidor"));
+    let (porta, rx) = crate::smtp::testes::servidor_falso();
+    let c = rpc(&st, "email.configGuardar", json!({ "servidor": "127.0.0.1", "porta": porta, "seguranca": "NENHUMA", "utilizador": "loja@kianda.ao",
+                                                   "remetente": "loja@kianda.ao", "copia": "arquivo@kianda.ao", "senha": "segredo" })).await;
+    assert_eq!((c["tem_senha"].as_bool(), c.get("senha").is_none()), (Some(true), true));
+    let guardada: String = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'email.senha'").fetch_one(&st.pool).await.unwrap();
+    assert!(guardada.starts_with("kgs1:") && !guardada.contains("segredo"), "senha cifrada");
+    // gravar sem senha mantém a anterior
+    rpc(&st, "email.configGuardar", json!({ "servidor": "127.0.0.1", "porta": porta, "seguranca": "NENHUMA", "utilizador": "loja@kianda.ao", "remetente": "loja@kianda.ao", "copia": "arquivo@kianda.ao" })).await;
+    rpc(&st, "email.testar", json!({ "para": "gerente@kianda.ao" })).await;
+    let (cmds, _) = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert!(cmds.iter().any(|c| c == "RCPT TO:<gerente@kianda.ao>"), "{cmds:?}");
+
+    // o documento por email: HTML com as linhas (escapadas), o total, o rodapé da AGT; cópia oculta para o arquivo
+    assert!(rpc_err(&st, "documentos.enviarEmail", json!({ "id": id, "para": "reservas@baia" })).await.contains("inválido"));
+    let r = rpc(&st, "documentos.enviarEmail", json!({ "id": id, "para": "reservas@baia.ao" })).await;
+    assert!(r["resposta"].as_str().unwrap().contains("queued"));
+    let (cmds, dados) = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert!(cmds.iter().any(|c| c == "RCPT TO:<reservas@baia.ao>") && cmds.iter().any(|c| c == "RCPT TO:<arquivo@kianda.ao>"), "{cmds:?}");
+    let html = html_da_mensagem(&dados);
+    assert!(html.contains(&numero) && html.contains("Pão &amp; Bolos &lt;especial&gt;") && html.contains("1.140,00") && html.contains("Processado por programa"), "{html}");
+    let auditoria: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auditoria WHERE acao = 'EMAIL' AND detalhe LIKE ?").bind(format!("{numero}%")).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(auditoria, 1);
+
+    // WhatsApp: telefone da ficha com o indicativo de Angola, texto com o documento e o total
+    let m = rpc(&st, "documentos.mensagem", json!({ "id": id })).await;
+    assert_eq!((m["numero"].as_str(), m["email"].as_str()), (Some("244923456789"), Some("reservas@baia.ao")));
+    assert!(m["url"].as_str().unwrap().starts_with("https://wa.me/244923456789?text="));
+    let texto = m["texto"].as_str().unwrap();
+    assert!(texto.contains(&numero) && texto.contains("*Total: 1.140,00 Kz*"), "{texto}");
+    assert!(rpc_err(&st, "documentos.mensagem", json!({ "id": id, "telefone": "123" })).await.contains("Telefone inválido"));
+    assert_eq!(rpc(&st, "documentos.mensagem", json!({ "id": id, "telefone": "+351 912 345 678" })).await["numero"], "351912345678");
+    // só abre ligações do WhatsApp
+    assert!(rpc_err(&st, "partilha.abrir", json!({ "url": "https://exemplo.com/" })).await.contains("não permitido"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}

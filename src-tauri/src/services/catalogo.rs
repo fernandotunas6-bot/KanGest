@@ -16,12 +16,16 @@ pub async fn tabelas(st: &AppState) -> AppResult<Value> {
         "taxas": db::query_json(p, "SELECT * FROM taxas_iva WHERE ativo = 1 ORDER BY percentagem DESC").await?,
         "motivos": db::query_json(p, "SELECT * FROM motivos_isencao ORDER BY codigo").await?,
         "armazens": db::query_json(p, "SELECT * FROM armazens WHERE ativo = 1 ORDER BY id").await?,
-        "modos_pagamento": db::query_json(p, "SELECT * FROM modos_pagamento WHERE ativo = 1 ORDER BY ordem").await?,
+        // os pontos de fidelização («DE») pagam-se pelo botão próprio do POS, não por um campo livre
+        "modos_pagamento": db::query_json(p, "SELECT * FROM modos_pagamento WHERE ativo = 1 AND codigo <> 'DE' ORDER BY ordem").await?,
         "tipos_documento": db::query_json(p, "SELECT * FROM tipos_documento WHERE ativo = 1 ORDER BY ordem").await?,
         "postos": db::query_json(p, "SELECT id, descricao, armazem_id, serie_prefixo FROM postos ORDER BY id").await?,
         "posto_id": st.posto().id,
         "armazem_id": st.posto().armazem_id,
         "posto": st.posto(),
+        // vendas calculadas a partir do PVP com IVA (Parametrização → Opções de venda)
+        "precos_com_iva": super::documentos::precos_com_iva(p).await?,
+        "fidelizacao": super::fidelizacao::cfg(p).await?,
     }))
 }
 
@@ -63,7 +67,8 @@ const ARTIGO_SELECT: &str = "
     SELECT a.*, t.percentagem AS taxa_pct, t.descricao AS taxa_desc, u.abreviatura AS unidade,
            f.descricao AS familia, sf.descricao AS subfamilia,
            COALESCE(s.quantidade, 0) AS stock,
-           CAST(ROUND(a.preco1 * (1 + t.percentagem / 100.0)) AS INTEGER) AS preco1_iva,
+           CASE WHEN a.pvp1 IS NOT NULL AND CAST(ROUND(a.pvp1 * 100.0 / (100 + t.percentagem)) AS INTEGER) = a.preco1 THEN a.pvp1
+                ELSE CAST(ROUND(a.preco1 * (1 + t.percentagem / 100.0)) AS INTEGER) END AS preco1_iva,
            CASE WHEN a.promo_desconto > 0 AND COALESCE(a.promo_inicio, '') <= date('now', 'localtime')
                      AND (a.promo_fim IS NULL OR a.promo_fim = '' OR a.promo_fim >= date('now', 'localtime'))
                 THEN a.promo_desconto ELSE 0 END AS promo_atual
@@ -119,7 +124,9 @@ pub async fn artigos_obter(st: &AppState, i: IdIn) -> AppResult<Value> {
         .fetch_optional(&st.pool)
         .await?
         .ok_or(AppError::NaoEncontrado)?;
-    Ok(db::row_json(&row))
+    let mut v = db::row_json(&row);
+    v["codigos"] = db::query_json_bind(&st.pool, "SELECT codigo, descricao, quantidade FROM artigo_codigos WHERE artigo_id = ? ORDER BY id", i.id).await?;
+    Ok(v)
 }
 
 #[derive(Deserialize)]
@@ -147,16 +154,118 @@ pub struct CodigoIn {
     codigo: String,
 }
 
-/// Leitura por código de barras ou referência exacta (leitor no POS).
+/// Regra de uma etiqueta de balança: EAN-13 que começa por `prefixo`, seguido do código do artigo
+/// (`digitos_artigo` algarismos) e do peso (PESO, em gramas com `decimais` = 3) ou do preço com IVA
+/// (PRECO, em cêntimos com `decimais` = 2); o último algarismo é o de controlo.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct RegraBalanca {
+    pub prefixo: String,
+    pub tipo: String,
+    #[serde(default = "cinco")]
+    pub digitos_artigo: usize,
+    #[serde(default = "tres")]
+    pub decimais: u32,
+}
+fn cinco() -> usize {
+    5
+}
+fn tres() -> u32 {
+    3
+}
+
+/// Regras de balança configuradas (Parametrização); por omissão: 21 = peso em gramas, 22 = preço em Kz.
+pub async fn regras_balanca(p: &sqlx::SqlitePool) -> AppResult<Vec<RegraBalanca>> {
+    let v: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'balanca.regras'").fetch_optional(p).await?;
+    Ok(v.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| {
+        vec![
+            RegraBalanca { prefixo: "21".into(), tipo: "PESO".into(), digitos_artigo: 5, decimais: 3 },
+            RegraBalanca { prefixo: "22".into(), tipo: "PRECO".into(), digitos_artigo: 5, decimais: 0 },
+        ]
+    }))
+}
+
+/// Algarismo de controlo de um EAN-13 (sobre os 12 primeiros).
+pub fn ean13_controlo(doze: &str) -> Option<u32> {
+    if doze.len() != 12 || !doze.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let soma: u32 = doze.chars().enumerate().map(|(i, c)| c.to_digit(10).unwrap() * if i % 2 == 0 { 1 } else { 3 }).sum();
+    Some((10 - soma % 10) % 10)
+}
+
+/// Etiqueta de balança: (código do artigo, tipo, valor) — peso em kg ou preço em cêntimos.
+pub fn ler_etiqueta(codigo: &str, regras: &[RegraBalanca]) -> Option<(String, String, f64)> {
+    let c = codigo.trim();
+    if c.len() != 13 || ean13_controlo(&c[..12])? != c[12..].parse::<u32>().ok()? {
+        return None;
+    }
+    let r = regras.iter().find(|r| c.starts_with(&r.prefixo) && r.prefixo.len() + r.digitos_artigo < 12)?;
+    let ini = r.prefixo.len();
+    let artigo = c[ini..ini + r.digitos_artigo].to_string();
+    let valor: f64 = c[ini + r.digitos_artigo..12].parse().ok()?;
+    match r.tipo.as_str() {
+        "PESO" => Some((artigo, "PESO".into(), valor / 10f64.powi(r.decimais as i32))),
+        "PRECO" => Some((artigo, "PRECO".into(), valor * 10f64.powi(2 - r.decimais as i32))),
+        _ => None,
+    }
+}
+
+/// Leitura por código de barras ou referência exacta (leitor no POS): código principal, códigos
+/// adicionais (com a quantidade da embalagem) e etiquetas de balança (com o peso ou o preço).
+/// Devolve o artigo com `quantidade_lida` quando o código traz a quantidade.
 pub async fn artigos_codigo(st: &AppState, c: CodigoIn) -> AppResult<Value> {
     st.sessao()?;
+    let codigo = c.codigo.trim();
+    let armazem = st.posto().armazem_id;
     let row = sqlx::query(&format!("{ARTIGO_SELECT} WHERE a.ativo = 1 AND (a.codigo_barras = ? OR a.referencia = ?) LIMIT 1"))
-        .bind(st.posto().armazem_id)
-        .bind(c.codigo.trim())
-        .bind(c.codigo.trim())
+        .bind(armazem)
+        .bind(codigo)
+        .bind(codigo)
         .fetch_optional(&st.pool)
         .await?;
-    Ok(row.as_ref().map(db::row_json).unwrap_or(Value::Null))
+    if let Some(r) = row {
+        return Ok(db::row_json(&r));
+    }
+    // código adicional (ex.: embalagem de 12)
+    let extra: Option<(i64, f64)> = sqlx::query_as("SELECT artigo_id, quantidade FROM artigo_codigos WHERE codigo = ?").bind(codigo).fetch_optional(&st.pool).await?;
+    if let Some((id, q)) = extra {
+        let r = sqlx::query(&format!("{ARTIGO_SELECT} WHERE a.ativo = 1 AND a.id = ?")).bind(armazem).bind(id).fetch_optional(&st.pool).await?;
+        return Ok(r.map(|r| {
+            let mut v = db::row_json(&r);
+            if (q - 1.0).abs() > 1e-9 {
+                v["quantidade_lida"] = json!(q);
+            }
+            v
+        })
+        .unwrap_or(Value::Null));
+    }
+    // etiqueta de balança
+    if let Some((plu, tipo, valor)) = ler_etiqueta(codigo, &regras_balanca(&st.pool).await?) {
+        let r = sqlx::query(&format!(
+            "{ARTIGO_SELECT} WHERE a.ativo = 1 AND a.codigo_balanca IS NOT NULL AND CAST(a.codigo_balanca AS INTEGER) = CAST(? AS INTEGER) LIMIT 1"
+        ))
+        .bind(armazem)
+        .bind(&plu)
+        .fetch_optional(&st.pool)
+        .await?;
+        if let Some(r) = r {
+            let mut v = db::row_json(&r);
+            let quantidade = if tipo == "PESO" {
+                valor
+            } else {
+                // etiqueta com o preço (com IVA): a quantidade é o preço a dividir pelo PVP ao kg
+                let pvp = v["preco1_iva"].as_i64().unwrap_or(0);
+                if pvp <= 0 {
+                    return Err(AppError::msg(format!("O artigo da etiqueta ({}) não tem preço de venda.", v["descricao"].as_str().unwrap_or(""))));
+                }
+                (valor / pvp as f64 * 1_000_000.0).round() / 1_000_000.0
+            };
+            v["quantidade_lida"] = json!(quantidade);
+            v["etiqueta"] = json!({ "tipo": tipo, "valor": valor });
+            return Ok(v);
+        }
+    }
+    Ok(Value::Null)
 }
 
 #[derive(Deserialize)]
@@ -177,6 +286,15 @@ pub struct ArtigoIn {
     preco2: Option<i64>,
     preco3: Option<i64>,
     preco4: Option<i64>,
+    /// PVP com IVA (cêntimos). Quando vem, é o valor mestre: o preço sem IVA calcula-se a partir dele.
+    #[serde(default)]
+    pvp1: Option<i64>,
+    #[serde(default)]
+    pvp2: Option<i64>,
+    #[serde(default)]
+    pvp3: Option<i64>,
+    #[serde(default)]
+    pvp4: Option<i64>,
     qtd_minima: Option<f64>,
     qtd_maxima: Option<f64>,
     controla_stock: Option<bool>,
@@ -191,6 +309,24 @@ pub struct ArtigoIn {
     promo_fim: Option<String>,
     /// Composição do kit: [{componente_id, quantidade}]
     componentes: Option<Vec<ComponenteIn>>,
+    /// Outros códigos de barras (ex.: embalagens); `None` mantém os que existem.
+    #[serde(default)]
+    codigos: Option<Vec<CodigoExtraIn>>,
+    /// Código do artigo na balança (PLU), lido das etiquetas EAN-13.
+    #[serde(default)]
+    codigo_balanca: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct CodigoExtraIn {
+    codigo: String,
+    #[serde(default)]
+    descricao: Option<String>,
+    #[serde(default = "um_f")]
+    quantidade: f64,
+}
+fn um_f() -> f64 {
+    1.0
 }
 
 #[derive(Deserialize)]
@@ -213,11 +349,32 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
     if pct == 0.0 && motivo.is_none() {
         return Err(AppError::msg("Artigos isentos de IVA exigem motivo de isenção."));
     }
+    // preços: com o PVP (com IVA) indicado, o preço sem IVA sai dele; sem PVP, o PVP sai do preço
+    let niveis: Vec<(i64, i64)> = [(Some(a.preco1), a.pvp1), (a.preco2, a.pvp2), (a.preco3, a.pvp3), (a.preco4, a.pvp4)]
+        .into_iter()
+        .map(|(preco, pvp)| match pvp {
+            Some(g) => (super::documentos::sem_iva(g.max(0), pct), g.max(0)),
+            None => {
+                let p = preco.unwrap_or(0).max(0);
+                (p, super::documentos::com_iva(p, pct))
+            }
+        })
+        .collect();
     let tipo = a.tipo.unwrap_or_else(|| "P".into());
     let controla = a.controla_stock.unwrap_or(tipo == "P") && tipo == "P";
     let cobar = a.codigo_barras.filter(|c| !c.trim().is_empty());
 
     let mut tx = crate::db::transacao(&st.pool).await?;
+    if let Some(c) = &cobar {
+        let outro: Option<String> = sqlx::query_scalar("SELECT a.descricao FROM artigo_codigos c JOIN artigos a ON a.id = c.artigo_id WHERE c.codigo = ? AND c.artigo_id <> ?")
+            .bind(c.trim())
+            .bind(a.id.unwrap_or(0))
+            .fetch_optional(&mut *tx)
+            .await?;
+        if let Some(d) = outro {
+            return Err(AppError::msg(format!("O código de barras {} já é um código de \"{d}\".", c.trim())));
+        }
+    }
     let referencia = match a.referencia.filter(|r| !r.trim().is_empty()) {
         Some(r) => r.trim().to_string(),
         None => {
@@ -256,10 +413,10 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
         .bind(a.taxa_iva_id)
         .bind(motivo)
         .bind(a.custo.unwrap_or(0))
-        .bind(a.preco1)
-        .bind(a.preco2.unwrap_or(0))
-        .bind(a.preco3.unwrap_or(0))
-        .bind(a.preco4.unwrap_or(0))
+        .bind(niveis[0].0)
+        .bind(niveis[1].0)
+        .bind(niveis[2].0)
+        .bind(niveis[3].0)
         .bind(a.qtd_minima.unwrap_or(0.0))
         .bind(a.qtd_maxima.unwrap_or(0.0))
         .bind(controla as i64)
@@ -270,6 +427,61 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
     }
     let res = query.execute(&mut *tx).await?;
     let id = a.id.unwrap_or_else(|| res.last_insert_rowid());
+    // código na balança (PLU) e outros códigos de barras
+    if let Some(plu) = &a.codigo_balanca {
+        let plu = plu.trim();
+        if !plu.is_empty() && (!plu.chars().all(|c| c.is_ascii_digit()) || plu.len() > 6) {
+            return Err(AppError::msg("O código da balança tem até 6 algarismos."));
+        }
+        if !plu.is_empty() {
+            let dup: Option<String> = sqlx::query_scalar("SELECT descricao FROM artigos WHERE id <> ? AND CAST(codigo_balanca AS INTEGER) = CAST(? AS INTEGER)")
+                .bind(id)
+                .bind(plu)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if let Some(d) = dup {
+                return Err(AppError::msg(format!("O código de balança {plu} já é do artigo \"{d}\".")));
+            }
+        }
+        sqlx::query("UPDATE artigos SET codigo_balanca = ? WHERE id = ?").bind(Some(plu).filter(|x| !x.is_empty())).bind(id).execute(&mut *tx).await?;
+    }
+    if let Some(codigos) = &a.codigos {
+        sqlx::query("DELETE FROM artigo_codigos WHERE artigo_id = ?").bind(id).execute(&mut *tx).await?;
+        for c in codigos {
+            let codigo = c.codigo.trim();
+            if codigo.is_empty() {
+                continue;
+            }
+            if c.quantidade <= 0.0 {
+                return Err(AppError::msg(format!("A quantidade do código {codigo} tem de ser positiva.")));
+            }
+            let outro: Option<String> = sqlx::query_scalar(
+                "SELECT descricao FROM artigos WHERE (codigo_barras = ?1 OR referencia = ?1)
+                 UNION ALL SELECT a.descricao FROM artigo_codigos c JOIN artigos a ON a.id = c.artigo_id WHERE c.codigo = ?1 LIMIT 1",
+            )
+            .bind(codigo)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if let Some(d) = outro {
+                return Err(AppError::msg(format!("O código {codigo} já está em uso (\"{d}\").")));
+            }
+            sqlx::query("INSERT INTO artigo_codigos (artigo_id, codigo, descricao, quantidade) VALUES (?, ?, ?, ?)")
+                .bind(id)
+                .bind(codigo)
+                .bind(c.descricao.as_deref().map(str::trim).filter(|x| !x.is_empty()))
+                .bind(c.quantidade)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+    sqlx::query("UPDATE artigos SET pvp1 = ?, pvp2 = ?, pvp3 = ?, pvp4 = ? WHERE id = ?")
+        .bind(niveis[0].1)
+        .bind(niveis[1].1)
+        .bind(niveis[2].1)
+        .bind(niveis[3].1)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
 
     // lotes e composição (kit): o kit não tem stock próprio — movimenta os componentes
     let composto = a.composto.unwrap_or(false);

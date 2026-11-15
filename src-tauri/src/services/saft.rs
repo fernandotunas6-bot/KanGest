@@ -196,11 +196,19 @@ async fn linhas(x: &mut String, p: &SqlitePool, d: &Doc, ind: usize, credito: bo
     Ok(())
 }
 
-fn totais(x: &mut String, ind: usize, d: &Doc) {
+/// Totais do documento e, nas facturas pagas no acto (FR), os meios de pagamento (`Payment`).
+fn totais(x: &mut String, ind: usize, d: &Doc, pagamentos: &[(String, i64)]) {
     let _ = writeln!(x, "{:ind$}<DocumentTotals>", "");
     el(x, ind + 2, "TaxPayable", &m(d.total_iva));
     el(x, ind + 2, "NetTotal", &m(d.total_liquido));
     el(x, ind + 2, "GrossTotal", &m(d.total));
+    for (modo, valor) in pagamentos {
+        let _ = writeln!(x, "{:w$}<Payment>", "", w = ind + 2);
+        el(x, ind + 4, "PaymentMechanism", modo);
+        el(x, ind + 4, "PaymentAmount", &m(*valor));
+        el(x, ind + 4, "PaymentDate", &d.data);
+        let _ = writeln!(x, "{:w$}</Payment>", "", w = ind + 2);
+    }
     let _ = writeln!(x, "{:ind$}</DocumentTotals>", "");
 }
 
@@ -389,7 +397,11 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
         el(&mut x, 8, "SystemEntryDate", &d.data_hora);
         el(&mut x, 8, "CustomerID", &d.entidade_id.to_string());
         linhas(&mut x, p, d, 8, d.tipo != "NC", false).await?;
-        totais(&mut x, 8, d);
+        let pagos: Vec<(String, i64)> = sqlx::query_as("SELECT modo_codigo, valor FROM documento_pagamentos WHERE documento_id = ? AND valor > 0 ORDER BY id")
+            .bind(d.id)
+            .fetch_all(p)
+            .await?;
+        totais(&mut x, 8, d, &pagos);
         retencoes(&mut x, p, d, 8).await?;
         x.push_str("      </Invoice>\n");
     }
@@ -444,7 +456,7 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
             let inicio = campo("carga_data");
             el(&mut x, 8, "MovementStartTime", if inicio.len() >= 16 { &inicio } else { &d.data_hora });
             linhas(&mut x, p, d, 8, true, true).await?;
-            totais(&mut x, 8, d);
+            totais(&mut x, 8, d, &[]);
             x.push_str("      </StockMovement>\n");
         }
         x.push_str("    </MovementOfGoods>\n");
@@ -469,7 +481,7 @@ async fn exportar_facturacao(st: &AppState, i: SaftIn, estado: bool) -> AppResul
         el(&mut x, 8, "SystemEntryDate", &d.data_hora);
         el(&mut x, 8, "CustomerID", &d.entidade_id.to_string());
         linhas(&mut x, p, d, 8, true, false).await?;
-        totais(&mut x, 8, d);
+        totais(&mut x, 8, d, &[]);
         x.push_str("      </WorkDocument>\n");
     }
     x.push_str("    </WorkingDocuments>\n");

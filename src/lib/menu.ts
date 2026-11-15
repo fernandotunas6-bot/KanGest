@@ -48,6 +48,7 @@ export const MENU: GrupoMenu[] = [
       { label: "Previsão de Venda", to: "/relatorios/stock?situacao=previsao", perm: "relatorios.ver" },
       { label: "Rastreabilidade de Lotes", to: "/relatorios/rastreio", perm: "relatorios.ver" },
       { label: "Etiquetas e Códigos de Barras", to: "/etiquetas" },
+      { label: "Promoções e Cupões", to: "/promocoes" },
       { label: "Recálculo de Stock", to: "/stock/recalculo", perm: "stock.inventario" },
     ],
   },
@@ -81,6 +82,7 @@ export const MENU: GrupoMenu[] = [
       { label: "V/Nota de Crédito", to: "/documentos/novo/VNC", perm: "compras.fatura" },
       { label: "V/Nota de Débito", to: "/documentos/novo/VND", perm: "compras.fatura" },
       { label: "Encomenda a Fornecedor", to: "/documentos/novo/VNE", perm: "compras.fatura" },
+      { label: "Sugestão de Encomendas", to: "/compras/sugestao", perm: "compras.fatura" },
       { label: "V/Orçamento", to: "/documentos/novo/VOR", perm: "compras.fatura" },
       { label: "V/Guia de Transporte", to: "/documentos/novo/VGT", perm: "compras.fatura" },
       { label: "Factura/Recibo (Autofacturação)", to: "/documentos/novo/AF", perm: "compras.fatura" },
@@ -116,6 +118,7 @@ export const MENU: GrupoMenu[] = [
       { label: "SAF-T de Aquisição (compras)", to: "/relatorios?saft=compras", perm: "sistema.saft" },
       { label: "SAF-T de Facturação ao Estado", to: "/relatorios?saft=estado", perm: "sistema.saft" },
       { label: "SAF-T de Inventários", to: "/relatorios?saft=inventario", perm: "sistema.saft" },
+      { label: "Exportação para a Contabilidade", to: "/contabilidade", perm: "relatorios.ver" },
     ],
   },
   {
@@ -148,6 +151,7 @@ export const MENU: GrupoMenu[] = [
     icon: Contact,
     itens: [
       { label: "Clientes", to: "/clientes", perm: "clientes" },
+      { label: "Fidelização de Clientes", to: "/fidelizacao", perm: "relatorios.ver" },
       { label: "Fornecedores", to: "/fornecedores", perm: "fornecedores" },
       { label: "Artigos", to: "/artigos" },
     ],

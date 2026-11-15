@@ -90,3 +90,10 @@ export function extenso(centimos: number): string {
   if (cents) s += ` e ${ate999(cents)} ${cents === 1 ? "cêntimo" : "cêntimos"}`;
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
+
+/** NIF angolano: 10 algarismos (empresas), n.º do BI (9 algarismos + 2 letras + 3 algarismos) ou 999999999. */
+export function nifValido(nif: string | null | undefined, pais = "AO"): boolean {
+  const n = (nif ?? "").replace(/[\s.-]/g, "").toUpperCase();
+  if (!n || pais.toUpperCase() !== "AO") return true;
+  return n === "999999999" || /^\d{10}$/.test(n) || /^\d{9}[A-Z]{2}\d{3}$/.test(n);
+}
