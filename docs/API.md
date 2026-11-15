@@ -13,6 +13,10 @@ e é servida pela própria API em `GET /api/v1/openapi.json`.
 
 ## 1. Ligar a API
 
+A API faz parte do **plano Empresa** e está disponível durante os 30 dias de experiência. Nos planos Essencial e
+Comércio acrescenta-se com o **módulo `api`** na licença. Sem ele, o ecrã avisa e os pedidos são recusados com
+`403 plano_sem_api`.
+
 **Sistema → API e Integrações** (permissão *API e integrações*, que por omissão só o administrador tem):
 
 1. Marque **Ligar a API de integração** e escolha a porta (7800 por omissão; tem de ser diferente da dos postos em rede).
@@ -109,7 +113,7 @@ Corpo:      Content-Type: application/json
 |---|---|---|
 | 400 | `pedido_invalido`, `campo_desconhecido` | JSON inválido, parâmetro mal escrito, campo que não existe |
 | 401 | `nao_autenticado`, `chave_invalida`, `chave_revogada`, `chave_inactiva`, `chave_expirada` | Problema com a chave |
-| 403 | `sem_permissao`, `ip_nao_autorizado`, `utilizador_inactivo` | A chave não pode fazer isto |
+| 403 | `sem_permissao`, `ip_nao_autorizado`, `utilizador_inactivo`, `plano_sem_api` | A chave não pode fazer isto, ou a licença não inclui a API |
 | 404 | `nao_encontrado` | Registo ou rota inexistente |
 | 405 | `metodo_nao_permitido` | Ex.: `DELETE` numa rota que não o aceita |
 | 413 | `pedido_grande` | Corpo acima de 2 MB |

@@ -2900,6 +2900,29 @@ async fn api_integracao() {
     let aud = rpc(&arc, "auditoria.listar", json!({ "de": hoje_, "ate": hoje_, "evento": "API_CHAVE" })).await;
     assert!(aud.as_array().unwrap().len() >= 4, "{aud}");
 
+    // ---- plano: a API faz parte do plano Empresa (e da experiência); nos outros, com o módulo «api» ----
+    {
+        use super::licenca::teste;
+        let dia = |d: i64| (chrono::Local::now().date_naive() + chrono::Duration::days(d)).format("%Y-%m-%d").to_string();
+        let lic = |plano: &str, modulos: Value| {
+            teste::emitir(&json!({ "v": 1, "id": format!("LIC-{plano}"), "nif": "5000000000", "empresa": "Loja API, Lda", "plano": plano, "postos": 0,
+                                   "modulos": modulos, "inicio": dia(-1), "fim": dia(365), "tolerancia": 15, "emitida": dia(0) }))
+        };
+        assert_eq!(rpc(&arc, "api.estado", Value::Null).await["licenca"]["experiencia"], true);
+        rpc(&arc, "licenca.activar", json!({ "chave": lic("COMERCIO", json!([])) })).await;
+        let (s, _, v) = http("GET", "/api/v1", Some(&k4), None);
+        assert_eq!((s, v["erro"]["codigo"].as_str()), (403, Some("plano_sem_api")), "{v}");
+        assert!(v["erro"]["mensagem"].as_str().unwrap().contains("Comércio"));
+        let e = rpc(&arc, "api.estado", Value::Null).await;
+        assert_eq!((e["licenca"]["incluida"].as_bool(), e["licenca"]["plano"].as_str()), (Some(false), Some("Comércio")));
+        assert!(rpc_err(&arc, "api.guardar", json!({ "ativo": true, "porta": porta, "rede": false })).await.contains("plano Empresa"));
+        rpc(&arc, "licenca.activar", json!({ "chave": lic("COMERCIO", json!(["api"])) })).await;
+        assert_eq!(http("GET", "/api/v1", Some(&k4), None).0, 200, "o módulo «api» acrescenta a API ao plano Comércio");
+        rpc(&arc, "licenca.activar", json!({ "chave": lic("EMPRESA", json!([])) })).await;
+        assert_eq!(http("GET", "/api/v1", Some(&k4), None).0, 200);
+        assert_eq!(rpc(&arc, "api.estado", Value::Null).await["licenca"]["incluida"], true);
+    }
+
     // ---- desligar: a porta fecha ----
     let e = rpc(&arc, "api.guardar", json!({ "ativo": false, "porta": porta, "rede": false })).await;
     assert!(e["a_servir"].is_null());

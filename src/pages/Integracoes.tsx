@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Ban, Copy, FileJson, KeyRound, Monitor, Network, Pencil, Plug, Plus, RefreshCw } from "lucide-react";
@@ -43,6 +44,8 @@ interface EstadoApi {
   rede: boolean;
   a_servir: number | null;
   erro: string | null;
+  /** A API faz parte do plano Empresa (e da experiência); nos outros planos, do módulo «api» da licença. */
+  licenca: { incluida: boolean; experiencia: boolean; plano: string; mensagem: string | null };
   enderecos: string[];
   modo_rede: string;
   permissoes: PermissaoApi[];
@@ -191,6 +194,26 @@ export default function Integracoes() {
         </Card>
       ) : (
         <div className="space-y-5">
+          {!e.licenca.incluida && (
+            <Card className="max-w-4xl border-accent/40 bg-accent-50/60">
+              <div className="flex items-start gap-3 p-4">
+                <AlertTriangle className="mt-0.5 size-5 shrink-0 text-[#9a6514]" />
+                <div className="space-y-2">
+                  <p className="font-medium">A API de integração não faz parte do plano {e.licenca.plano}</p>
+                  <p className="text-[13px] text-ink-2">{e.licenca.mensagem}</p>
+                  <p className="text-[13px] text-ink-2">Pode preparar as chaves; os pedidos são recusados até a licença incluir a API.</p>
+                  <Link to="/licenca" className="inline-block text-[13px] font-medium text-brand hover:underline">
+                    Licença e Assinatura →
+                  </Link>
+                </div>
+              </div>
+            </Card>
+          )}
+          {e.licenca.experiencia && (
+            <p className="max-w-4xl text-[12.5px] text-ink-3">
+              Durante a experiência a API está disponível. Depois faz parte do plano Empresa; nos planos Essencial e Comércio acrescenta-se com o módulo API.
+            </p>
+          )}
           <Servidor e={e} base={base} onGuardado={atualizar} />
 
           <Card>

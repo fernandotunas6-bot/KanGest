@@ -847,6 +847,15 @@ async fn processar(st: &AppState, p: &Pedido, ip: IpAddr) -> (Resposta, Option<i
             return (r, id, false);
         }
     };
+    // a API faz parte do plano Empresa (ou do módulo «api» da licença)
+    match services::licenca::calcular(st).await {
+        Ok(e) => {
+            if let Err(m) = services::licenca::api_incluida(&e) {
+                return (Resposta::erro(403, "plano_sem_api", m), Some(chave.id), true);
+            }
+        }
+        Err(e) => return (Resposta::from(e), Some(chave.id), true),
+    }
     let restantes = match limite(&chave) {
         Ok(r) => r,
         Err(r) => return (r, Some(chave.id), true),
@@ -1924,6 +1933,8 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
         let (_, perms) = permissoes_efectivas(p, &perfil, u.get::<Option<String>, _>("permissoes").as_deref()).await;
         utilizadores.push(json!({ "id": u.get::<i64, _>("id"), "nome": u.get::<String, _>("nome"), "login": u.get::<String, _>("login"), "perfil": perfil, "permissoes": perms }));
     }
+    let lic = services::licenca::calcular(st).await?;
+    let incluida = services::licenca::api_incluida(&lic);
     let servir = a_servir();
     let enderecos: Vec<String> = if cfg.rede { crate::rede::enderecos_locais() } else { Vec::new() };
     Ok(json!({
@@ -1931,6 +1942,12 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
         "porta": cfg.porta,
         "rede": cfg.rede,
         "a_servir": servir.map(|s| s.0),
+        "licenca": {
+            "incluida": incluida.is_ok(),
+            "experiencia": lic.plano == "EXPERIENCIA",
+            "plano": services::licenca::nome_plano(&lic.plano),
+            "mensagem": incluida.err(),
+        },
         "erro": ERRO.lock().unwrap().clone(),
         "enderecos": enderecos,
         "modo_rede": crate::rede::config().modo,
@@ -1963,6 +1980,7 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
     }
     let rede = g.rede.unwrap_or(true);
     if g.ativo {
+        services::licenca::api_incluida(&services::licenca::calcular(st).await?).map_err(AppError::msg)?;
         let app = APP.get().cloned().ok_or_else(|| AppError::msg("Feche e reabra o KanGest para ligar a API."))?;
         if let Err(e) = iniciar(app, porta, rede) {
             *ERRO.lock().unwrap() = Some(e.to_string());

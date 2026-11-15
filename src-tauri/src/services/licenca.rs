@@ -172,6 +172,26 @@ pub struct Estado {
     pub sincronizada_em: Option<String>,
     /// Email usado no registo.
     pub email_registo: Option<String>,
+    /// Módulos extra da licença (ex.: «api» acrescenta a API de integração aos planos Essencial e Comércio).
+    pub modulos: Vec<String>,
+}
+
+/// Módulo da licença que acrescenta a API de integração aos planos que não a incluem.
+pub const MODULO_API: &str = "api";
+
+/// A API de integração faz parte do plano Empresa e do período de experiência; nos planos Essencial e Comércio
+/// acrescenta-se com o módulo «api» na licença. O erro traz a explicação para o ecrã e para quem chama a API.
+pub fn api_incluida(e: &Estado) -> Result<(), String> {
+    if e.modo == "RELOGIO" {
+        return Err(e.mensagem.clone());
+    }
+    if matches!(e.plano.as_str(), "EXPERIENCIA" | "EMPRESA") || e.modulos.iter().any(|m| m.eq_ignore_ascii_case(MODULO_API)) {
+        return Ok(());
+    }
+    Err(format!(
+        "A API de integração faz parte do plano Empresa (o desta licença é {}). Peça a mudança de plano ou o módulo API em Sistema → Licença e Assinatura.",
+        nome_plano(&e.plano)
+    ))
 }
 
 /// Data de instalação (o início do período de experiência). Nas bases antigas, conta a partir de hoje.
@@ -235,6 +255,7 @@ pub async fn calcular(st: &AppState) -> AppResult<Estado> {
         registada: cfg_ler(p, "licenca.registada").await?.as_deref() == Some("1"),
         sincronizada_em: cfg_ler(p, "licenca.sincronizada_em").await?,
         email_registo: cfg_ler(p, "licenca.registo_email").await?,
+        modulos: Vec::new(),
     };
 
     if let Some(visto) = relogio_atrasado(p).await? {
@@ -259,6 +280,7 @@ pub async fn calcular(st: &AppState) -> AppResult<Estado> {
                 } else if let (Some(inicio), Some(fim)) = (data(&lic.inicio), data(&lic.fim)) {
                     e.plano = lic.plano.clone();
                     e.postos = lic.postos;
+                    e.modulos = lic.modulos.clone();
                     e.licenca_id = Some(lic.id.clone());
                     e.empresa = Some(lic.empresa.clone());
                     e.fim = Some(lic.fim.clone());
