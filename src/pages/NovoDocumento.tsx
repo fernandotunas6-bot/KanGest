@@ -21,6 +21,8 @@ interface L {
   descricao: string;
   quantidade: number;
   preco: string; // s/ IVA, texto editável
+  /** PVP com IVA conhecido (do artigo ou da linha de origem); «preços com IVA incluído» parte dele. Some ao editar o preço. */
+  pvp?: number | null;
   desconto: number;
   taxa: number;
   unidade: string | null;
@@ -238,6 +240,7 @@ export default function NovoDocumento() {
             quantidade,
             max,
             preco: toInputKz(l.preco_unitario),
+            pvp: l.pvp_unitario ?? null,
             desconto: l.desconto_pct,
             taxa: l.taxa_iva_pct,
             unidade: l.unidade,
@@ -264,9 +267,24 @@ export default function NovoDocumento() {
     enabled: !!entidade && entidade.id !== 1 && !eStock,
   }).data?.documentos.reduce((s, d) => s + d.valor_pendente, 0);
 
+  // «preços com IVA incluído» (vendas): a linha parte do PVP com IVA e o IVA sai do total, como no servidor
+  const comIva = !!t?.precos_com_iva && grupo === "VENDAS" && !eStock;
   const calc = useMemo(
     () =>
       linhas.map((l) => {
+        if (comIva) {
+          const g = l.pvp ?? Math.round((parseKz(l.preco) * (100 + l.taxa)) / 100);
+          const brutoG = Math.round(l.quantidade * g);
+          const pct = 100 - ((100 - l.desconto) * (100 - descGlobal)) / 100;
+          const descLinhaG = Math.round((brutoG * l.desconto) / 100);
+          const descG = Math.round((brutoG * pct) / 100);
+          const total = brutoG - descG;
+          const iva = Math.round((total * l.taxa) / (100 + l.taxa));
+          const semIva = (v: number) => Math.round((v * 100) / (100 + l.taxa));
+          const desc = semIva(descG);
+          const descLinha = semIva(descLinhaG);
+          return { bruto: total - iva + desc, descLinha, descGlobal: desc - descLinha, desc, liq: total - iva, iva, total };
+        }
         const bruto = Math.round(l.quantidade * Math.round(parseKz(l.preco) * fator));
         const pct = 100 - ((100 - l.desconto) * (100 - descGlobal)) / 100;
         const descLinha = Math.round((bruto * l.desconto) / 100);
@@ -275,7 +293,7 @@ export default function NovoDocumento() {
         const iva = eStock ? 0 : Math.round((liq * l.taxa) / 100);
         return { bruto, descLinha, descGlobal: desc - descLinha, desc, liq, iva, total: liq + iva };
       }),
-    [linhas, descGlobal, eStock, fator],
+    [linhas, descGlobal, eStock, fator, comIva],
   );
   const tot = calc.reduce(
     (s, c) => ({ bruto: s.bruto + c.bruto, descLinha: s.descLinha + c.descLinha, descGlobal: s.descGlobal + c.descGlobal, liq: s.liq + c.liq, iva: s.iva + c.iva, total: s.total + c.total }),
@@ -296,8 +314,11 @@ export default function NovoDocumento() {
   const entradaStock = tipo?.stock === 1 || tipo?.stock === 3;
 
   function adicionar(a: Artigo) {
-    const base = eCompra ? a.custo : eStock ? a.custo_medio : [a.preco1, a.preco2, a.preco3, a.preco4][(entidade?.nivel_preco ?? 1) - 1] || a.preco1;
+    const nivel = [a.preco1, a.preco2, a.preco3, a.preco4][(entidade?.nivel_preco ?? 1) - 1] ? (entidade?.nivel_preco ?? 1) : 1;
+    const base = eCompra ? a.custo : eStock ? a.custo_medio : [a.preco1, a.preco2, a.preco3, a.preco4][nivel - 1];
     const preco = estrangeira && fator > 0 ? Math.round(base / fator) : base;
+    const pvpGuardado = [a.pvp1, a.pvp2, a.pvp3, a.pvp4][nivel - 1];
+    const pvp = !eCompra && !eStock && pvpGuardado != null && Math.round((pvpGuardado * 100) / (100 + a.taxa_pct)) === base ? pvpGuardado : null;
     // «Duplicar Linha» desligado no tipo: o mesmo artigo soma à linha existente.
     if (tipo && !tipo.repetir_linhas && !inventario) {
       const existente = linhas.find((l) => l.artigo_id === a.id && !l.lote);
@@ -315,6 +336,7 @@ export default function NovoDocumento() {
         descricao: a.descricao,
         quantidade: inventario ? a.stock : 1,
         preco: toInputKz(preco),
+        pvp,
         desconto: eCompra || eStock ? 0 : Math.max(entidade?.desconto ?? 0, a.promo_atual ?? 0),
         taxa: a.taxa_pct,
         custo: a.custo_medio,
@@ -362,6 +384,7 @@ export default function NovoDocumento() {
           descricao: l.descricao,
           quantidade: l.quantidade,
           preco_unitario: parseKz(l.preco),
+          pvp_unitario: comIva && l.pvp != null ? l.pvp : undefined,
           desconto_pct: l.desconto,
           lote: l.controla_lote && l.lote.trim() ? l.lote.trim() : null,
           validade: l.controla_lote && l.validade ? l.validade : null,
@@ -670,7 +693,7 @@ export default function NovoDocumento() {
                     ) : (
                       <>
                         <Td>
-                          <Input className="num h-8 min-w-[88px] px-2 text-right" value={l.preco} onChange={(e) => upd(l.key, { preco: e.target.value })} disabled={!!tipo.credito && !!origemId} />
+                          <Input className="num h-8 min-w-[88px] px-2 text-right" value={l.preco} onChange={(e) => upd(l.key, { preco: e.target.value, pvp: null })} disabled={!!tipo.credito && !!origemId} />
                         </Td>
                         {!eStock && (
                           <Td>

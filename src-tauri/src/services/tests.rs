@@ -3159,3 +3159,40 @@ async fn nif_angolano_validado() {
     assert!(super::entidades::nif_angolano_valido("999999999"));
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+#[tokio::test]
+async fn precos_com_iva_incluido() {
+    let (st, pasta) = base_com_admin("iva-incluido").await;
+    // PVP de prateleira: 1 000,00 Kz com IVA (14%)
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Leite", "tipo": "S", "taxa_iva_id": 1, "preco1": 0, "pvp1": 100000 })).await["id"].as_i64().unwrap();
+    let art = rpc(&st, "artigos.obter", json!({ "id": a })).await;
+    assert_eq!((art["preco1"].as_i64(), art["pvp1"].as_i64()), (Some(87719), Some(100000)), "o preço sem IVA sai do PVP");
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let venda = |q: i64| json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": q }], "pagamentos": [{ "modo": "NU", "valor": 100000 * q }] });
+
+    // sem a opção: o cálculo antigo (a partir do preço sem IVA) dá 2 999,99
+    let antes = rpc(&st, "documentos.emitir", venda(3)).await;
+    assert_eq!(antes["documento"]["total"], 299999);
+
+    // com a opção: 3 × 1 000,00 = 3 000,00 e o IVA sai do total
+    rpc(&st, "parametros.opcoesGuardar", json!({ "precos_com_iva": true })).await;
+    assert_eq!(rpc(&st, "tabelas", Value::Null).await["precos_com_iva"], true);
+    let fr = rpc(&st, "documentos.emitir", venda(3)).await;
+    let d = &fr["documento"];
+    assert_eq!((d["total"].as_i64(), d["total_iva"].as_i64(), d["total_liquido"].as_i64()), (Some(300000), Some(36842), Some(263158)));
+    assert_eq!(fr["linhas"][0]["pvp_unitario"], 100000);
+    assert_eq!(fr["documento"]["troco"], 0);
+
+    // desconto de linha (10%) e desconto global em Kz, como o cliente os vê
+    let com_desc = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1, "desconto_pct": 10 }], "pagamentos": [{ "modo": "NU", "valor": 90000 }] })).await;
+    assert_eq!(com_desc["documento"]["total"], 90000);
+    let global = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "desconto_global_valor": 50000, "linhas": [{ "artigo_id": a, "quantidade": 3 }], "pagamentos": [{ "modo": "NU", "valor": 250000 }] })).await;
+    assert_eq!(global["documento"]["total"], 250000, "3 000,00 − 500,00");
+
+    // a nota de crédito parte do PVP da factura: 1 unidade da venda de 3 × 1 000,00 = 1 000,00
+    let nc = rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": 1, "doc_origem_id": d["id"], "motivo": "Devolução", "linhas": [{ "artigo_id": a, "quantidade": 1 }] })).await;
+    assert_eq!(nc["documento"]["total"], 100000);
+    // a cadeia e os totais continuam coerentes
+    assert_eq!(rpc(&st, "agt.verificarIntegridade", Value::Null).await["ok"], true);
+    let _ = std::fs::remove_dir_all(&pasta);
+}

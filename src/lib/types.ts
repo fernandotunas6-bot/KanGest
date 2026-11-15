@@ -91,6 +91,11 @@ export interface Artigo {
   preco2: number;
   preco3: number;
   preco4: number;
+  /** PVP com IVA guardado de cada nível (valor mestre com «preços com IVA incluído»). */
+  pvp1?: number | null;
+  pvp2?: number | null;
+  pvp3?: number | null;
+  pvp4?: number | null;
   qtd_minima: number;
   qtd_maxima: number;
   controla_stock: number;
@@ -178,6 +183,8 @@ export interface Tabelas {
   posto_id: number;
   armazem_id: number;
   posto: Posto;
+  /** Opção de venda «preços com IVA incluído»: as linhas partem do PVP com IVA. */
+  precos_com_iva?: boolean;
 }
 
 export type Grupo = "VENDAS" | "COMPRAS" | "STOCK";
@@ -209,6 +216,8 @@ export interface OpcoesImpresso {
   valor_extenso: boolean;
   assinaturas: boolean;
   mostrar_operador: boolean;
+  /** Vendas calculadas a partir do PVP com IVA (3 × 1 000,00 = 3 000,00). */
+  precos_com_iva?: boolean;
 }
 
 export interface Transporte {
@@ -254,6 +263,8 @@ export interface DocLinha {
   quantidade: number;
   unidade: string | null;
   preco_unitario: number;
+  /** Preço unitário com IVA (linhas vendidas com «preços com IVA incluído»). */
+  pvp_unitario?: number | null;
   desconto_pct: number;
   valor_desconto: number;
   taxa_iva_pct: number;

@@ -51,6 +51,7 @@ interface Linha {
   artigo: Artigo;
   quantidade: number;
   preco: number; // sem IVA (cêntimos)
+  pvp?: number | null; // com IVA (cêntimos): o valor mestre com «preços com IVA incluído»
   desconto: number; // %
   descricao: string | null; // descrição de linha (F9)
   lote?: string | null; // lote escolhido (vazio = o que expira primeiro)
@@ -58,7 +59,7 @@ interface Linha {
 }
 
 type DescGlobal = { tipo: "pct" | "valor"; valor: number }; // pct: %, valor: cêntimos
-type LinhaGuardada = { artigo_id: number; quantidade: number; preco: number; desconto: number; descricao?: string | null };
+type LinhaGuardada = { artigo_id: number; quantidade: number; preco: number; pvp?: number | null; desconto: number; descricao?: string | null };
 
 const OPCOES_PADRAO: PostoOpcoes = {
   formato: "ticket",
@@ -78,9 +79,59 @@ const CONSUMIDOR: Entidade = {
 const uid = () => crypto.randomUUID();
 const precoNivel = (a: Artigo, nivel: number) => [a.preco1, a.preco2, a.preco3, a.preco4][nivel - 1] || a.preco1;
 const comIvaArt = (preco: number, a: Artigo) => Math.round(preco * (1 + a.taxa_pct / 100));
+const semIvaArt = (pvp: number, a: Artigo) => Math.round((pvp * 100) / (100 + a.taxa_pct));
+/** PVP com IVA do nível de preço: o guardado, se ainda bater com o preço sem IVA; senão, calculado (como o servidor). */
+const pvpNivel = (a: Artigo, nivel: number) => {
+  const n = [a.preco1, a.preco2, a.preco3, a.preco4][nivel - 1] ? nivel : 1;
+  const preco = precoNivel(a, n);
+  const g = [a.pvp1, a.pvp2, a.pvp3, a.pvp4][n - 1];
+  return g != null && semIvaArt(g, a) === preco ? g : comIvaArt(preco, a);
+};
+
+type CalcLinha = { bruto: number; desc: number; liquido: number; iva: number; total: number };
+
+function resumir(linhas: Linha[], calc: CalcLinha[]) {
+  const t = calc.reduce(
+    (s, c, i) => ({ bruto: s.bruto + c.bruto, desc: s.desc + c.desc, iva: s.iva + c.iva, total: s.total + c.total, itens: s.itens + linhas[i].quantidade }),
+    { bruto: 0, desc: 0, iva: 0, total: 0, itens: 0 },
+  );
+  const maxDesc = calc.reduce((m, c) => Math.max(m, c.bruto ? (c.desc * 100) / c.bruto : 0), 0);
+  return { linhas: calc, ...t, maxDesc };
+}
+
+/** «Preços com IVA incluído»: a linha parte do PVP (quantidade × PVP − desconto) e o IVA sai do total. */
+function calcularComIva(linhas: Linha[], g: DescGlobal) {
+  const gp = g.tipo === "pct" ? g.valor : 0;
+  const base = linhas.map((l) => {
+    const brutoG = Math.round(l.quantidade * (l.pvp ?? comIvaArt(l.preco, l.artigo)));
+    const pct = 100 - ((100 - l.desconto) * (100 - gp)) / 100;
+    const descG = Math.round((brutoG * pct) / 100);
+    return { descG, total: brutoG - descG };
+  });
+  if (g.tipo === "valor" && g.valor > 0 && base.length) {
+    const tot = base.reduce((s, b) => s + b.total, 0);
+    const valor = Math.min(g.valor, tot);
+    let restante = valor;
+    base.forEach((b, i) => {
+      const quota = i === base.length - 1 ? restante : Math.round((valor * b.total) / (tot || 1));
+      const d = Math.min(quota, b.total, restante);
+      restante -= d;
+      b.total -= d;
+      b.descG += d;
+    });
+  }
+  const calc = base.map((b, i) => {
+    const t = linhas[i].artigo.taxa_pct;
+    const iva = Math.round((b.total * t) / (100 + t));
+    const desc = Math.round((b.descG * 100) / (100 + t));
+    return { bruto: b.total - iva + desc, desc, liquido: b.total - iva, iva, total: b.total };
+  });
+  return resumir(linhas, calc);
+}
 
 /** Mesmas regras de arredondamento do backend (documentos::emitir). */
-function calcular(linhas: Linha[], g: DescGlobal) {
+function calcular(linhas: Linha[], g: DescGlobal, comIva = false) {
+  if (comIva) return calcularComIva(linhas, g);
   const gp = g.tipo === "pct" ? g.valor : 0;
   const base = linhas.map((l) => {
     const bruto = Math.round(l.quantidade * l.preco);
@@ -104,12 +155,7 @@ function calcular(linhas: Linha[], g: DescGlobal) {
     const iva = Math.round((b.liquido * linhas[i].artigo.taxa_pct) / 100);
     return { ...b, iva, total: b.liquido + iva };
   });
-  const t = calc.reduce(
-    (s, c, i) => ({ bruto: s.bruto + c.bruto, desc: s.desc + c.desc, iva: s.iva + c.iva, total: s.total + c.total, itens: s.itens + linhas[i].quantidade }),
-    { bruto: 0, desc: 0, iva: 0, total: 0, itens: 0 },
-  );
-  const maxDesc = calc.reduce((m, c) => Math.max(m, c.bruto ? (c.desc * 100) / c.bruto : 0), 0);
-  return { linhas: calc, ...t, maxDesc };
+  return resumir(linhas, calc);
 }
 
 type Teclado = { modo: "qtd" | "preco" | "desc" | "global" } | null;
@@ -167,7 +213,8 @@ export default function Pos() {
   });
 
   const focar = () => setTimeout(() => buscaRef.current?.focus(), 30);
-  const totais = useMemo(() => calcular(linhas, descGlobal), [linhas, descGlobal]);
+  const comIva = !!tabelas.data?.precos_com_iva;
+  const totais = useMemo(() => calcular(linhas, descGlobal, comIva), [linhas, descGlobal, comIva]);
   const idx = sel ?? (linhas.length ? linhas.length - 1 : null); // linha activa (seleccionada ou a última)
   const linhaAtiva = idx !== null ? linhas[idx] : null;
   const algumModal = pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido;
@@ -191,7 +238,10 @@ export default function Pos() {
           return n;
         }
         setSel(ls.length);
-        return [...ls, { key: uid(), artigo: a, quantidade, preco: precoNivel(a, cliente.nivel_preco), desconto: Math.max(cliente.desconto || 0, a.promo_atual || 0), descricao: null }];
+        return [
+          ...ls,
+          { key: uid(), artigo: a, quantidade, preco: precoNivel(a, cliente.nivel_preco), pvp: pvpNivel(a, cliente.nivel_preco), desconto: Math.max(cliente.desconto || 0, a.promo_atual || 0), descricao: null },
+        ];
       });
     },
     [cliente, opcoes.repetir_linhas],
@@ -223,7 +273,9 @@ export default function Pos() {
   function mudarCliente(c: Entidade) {
     setCliente(c);
     // reaplica nível de preço e desconto do cliente às linhas não alteradas manualmente
-    setLinhas((ls) => ls.map((l) => (l.manual ? l : { ...l, preco: precoNivel(l.artigo, c.nivel_preco), desconto: Math.max(c.desconto || 0, l.artigo.promo_atual || 0) })));
+    setLinhas((ls) =>
+      ls.map((l) => (l.manual ? l : { ...l, preco: precoNivel(l.artigo, c.nivel_preco), pvp: pvpNivel(l.artigo, c.nivel_preco), desconto: Math.max(c.desconto || 0, l.artigo.promo_atual || 0) })),
+    );
   }
 
   function limpar() {
@@ -265,14 +317,14 @@ export default function Pos() {
     } else if (modo === "preco" && i !== null) {
       const l = linhas[i];
       const preco = Math.round((valor * 100) / (1 + l.artigo.taxa_pct / 100));
-      comPermissao("pos.alterar_preco", "Alterar preço", () => atualizar(i, { preco, manual: true }));
+      comPermissao("pos.alterar_preco", "Alterar preço", () => atualizar(i, { preco, pvp: Math.round(valor * 100), manual: true }));
     } else if (modo === "desc" && i !== null) {
       if (valor > 100) return toast.error("Desconto inválido.");
       comPermissao("pos.desconto", `Desconto de ${valor}%`, () => atualizar(i, { desconto: valor, manual: true }), valor);
     } else if (modo === "global") {
       const g: DescGlobal = descGlobal.tipo === "pct" ? { tipo: "pct", valor } : { tipo: "valor", valor: Math.round(valor * 100) };
       if (g.tipo === "pct" && g.valor > 100) return toast.error("Desconto inválido.");
-      const efetivo = calcular(linhas, g).maxDesc;
+      const efetivo = calcular(linhas, g, comIva).maxDesc;
       comPermissao("pos.desconto", "Desconto global", () => setDescGlobal(g), efetivo);
     }
     focar();
@@ -287,7 +339,7 @@ export default function Pos() {
     setLinhas(
       origemLinhas
         .filter((l) => mapa.has(l.artigo_id))
-        .map((l) => ({ key: uid(), artigo: mapa.get(l.artigo_id)!, quantidade: l.quantidade, preco: l.preco, desconto: l.desconto, descricao: l.descricao ?? null, manual: true })),
+        .map((l) => ({ key: uid(), artigo: mapa.get(l.artigo_id)!, quantidade: l.quantidade, preco: l.preco, pvp: l.pvp ?? null, desconto: l.desconto, descricao: l.descricao ?? null, manual: true })),
     );
     setSel(null);
   }
@@ -304,7 +356,7 @@ export default function Pos() {
         descricao,
         total: totais.total,
         dados: {
-          linhas: linhas.map((l) => ({ artigo_id: l.artigo.id, quantidade: l.quantidade, preco: l.preco, desconto: l.desconto, descricao: l.descricao })),
+          linhas: linhas.map((l) => ({ artigo_id: l.artigo.id, quantidade: l.quantidade, preco: l.preco, pvp: l.pvp ?? null, desconto: l.desconto, descricao: l.descricao })),
           desc_global: descGlobal,
           origem,
         },
@@ -340,7 +392,7 @@ export default function Pos() {
     try {
       const d = await call<DocCompleto>("documentos.obter", { id });
       await carregarLinhas(
-        d.linhas.map((l) => ({ artigo_id: l.artigo_id, quantidade: l.quantidade, preco: l.preco_unitario, desconto: l.desconto_pct, descricao: l.descricao })),
+        d.linhas.map((l) => ({ artigo_id: l.artigo_id, quantidade: l.quantidade, preco: l.preco_unitario, pvp: l.pvp_unitario ?? null, desconto: l.desconto_pct, descricao: l.descricao })),
       );
       await carregarCliente(d.documento.entidade_id);
       setOrigem({ id: d.documento.id, numero: d.documento.numero_doc });
@@ -370,7 +422,7 @@ export default function Pos() {
       setLinhas(
         guardado.linhas
           .filter((l) => mapa.has(l.artigo_id))
-          .map((l) => ({ key: uid(), artigo: mapa.get(l.artigo_id)!, quantidade: l.quantidade, preco: l.preco, desconto: l.desconto, descricao: l.descricao ?? null, lote: l.lote ?? null, manual: !!l.manual })),
+          .map((l) => ({ key: uid(), artigo: mapa.get(l.artigo_id)!, quantidade: l.quantidade, preco: l.preco, pvp: l.pvp ?? null, desconto: l.desconto, descricao: l.descricao ?? null, lote: l.lote ?? null, manual: !!l.manual })),
       );
       setDescGlobal(guardado.desc_global ?? { tipo: "pct", valor: 0 });
       setOrigem(guardado.origem ?? null);
@@ -387,7 +439,7 @@ export default function Pos() {
         localStorage.setItem(
           chaveCarrinho,
           JSON.stringify({
-            linhas: linhas.map((l) => ({ artigo_id: l.artigo.id, quantidade: l.quantidade, preco: l.preco, desconto: l.desconto, descricao: l.descricao, lote: l.lote ?? null, manual: !!l.manual })),
+            linhas: linhas.map((l) => ({ artigo_id: l.artigo.id, quantidade: l.quantidade, preco: l.preco, pvp: l.pvp ?? null, desconto: l.desconto, descricao: l.descricao, lote: l.lote ?? null, manual: !!l.manual })),
             cliente: cliente.id === 1 ? null : cliente.id,
             desc_global: descGlobal,
             origem,
@@ -752,7 +804,7 @@ export default function Pos() {
                         {!!a.promo_atual && <span className="rounded bg-accent-50 px-1.5 py-px font-medium text-accent-ink">−{numero(a.promo_atual, 2)}%</span>}
                       </span>
                       <div className="mt-auto flex items-end justify-between gap-2">
-                        <span className={cn("num text-[16px] font-semibold", semStock ? "text-ink-3" : "text-brand-700")}>{kzNum(comIvaArt(precoNivel(a, cliente.nivel_preco), a))}</span>
+                        <span className={cn("num text-[16px] font-semibold", semStock ? "text-ink-3" : "text-brand-700")}>{kzNum(pvpNivel(a, cliente.nivel_preco))}</span>
                         {a.tipo === "S" ? (
                           <span className="text-[11px] text-ink-3">Serviço</span>
                         ) : (
@@ -872,7 +924,7 @@ export default function Pos() {
                             {l.descricao || l.artigo.descricao}
                           </div>
                           <div className="num text-[12px] text-ink-3">
-                            {kzNum(comIvaArt(l.preco, l.artigo))} / {l.artigo.unidade ?? "UN"} · IVA {l.artigo.taxa_pct}%
+                            {kzNum(l.pvp ?? comIvaArt(l.preco, l.artigo))} / {l.artigo.unidade ?? "UN"} · IVA {l.artigo.taxa_pct}%
                             {l.desconto ? ` · \u2212${numero(l.desconto, 2)}%` : ""}
                           </div>
                           {/* preço líquido (já com os descontos) abaixo do custo médio: só aviso, a venda continua possível */}
@@ -1006,7 +1058,7 @@ export default function Pos() {
         sufixo={teclado?.modo === "qtd" ? linhaAtiva?.artigo.unidade ?? "" : teclado?.modo === "desc" || (teclado?.modo === "global" && descGlobal.tipo === "pct") ? "%" : "Kz"}
         ajuda={
           teclado?.modo === "preco"
-            ? `Preço actual: ${kz(linhaAtiva ? comIvaArt(linhaAtiva.preco, linhaAtiva.artigo) : 0)}`
+            ? `Preço actual: ${kz(linhaAtiva ? (linhaAtiva.pvp ?? comIvaArt(linhaAtiva.preco, linhaAtiva.artigo)) : 0)}`
             : teclado?.modo === "desc" || teclado?.modo === "global"
               ? sessao?.limite_desconto
                 ? `O seu limite de desconto é ${sessao.limite_desconto}%.`
@@ -1021,7 +1073,7 @@ export default function Pos() {
             : teclado.modo === "qtd"
               ? String(linhaAtiva.quantidade).replace(".", ",")
               : teclado.modo === "preco"
-                ? (comIvaArt(linhaAtiva.preco, linhaAtiva.artigo) / 100).toFixed(2).replace(".", ",")
+                ? ((linhaAtiva.pvp ?? comIvaArt(linhaAtiva.preco, linhaAtiva.artigo)) / 100).toFixed(2).replace(".", ",")
                 : teclado.modo === "desc"
                   ? String(linhaAtiva.desconto || "")
                   : descGlobal.tipo === "pct"
@@ -1225,6 +1277,8 @@ function Pagamento({
           artigo_id: l.artigo.id,
           quantidade: l.quantidade,
           preco_unitario: l.preco,
+          // com «preços com IVA incluído» o servidor parte do PVP da linha
+          pvp_unitario: l.pvp ?? undefined,
           desconto_pct: l.desconto,
           descricao: l.descricao ?? undefined,
           lote: l.lote || undefined,

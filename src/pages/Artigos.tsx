@@ -187,7 +187,15 @@ function ArtigoForm({
   const qc = useQueryClient();
   const [a, setA] = useState<Partial<Artigo>>(inicial);
   const taxa = t?.taxas.find((x) => x.id === a.taxa_iva_id)?.percentagem ?? 0;
-  const [pvp, setPvp] = useState(() => [a.preco1, a.preco2, a.preco3, a.preco4].map((p) => toInputKz(comIva(p ?? 0, taxa))));
+  // PVP com IVA: o guardado quando bate com o preço sem IVA (é o valor mestre); senão, calculado
+  const [pvp, setPvp] = useState(() =>
+    [
+      [a.preco1, a.pvp1],
+      [a.preco2, a.pvp2],
+      [a.preco3, a.pvp3],
+      [a.preco4, a.pvp4],
+    ].map(([p, g]) => toInputKz(g != null && semIva(g, taxa) === (p ?? 0) ? g : comIva(p ?? 0, taxa))),
+  );
   const [custo, setCusto] = useState(toInputKz(a.custo ?? 0));
   const [busy, setBusy] = useState(false);
   const [comps, setComps] = useState<Componente[]>([]);
@@ -232,6 +240,11 @@ function ArtigoForm({
         preco2: precos[1],
         preco3: precos[2],
         preco4: precos[3],
+        // o PVP com IVA escrito é o valor mestre (o servidor deriva dele o preço sem IVA)
+        pvp1: parseKz(pvp[0]),
+        pvp2: parseKz(pvp[1]),
+        pvp3: parseKz(pvp[2]),
+        pvp4: parseKz(pvp[3]),
         controla_stock: !!a.controla_stock && !a.composto,
         permite_negativo: !!a.permite_negativo,
         ativo: a.ativo === undefined ? true : !!a.ativo,

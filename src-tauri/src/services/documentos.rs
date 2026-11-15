@@ -21,10 +21,31 @@ pub struct LinhaIn {
     quantidade: f64,
     /// Preço unitário SEM IVA em cêntimos (na moeda do documento). Se omitido, usa o preço do artigo.
     preco_unitario: Option<i64>,
+    /// Preço unitário COM IVA em cêntimos (modo «preços com IVA incluído»); tem precedência sobre o anterior.
+    #[serde(default)]
+    pvp_unitario: Option<i64>,
     desconto_pct: Option<f64>,
     /// Lote (obrigatório nas entradas de artigos com controlo de lotes; nas saídas, se omitido, FEFO).
     lote: Option<String>,
     validade: Option<String>,
+}
+
+/// Preço com IVA a partir do preço sem IVA (cêntimos).
+pub fn com_iva(sem: i64, taxa: f64) -> i64 {
+    (sem as f64 * (100.0 + taxa) / 100.0).round() as i64
+}
+
+/// Preço sem IVA a partir do preço com IVA (cêntimos).
+pub fn sem_iva(com: i64, taxa: f64) -> i64 {
+    (com as f64 * 100.0 / (100.0 + taxa)).round() as i64
+}
+
+/// Opção «Preços com IVA incluído»: as vendas calculam-se a partir do PVP com IVA (o total da linha é
+/// quantidade × PVP, menos descontos) e o IVA sai do total, em vez de se somar a um preço sem IVA
+/// arredondado ao cêntimo (3 × 1 000,00 Kz dava 2 999,99 Kz).
+pub async fn precos_com_iva<'e, E: sqlx::SqliteExecutor<'e>>(e: E) -> AppResult<bool> {
+    let v: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'vendas.precos_com_iva'").fetch_optional(e).await?;
+    Ok(v.as_deref() == Some("1"))
 }
 
 /// Desconto da promoção do artigo se `data` (AAAA-MM-DD) estiver dentro do período; 0 fora dele.
@@ -242,6 +263,8 @@ struct Linha {
     quantidade: f64,
     unidade: Option<String>,
     preco: i64,
+    /// Preço unitário com IVA (só no modo «preços com IVA incluído»).
+    pvp: Option<i64>,
     desconto_pct: f64,
     valor_desconto: i64,
     taxa_id: Option<i64>,
@@ -486,6 +509,8 @@ struct ArtigoCreditavel {
     total: i64,
     /// Preço unitário sem IVA e desconto da primeira linha do artigo (os valores por omissão da nota).
     preco: i64,
+    /// PVP com IVA dessa linha (vendas feitas com «preços com IVA incluído»).
+    pvp: Option<i64>,
     desconto: f64,
     creditado_qtd: f64,
     creditado_total: i64,
@@ -500,15 +525,16 @@ struct Creditavel {
 
 async fn creditavel_tx(tx: &mut Transaction<'_, Sqlite>, origem_id: i64) -> AppResult<Creditavel> {
     let mut artigos = std::collections::BTreeMap::new();
-    let linhas: Vec<(i64, f64, i64, i64, f64, String)> = sqlx::query_as(
-        "SELECT artigo_id, quantidade, total, preco_unitario, desconto_pct, descricao FROM documento_linhas
+    type LinhaOrigem = (i64, f64, i64, i64, Option<i64>, f64, String);
+    let linhas: Vec<LinhaOrigem> = sqlx::query_as(
+        "SELECT artigo_id, quantidade, total, preco_unitario, pvp_unitario, desconto_pct, descricao FROM documento_linhas
          WHERE documento_id = ? AND artigo_id IS NOT NULL ORDER BY linha",
     )
     .bind(origem_id)
     .fetch_all(&mut **tx)
     .await?;
-    for (aid, q, t, preco, desconto, descricao) in linhas {
-        let e = artigos.entry(aid).or_insert(ArtigoCreditavel { descricao, quantidade: 0.0, total: 0, preco, desconto, creditado_qtd: 0.0, creditado_total: 0 });
+    for (aid, q, t, preco, pvp, desconto, descricao) in linhas {
+        let e = artigos.entry(aid).or_insert(ArtigoCreditavel { descricao, quantidade: 0.0, total: 0, preco, pvp, desconto, creditado_qtd: 0.0, creditado_total: 0 });
         e.quantidade += q;
         e.total += t;
     }
@@ -808,6 +834,8 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     // Preço/desconto alterados em vendas exigem permissão (ou PIN de supervisor).
     // Documentos com origem (NC, conversão de proforma) herdam os valores já autorizados.
     let verificar = tipo.grupo == "VENDAS" && matches!(tipo.classe.as_str(), "VENDA" | "PROFORMA" | "TRANSPORTE") && i.doc_origem_id.is_none();
+    // preços com IVA incluído (opção de venda): a linha calcula-se a partir do PVP com IVA
+    let modo_iva = tipo.grupo == "VENDAS" && precos_com_iva(&mut *tx).await?;
     let inventario = tipo.stock == 3;
     let mut preco_alterado = false;
     let mut desconto_extra = desc_global > 0.0 || desc_global_valor > 0;
@@ -825,6 +853,13 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::msg(format!("Artigo {aid} não encontrado.")))?;
+        // nível de preço do cliente; um nível sem preço usa o nível 1 (como o POS)
+        let nivel_preco = match nivel_preco {
+            2 if a.get::<i64, _>("preco2") > 0 => 2,
+            3 if a.get::<i64, _>("preco3") > 0 => 3,
+            4 if a.get::<i64, _>("preco4") > 0 => 4,
+            _ => 1,
+        };
         let preco_artigo = match tipo.grupo.as_str() {
             "COMPRAS" => a.get::<i64, _>("custo"),
             "STOCK" => a.get::<i64, _>("custo_medio"),
@@ -842,15 +877,6 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
             })?),
             None => None,
         };
-        let preco = match l.preco_unitario {
-            Some(p) if moeda != "AOA" => r(p as f64 * cambio),
-            Some(p) => p,
-            None => na_origem.map(|o| o.preco).unwrap_or(preco_artigo),
-        }
-        .max(0);
-        if preco != preco_artigo {
-            preco_alterado = true;
-        }
         // kit: o stock movimentado é o dos componentes
         let componentes: Vec<(i64, f64, bool, bool)> = if a.get::<i64, _>("composto") == 1 {
             sqlx::query_as::<_, (i64, f64, i64, i64)>(
@@ -871,6 +897,46 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         } else {
             (Some(a.get::<i64, _>("taxa_iva_id")), a.get::<f64, _>("percentagem"), a.get::<Option<String>, _>("motivo_isencao"))
         };
+        let (preco, pvp) = if modo_iva {
+            // PVP do artigo: o guardado, se ainda bater com o preço sem IVA (pode ter sido mexido por
+            // importações ou versões antigas); senão, calculado a partir dele
+            let coluna = match nivel_preco {
+                2 => "pvp2",
+                3 => "pvp3",
+                4 => "pvp4",
+                _ => "pvp1",
+            };
+            let g_artigo = a
+                .try_get::<Option<i64>, _>(coluna)
+                .ok()
+                .flatten()
+                .filter(|g| sem_iva(*g, taxa_pct) == preco_artigo)
+                .unwrap_or_else(|| com_iva(preco_artigo, taxa_pct));
+            let g = match (l.pvp_unitario, l.preco_unitario) {
+                (Some(g), _) => g,
+                (None, Some(p)) => com_iva(p, taxa_pct),
+                (None, None) => match na_origem {
+                    Some(o) => o.pvp.unwrap_or_else(|| com_iva(o.preco, taxa_pct)),
+                    None => g_artigo,
+                },
+            }
+            .max(0);
+            if g != g_artigo {
+                preco_alterado = true;
+            }
+            (sem_iva(g, taxa_pct), Some(g))
+        } else {
+            let preco = match l.preco_unitario {
+                Some(p) if moeda != "AOA" => r(p as f64 * cambio),
+                Some(p) => p,
+                None => na_origem.map(|o| o.preco).unwrap_or(preco_artigo),
+            }
+            .max(0);
+            if preco != preco_artigo {
+                preco_alterado = true;
+            }
+            (preco, None)
+        };
         // promoção do artigo em vigor na data do documento (só vendas): é o desconto por omissão
         // e, até esse valor, não precisa de autorização
         let promo = if tipo.grupo == "VENDAS" { promocao_vigente(&a, &data_doc) } else { 0.0 };
@@ -880,10 +946,23 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
             desconto_extra = true;
         }
         let desconto_pct = 100.0 - (100.0 - dl) * (100.0 - desc_global) / 100.0;
-        let bruto = r(l.quantidade * preco as f64);
-        let valor_desconto = r(bruto as f64 * desconto_pct / 100.0);
-        let liquido = bruto - valor_desconto;
-        let iva = r(liquido as f64 * taxa_pct / 100.0);
+        let (valor_desconto, liquido, iva, total) = match pvp {
+            // com IVA incluído: o total da linha é quantidade × PVP menos o desconto; o IVA sai do total
+            Some(g) => {
+                let bruto_g = r(l.quantidade * g as f64);
+                let desconto_g = r(bruto_g as f64 * desconto_pct / 100.0);
+                let total = bruto_g - desconto_g;
+                let iva = r(total as f64 * taxa_pct / (100.0 + taxa_pct));
+                (sem_iva(desconto_g, taxa_pct), total - iva, iva, total)
+            }
+            None => {
+                let bruto = r(l.quantidade * preco as f64);
+                let valor_desconto = r(bruto as f64 * desconto_pct / 100.0);
+                let liquido = bruto - valor_desconto;
+                let iva = r(liquido as f64 * taxa_pct / 100.0);
+                (valor_desconto, liquido, iva, liquido + iva)
+            }
+        };
         linhas.push(Linha {
             artigo_id: Some(aid),
             referencia: a.get("referencia"),
@@ -891,6 +970,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
             quantidade: l.quantidade,
             unidade: a.get("abreviatura"),
             preco,
+            pvp,
             desconto_pct,
             valor_desconto,
             taxa_id,
@@ -898,7 +978,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
             motivo: if taxa_pct == 0.0 && tipo.classe != "STOCK" { motivo_isencao.or(Some("M00".into())) } else { None },
             liquido,
             iva,
-            total: liquido + iva,
+            total,
             custo: a.get("custo_medio"),
             controla_stock: a.get::<i64, _>("controla_stock") == 1 && a.get::<String, _>("tipo") == "P" && componentes.is_empty(),
             permite_negativo: a.get::<i64, _>("permite_negativo") == 1,
@@ -911,7 +991,26 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     }
 
     // ---------- desconto global em valor (distribuído pelas linhas) ----------
-    if desc_global_valor > 0 && !linhas.is_empty() {
+    // com IVA incluído, o valor (em Kz, como o cliente o vê) abate ao total com IVA de cada linha
+    if desc_global_valor > 0 && !linhas.is_empty() && modo_iva {
+        let base: i64 = linhas.iter().map(|l| l.total).sum();
+        if desc_global_valor > base {
+            return Err(AppError::msg("O desconto global não pode ser superior ao total."));
+        }
+        let n = linhas.len();
+        let mut restante = desc_global_valor;
+        for (k, l) in linhas.iter_mut().enumerate() {
+            let quota = if k + 1 == n { restante } else { r(desc_global_valor as f64 * l.total as f64 / base as f64) };
+            let d = quota.min(l.total).min(restante);
+            restante -= d;
+            l.total -= d;
+            l.iva = r(l.total as f64 * l.taxa_pct / (100.0 + l.taxa_pct));
+            l.liquido = l.total - l.iva;
+            l.valor_desconto += sem_iva(d, l.taxa_pct);
+            let bruto = l.liquido + l.valor_desconto;
+            l.desconto_pct = if bruto > 0 { (l.valor_desconto as f64 * 1_000_000.0 / bruto as f64).round() / 10_000.0 } else { 0.0 };
+        }
+    } else if desc_global_valor > 0 && !linhas.is_empty() {
         let base: i64 = linhas.iter().map(|l| l.liquido).sum();
         if desc_global_valor > base {
             return Err(AppError::msg("O desconto global não pode ser superior ao total."));
@@ -1282,8 +1381,8 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     for (n, l) in linhas.iter().enumerate() {
         let linha_id = sqlx::query(
             "INSERT INTO documento_linhas (documento_id, linha, artigo_id, referencia, descricao, quantidade, unidade,
-                preco_unitario, desconto_pct, valor_desconto, taxa_iva_id, taxa_iva_pct, motivo_isencao, valor_liquido, valor_iva, total, custo)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                preco_unitario, desconto_pct, valor_desconto, taxa_iva_id, taxa_iva_pct, motivo_isencao, valor_liquido, valor_iva, total, custo, pvp_unitario)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(doc_id)
         .bind(n as i64 + 1)
@@ -1302,6 +1401,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         .bind(l.iva)
         .bind(l.total)
         .bind(l.custo)
+        .bind(l.pvp)
         .execute(&mut *tx)
         .await?
         .last_insert_rowid();

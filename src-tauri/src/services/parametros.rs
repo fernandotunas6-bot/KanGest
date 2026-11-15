@@ -17,6 +17,8 @@ pub const OPCOES: &[(&str, &str)] = &[
     ("valor_extenso", "doc.valor_extenso"),
     ("assinaturas", "doc.assinaturas"),
     ("mostrar_operador", "doc.mostrar_operador"),
+    // vendas calculadas a partir do PVP com IVA (retalho): 3 × 1 000,00 Kz = 3 000,00 Kz
+    ("precos_com_iva", "vendas.precos_com_iva"),
 ];
 
 /// Opções do impresso (A4/A5) para juntar ao documento.

@@ -22,6 +22,8 @@ pub async fn tabelas(st: &AppState) -> AppResult<Value> {
         "posto_id": st.posto().id,
         "armazem_id": st.posto().armazem_id,
         "posto": st.posto(),
+        // vendas calculadas a partir do PVP com IVA (Parametrização → Opções de venda)
+        "precos_com_iva": super::documentos::precos_com_iva(p).await?,
     }))
 }
 
@@ -63,7 +65,8 @@ const ARTIGO_SELECT: &str = "
     SELECT a.*, t.percentagem AS taxa_pct, t.descricao AS taxa_desc, u.abreviatura AS unidade,
            f.descricao AS familia, sf.descricao AS subfamilia,
            COALESCE(s.quantidade, 0) AS stock,
-           CAST(ROUND(a.preco1 * (1 + t.percentagem / 100.0)) AS INTEGER) AS preco1_iva,
+           CASE WHEN a.pvp1 IS NOT NULL AND CAST(ROUND(a.pvp1 * 100.0 / (100 + t.percentagem)) AS INTEGER) = a.preco1 THEN a.pvp1
+                ELSE CAST(ROUND(a.preco1 * (1 + t.percentagem / 100.0)) AS INTEGER) END AS preco1_iva,
            CASE WHEN a.promo_desconto > 0 AND COALESCE(a.promo_inicio, '') <= date('now', 'localtime')
                      AND (a.promo_fim IS NULL OR a.promo_fim = '' OR a.promo_fim >= date('now', 'localtime'))
                 THEN a.promo_desconto ELSE 0 END AS promo_atual
@@ -177,6 +180,15 @@ pub struct ArtigoIn {
     preco2: Option<i64>,
     preco3: Option<i64>,
     preco4: Option<i64>,
+    /// PVP com IVA (cêntimos). Quando vem, é o valor mestre: o preço sem IVA calcula-se a partir dele.
+    #[serde(default)]
+    pvp1: Option<i64>,
+    #[serde(default)]
+    pvp2: Option<i64>,
+    #[serde(default)]
+    pvp3: Option<i64>,
+    #[serde(default)]
+    pvp4: Option<i64>,
     qtd_minima: Option<f64>,
     qtd_maxima: Option<f64>,
     controla_stock: Option<bool>,
@@ -213,6 +225,17 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
     if pct == 0.0 && motivo.is_none() {
         return Err(AppError::msg("Artigos isentos de IVA exigem motivo de isenção."));
     }
+    // preços: com o PVP (com IVA) indicado, o preço sem IVA sai dele; sem PVP, o PVP sai do preço
+    let niveis: Vec<(i64, i64)> = [(Some(a.preco1), a.pvp1), (a.preco2, a.pvp2), (a.preco3, a.pvp3), (a.preco4, a.pvp4)]
+        .into_iter()
+        .map(|(preco, pvp)| match pvp {
+            Some(g) => (super::documentos::sem_iva(g.max(0), pct), g.max(0)),
+            None => {
+                let p = preco.unwrap_or(0).max(0);
+                (p, super::documentos::com_iva(p, pct))
+            }
+        })
+        .collect();
     let tipo = a.tipo.unwrap_or_else(|| "P".into());
     let controla = a.controla_stock.unwrap_or(tipo == "P") && tipo == "P";
     let cobar = a.codigo_barras.filter(|c| !c.trim().is_empty());
@@ -256,10 +279,10 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
         .bind(a.taxa_iva_id)
         .bind(motivo)
         .bind(a.custo.unwrap_or(0))
-        .bind(a.preco1)
-        .bind(a.preco2.unwrap_or(0))
-        .bind(a.preco3.unwrap_or(0))
-        .bind(a.preco4.unwrap_or(0))
+        .bind(niveis[0].0)
+        .bind(niveis[1].0)
+        .bind(niveis[2].0)
+        .bind(niveis[3].0)
         .bind(a.qtd_minima.unwrap_or(0.0))
         .bind(a.qtd_maxima.unwrap_or(0.0))
         .bind(controla as i64)
@@ -270,6 +293,14 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
     }
     let res = query.execute(&mut *tx).await?;
     let id = a.id.unwrap_or_else(|| res.last_insert_rowid());
+    sqlx::query("UPDATE artigos SET pvp1 = ?, pvp2 = ?, pvp3 = ?, pvp4 = ? WHERE id = ?")
+        .bind(niveis[0].1)
+        .bind(niveis[1].1)
+        .bind(niveis[2].1)
+        .bind(niveis[3].1)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
 
     // lotes e composição (kit): o kit não tem stock próprio — movimenta os componentes
     let composto = a.composto.unwrap_or(false);

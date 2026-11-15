@@ -263,9 +263,11 @@ function Impresso({ opcoes }: { opcoes: OpcoesImpresso }) {
     setBusy(true);
     try {
       await call("parametros.opcoesGuardar", o);
-      toast.success("Opções do impresso gravadas.");
+      toast.success("Opções gravadas.");
       qc.invalidateQueries({ queryKey: ["parametros"] });
       qc.invalidateQueries({ queryKey: ["documento"] });
+      // o POS e os documentos lêem a opção «preços com IVA incluído» das tabelas
+      qc.invalidateQueries({ queryKey: ["tabelas"] });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -277,13 +279,18 @@ function Impresso({ opcoes }: { opcoes: OpcoesImpresso }) {
     ["valor_extenso", "Valor por extenso", "O total escrito por extenso, com o prefixo de cada documento"],
     ["assinaturas", "Linhas de assinatura", "Espaço para a assinatura do cliente e da empresa"],
     ["mostrar_operador", "Operador", "O nome de quem emitiu o documento"],
+    [
+      "precos_com_iva",
+      "Preços com IVA incluído (retalho)",
+      "As vendas partem do PVP com IVA da ficha do artigo: 3 × 1 000,00 Kz dá 3 000,00 Kz e o IVA sai do total. Sem esta opção, parte-se do preço sem IVA e podem aparecer diferenças de um cêntimo.",
+    ],
   ];
   return (
     <Card className="max-w-2xl p-6">
       <div className="space-y-4">
         {itens.map(([k, titulo, texto]) => (
           <label key={k} className="flex cursor-pointer items-start gap-3">
-            <input className="mt-1" type="checkbox" checked={o[k]} onChange={(e) => setO((x) => ({ ...x, [k]: e.target.checked }))} />
+            <input className="mt-1" type="checkbox" checked={!!o[k]} onChange={(e) => setO((x) => ({ ...x, [k]: e.target.checked }))} />
             <span>
               <span className="font-medium">{titulo}</span>
               <span className="block text-[13px] text-ink-3">{texto}</span>
