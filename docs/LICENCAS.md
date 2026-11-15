@@ -66,6 +66,7 @@ node scripts/licencas/kangest-licencas.mjs emitir --nif 5417189230 --empresa "Lo
      --plano COMERCIO --postos 3 --meses 12
 #   planos: ESSENCIAL (1 posto), COMERCIO (3 postos), EMPRESA (sem limite); --postos muda o número
 #   --ate 2027-12-31 em vez de --meses; --tolerancia 15 (dias); --inicio AAAA-MM-DD
+#   --modulos api acrescenta a API de integração a um plano Essencial ou Comércio
 
 # ver o conteúdo de uma licença e confirmar a assinatura
 node scripts/licencas/kangest-licencas.mjs ver KG1.…
@@ -82,15 +83,25 @@ uma versão nova do KanGest; as licenças antigas continuam válidas enquanto a 
 
 - A verificação está em `documentos::emitir`: vale para o POS, a gestão, as compras, os recibos e a oficina.
 - O limite de postos aplica-se ao criar um posto (`posto.guardar`).
+- A **API de integração** ([API.md](API.md)) faz parte do plano Empresa e da experiência; nos planos Essencial e
+  Comércio só com o módulo `api` na licença (`licenca::api_incluida`). Hoje o módulo emite-se com a ferramenta de linha
+  de comandos; o servidor de licenças ainda não guarda módulos por cliente (as renovações e o painel emitem sem módulos).
 - A experiência conta desde a criação da empresa; nas bases antigas, desde a primeira vez que a versão com licenças
   abre. Os 30 dias estão no programa (`DIAS_EXPERIENCIA`), não na configuração que o cliente pode alterar.
+- As datas da experiência e do relógio vão seladas na base (`licenca.selo`, HMAC-SHA256): editá-las à mão não dá mais
+  dias nem esconde um relógio atrasado. O executável oficial leva um selo de integridade e não emite se tiver sido
+  alterado nem com um depurador ligado. Ver [SEGURANCA.md](SEGURANCA.md).
 - Em rede, a licença é a do servidor: os postos pedem-lhe o estado e é ele que emite os documentos. O registo online
   faz-se também no servidor (é o computador dele que fica registado).
 - Ao receber uma licença do servidor, o KanGest nunca troca uma licença válida que dure mais (por exemplo, emitida à
   mão) por uma mais curta.
+- O servidor limita os pedidos por IP e por hora (registo, confirmação, renovação e falhas no painel) e pode ter o
+  painel atrás do Cloudflare Access (`--access-equipa` e `--access-aud` no `publicar-licencas.py`): ver
+  [CLOUDFLARE.md](CLOUDFLARE.md).
 
 ## Próximos passos
 
 1. Envio dos códigos por email (conta Resend com um domínio verificado) e um domínio próprio para o servidor.
 2. Pagamentos por referência Multicaixa (ProxyPay ou outro intermediário): o pagamento confirmado renova sozinho.
 3. Preços dos planos no site, lidos de `/v1/planos`.
+4. Módulos por cliente no servidor de licenças (ex.: `api` nos planos Essencial e Comércio), mantidos nas renovações.

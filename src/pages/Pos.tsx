@@ -1462,13 +1462,14 @@ function Pagamento({
             {/* uma linha por forma de pagamento: cabe no ecrã sem rolar até ao botão de emitir */}
             <div className="space-y-2">
               {modos
-                .filter((m) => m.codigo !== "CS" || cliente.id !== 1)
+                // compensação de saldo: só para o cliente identificado que tem crédito (adiantamentos, notas de crédito)
+                .filter((m) => m.codigo !== "CS" || (cliente.id !== 1 && (cliente.credito ?? 0) > 0))
                 .map((m) => (
                   <label key={m.codigo} className="grid grid-cols-[minmax(0,1fr)_150px] items-center gap-3">
                     <span className="flex min-w-0 items-center gap-2 text-[13px] text-ink-2">
                       {m.codigo === "NU" ? <Banknote className="size-4 shrink-0 text-ink-3" /> : <CreditCard className="size-4 shrink-0 text-ink-3" />}
                       <span className="truncate" title={m.descricao}>
-                        {m.descricao}
+                        {m.codigo === "CS" ? `Crédito do cliente (disponível ${kz(cliente.credito ?? 0)})` : m.descricao}
                       </span>
                     </span>
                     <Input

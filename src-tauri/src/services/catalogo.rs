@@ -268,6 +268,58 @@ pub async fn artigos_codigo(st: &AppState, c: CodigoIn) -> AppResult<Value> {
     Ok(Value::Null)
 }
 
+/// Leitura de um código para a API de integração: (artigo, leitura). A leitura só vem quando o código vale
+/// outra quantidade que não 1: embalagem (`{"origem": "embalagem", "quantidade", "descricao"}`) ou etiqueta
+/// de balança (`{"origem": "balanca", "tipo", "valor", "quantidade"}`). Mesma ordem que o leitor do POS.
+pub async fn ler_codigo(p: &sqlx::SqlitePool, codigo: &str) -> AppResult<Option<(i64, Option<Value>)>> {
+    let codigo = codigo.trim();
+    if codigo.is_empty() {
+        return Ok(None);
+    }
+    // 1. código de barras ou referência do artigo
+    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM artigos WHERE ativo = 1 AND (codigo_barras = ?1 OR referencia = ?1) ORDER BY codigo_barras = ?1 DESC, id LIMIT 1")
+        .bind(codigo)
+        .fetch_optional(p)
+        .await?;
+    if let Some(id) = id {
+        return Ok(Some((id, None)));
+    }
+    // 2. código adicional (outra embalagem)
+    let extra: Option<(i64, f64, Option<String>)> = sqlx::query_as(
+        "SELECT c.artigo_id, c.quantidade, c.descricao FROM artigo_codigos c JOIN artigos a ON a.id = c.artigo_id WHERE c.codigo = ? AND a.ativo = 1",
+    )
+    .bind(codigo)
+    .fetch_optional(p)
+    .await?;
+    if let Some((id, q, d)) = extra {
+        return Ok(Some((id, ((q - 1.0).abs() > 1e-9 || d.is_some()).then(|| json!({ "origem": "embalagem", "quantidade": q, "descricao": d })))));
+    }
+    // 3. etiqueta de balança (EAN-13 com o código do artigo e o peso ou o preço com IVA)
+    let Some((plu, tipo, valor)) = ler_etiqueta(codigo, &regras_balanca(p).await?) else { return Ok(None) };
+    let artigo: Option<(i64, i64, String)> = sqlx::query_as(
+        "SELECT a.id,
+                CASE WHEN a.pvp1 IS NOT NULL AND CAST(ROUND(a.pvp1 * 100.0 / (100 + t.percentagem)) AS INTEGER) = a.preco1 THEN a.pvp1
+                     ELSE CAST(ROUND(a.preco1 * (1 + t.percentagem / 100.0)) AS INTEGER) END,
+                a.descricao
+         FROM artigos a JOIN taxas_iva t ON t.id = a.taxa_iva_id
+         WHERE a.ativo = 1 AND a.codigo_balanca IS NOT NULL AND CAST(a.codigo_balanca AS INTEGER) = CAST(? AS INTEGER) LIMIT 1",
+    )
+    .bind(&plu)
+    .fetch_optional(p)
+    .await?;
+    let Some((id, pvp, descricao)) = artigo else { return Ok(None) };
+    let quantidade = if tipo == "PESO" {
+        valor
+    } else {
+        // etiqueta com o preço (com IVA): a quantidade é o preço a dividir pelo PVP ao kg
+        if pvp <= 0 {
+            return Err(AppError::msg(format!("O artigo da etiqueta ({descricao}) não tem preço de venda.")));
+        }
+        (valor / pvp as f64 * 1_000_000.0).round() / 1_000_000.0
+    };
+    Ok(Some((id, Some(json!({ "origem": "balanca", "tipo": tipo, "valor": valor, "quantidade": quantidade })))))
+}
+
 #[derive(Deserialize)]
 pub struct ArtigoIn {
     id: Option<i64>,
@@ -375,9 +427,11 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
             return Err(AppError::msg(format!("O código de barras {} já é um código de \"{d}\".", c.trim())));
         }
     }
-    let referencia = match a.referencia.filter(|r| !r.trim().is_empty()) {
-        Some(r) => r.trim().to_string(),
-        None => {
+    let referencia = match (a.referencia.filter(|r| !r.trim().is_empty()), a.id) {
+        (Some(r), _) => r.trim().to_string(),
+        // ao editar, uma referência vazia mantém a que o artigo já tem (antes gerava-lhe outra)
+        (None, Some(id)) => sqlx::query_scalar("SELECT referencia FROM artigos WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?.ok_or(AppError::NaoEncontrado)?,
+        (None, None) => {
             let n: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) + 1 FROM artigos").fetch_one(&mut *tx).await?;
             format!("A{n:05}")
         }

@@ -16,6 +16,8 @@ from pathlib import Path
 API = "https://api.cloudflare.com/client/v4"
 RAIZ = Path(__file__).resolve().parent.parent / "site"
 EXCLUIR = {"LEIA-ME.md"}
+# Ficheiros de configuração do Pages: vão no pedido de publicação, não como ficheiros do site.
+CONFIG_PAGES = ("_headers", "_redirects")
 
 # ------------------------------------------------------------------ BLAKE3 (hash simples, 32 bytes)
 _IV = [0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19]
@@ -100,7 +102,10 @@ def _verificar_blake3():
 
 # ------------------------------------------------------------------ API
 def _contexto_tls():
-    """O Python do python.org no macOS não usa os certificados do sistema: usa os do certifi ou /etc/ssl/cert.pem."""
+    """O Python do python.org no macOS não usa os certificados do sistema: usa os do certifi ou /etc/ssl/cert.pem.
+    SSL_CERT_FILE, quando definido (ex.: atrás de um proxy da empresa), tem prioridade."""
+    if os.environ.get("SSL_CERT_FILE") and os.path.exists(os.environ["SSL_CERT_FILE"]):
+        return ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
     try:
         import certifi
         return ssl.create_default_context(cafile=certifi.where())
@@ -123,7 +128,10 @@ def pedido(metodo, caminho, token, dados=None, multipart=None, base=API):
         fronteira = uuid.uuid4().hex
         partes = []
         for nome, valor in multipart.items():
-            partes.append(f'--{fronteira}\r\nContent-Disposition: form-data; name="{nome}"\r\n\r\n{valor}\r\n')
+            if isinstance(valor, tuple):  # (nome do ficheiro, conteúdo): parte de ficheiro, como o wrangler envia o _headers
+                partes.append(f'--{fronteira}\r\nContent-Disposition: form-data; name="{nome}"; filename="{valor[0]}"\r\nContent-Type: text/plain\r\n\r\n{valor[1]}\r\n')
+            else:
+                partes.append(f'--{fronteira}\r\nContent-Disposition: form-data; name="{nome}"\r\n\r\n{valor}\r\n')
         corpo = ("".join(partes) + f"--{fronteira}--\r\n").encode()
         cab["Content-Type"] = f"multipart/form-data; boundary={fronteira}"
     elif dados is not None:
@@ -155,7 +163,7 @@ def main():
     ficheiros = {}
     for f in sorted(RAIZ.rglob("*")):
         rel = f.relative_to(RAIZ).as_posix()
-        if f.is_file() and f.name not in EXCLUIR and not any(p.startswith(".") for p in rel.split("/")):
+        if f.is_file() and f.name not in EXCLUIR and rel not in CONFIG_PAGES and not any(p.startswith(".") for p in rel.split("/")):
             dados = f.read_bytes()
             b64 = base64.b64encode(dados).decode()
             chave = blake3((b64 + f.suffix[1:]).encode())[:32]
@@ -163,6 +171,9 @@ def main():
             ficheiros["/" + rel] = (chave, b64, tipo)
     for caminho, (chave, b64, tipo) in ficheiros.items():
         print(f"  {caminho:<36} {tipo:<24} {len(b64) * 3 // 4:>8} bytes  {chave}")
+    config_pages = {n: (n, (RAIZ / n).read_text()) for n in CONFIG_PAGES if (RAIZ / n).is_file()}
+    for n in config_pages:
+        print(f"  /{n:<35} (configuração do Pages: cabeçalhos de segurança)")
     if ensaio:
         return print(f"Ensaio: {len(ficheiros)} ficheiros prontos a publicar no projecto «{projecto}».")
 
@@ -205,7 +216,7 @@ def main():
 
     manifesto = {caminho: chave for caminho, (chave, _, _) in ficheiros.items()}
     st, r = pedido("POST", f"/accounts/{conta}/pages/projects/{projecto}/deployments", token,
-                   multipart={"manifest": json.dumps(manifesto), "branch": "main"})
+                   multipart={"manifest": json.dumps(manifesto), "branch": "main", **config_pages})
     if st not in (200, 201):
         sys.exit(f"Falhou a publicação ({st}): {erro(r)}")
     print(f"Publicado: {r['result'].get('url')}")

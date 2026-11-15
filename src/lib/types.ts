@@ -173,6 +173,8 @@ export interface Entidade {
   desconto: number;
   nivel_preco: number;
   saldo?: number;
+  /** Crédito a favor (adiantamentos e notas de crédito por usar), em cêntimos. */
+  credito?: number;
 }
 
 export interface Tabelas {

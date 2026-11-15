@@ -153,6 +153,7 @@ Legenda: ✅ feito · 🟡 parcial · ❌ falta
 | Séries de documentos | ✅ (automáticas + ecrã de gestão em Sistema → Séries de Documentos) |
 | Manual do utilizador / Sobre | ✅ (manual rápido, atalhos do POS, versão, pasta e tamanho da base) |
 | Verificar actualização | ✅ (endereço ou pasta partilhada, SHA-256 e assinatura minisign opcional, cópia de segurança antes de instalar; ver [ATUALIZACOES.md](ATUALIZACOES.md)) |
+| API de integração para outros sistemas (não existia no KIGEST) | ✅ (Sistema → API e Integrações: chaves de acesso com permissões, IPs permitidos, validade, limite de pedidos e registo; loja online, contabilidade e BI; ver [API.md](API.md)) |
 | **Importação de dados do KIGEST** (SQL Server: empresa, artigos, stock, entidades, utilizadores, histórico de documentos e conta corrente, RH e salários, tesouraria, oficina, custos de importação) | ✅ (simulação e conferência KIGEST × KanGest; ver [MIGRACAO-KIGEST.md](MIGRACAO-KIGEST.md) e [COMPARACAO-KIGEST.md](COMPARACAO-KIGEST.md)) |
 
 ## Resumo

@@ -50,6 +50,7 @@ import Viaturas from "@/pages/oficina/Viaturas";
 import Ordens from "@/pages/oficina/Ordens";
 import Utilizadores from "@/pages/Utilizadores";
 import Licenca from "@/pages/Licenca";
+import Integracoes from "@/pages/Integracoes";
 import { EcraBloqueado, MudarSenhaObrigatoria, usePolitica, useInatividade } from "@/components/Sessao";
 
 export default function App() {
@@ -113,6 +114,7 @@ export default function App() {
         <Route path="/relatorios/rastreio" element={<Rastreio />} />
         <Route path="/relatorios/fornecedores" element={<MapaFornecedor />} />
         <Route path="/configuracoes" element={<Configuracoes />} />
+        <Route path="/integracoes" element={<Integracoes />} />
         <Route path="/lotes" element={<Lotes />} />
         <Route path="/etiquetas" element={<Etiquetas />} />
         <Route path="/promocoes" element={<Promocoes />} />

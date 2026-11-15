@@ -12,4 +12,7 @@ experiência uma vez por NIF, guarda os pagamentos e entrega as licenças (`KG1.
 | `teste/servidor-local.mjs` | O Worker servido pelo Node, para testar o KanGest (`licencas_servidor_local` no Rust) |
 
 Publicar: `CLOUDFLARE_API_TOKEN=… python3 ../scripts/publicar-licencas.py` (ver `docs/LICENCAS.md`).
-Segredos no Cloudflare: `CHAVE_PRIVADA`, `ADMIN_TOKEN` e, opcionais, `RESEND_API_KEY` e `EMAIL_REMETENTE`.
+Segredos no Cloudflare: `CHAVE_PRIVADA`, `ADMIN_TOKEN` e, opcionais, `RESEND_API_KEY`, `EMAIL_REMETENTE`, `ACCESS_EQUIPA` e `ACCESS_AUD`.
+
+Protecção: limite de pedidos por IP e por hora (tabela `limites`, constantes `LIMITES`), Cloudflare Access à frente do
+painel (com `ACCESS_EQUIPA` e `ACCESS_AUD`) e cabeçalhos de segurança em todas as respostas. Ver `docs/CLOUDFLARE.md`.

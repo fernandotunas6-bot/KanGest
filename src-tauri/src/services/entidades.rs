@@ -35,7 +35,15 @@ pub async fn listar(st: &AppState, f: Filtro) -> AppResult<Value> {
 
 pub async fn obter(st: &AppState, i: IdIn) -> AppResult<Value> {
     st.sessao()?;
-    let row = sqlx::query("SELECT * FROM entidades WHERE id = ?")
+    // com o saldo e o crédito a favor, como na lista (o POS oferece pagar com o crédito do cliente)
+    let row = sqlx::query(
+        "SELECT e.*,
+            (SELECT COALESCE(SUM(d.valor_pendente), 0) - COALESCE(SUM(d.credito_disponivel), 0) FROM documentos d
+              WHERE d.entidade_id = e.id AND d.estado = 'N') AS saldo,
+            (SELECT COALESCE(SUM(d.credito_disponivel), 0) FROM documentos d
+              WHERE d.entidade_id = e.id AND d.estado = 'N') AS credito
+         FROM entidades e WHERE e.id = ?",
+    )
         .bind(i.id)
         .fetch_optional(&st.pool)
         .await?

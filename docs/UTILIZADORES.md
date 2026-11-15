@@ -20,7 +20,7 @@ Cada utilizador tem um perfil. As permissões do perfil aplicam-se a todos os se
 | Perfil | Escalão | Permissões de origem |
 |---|---|---|
 | Administrador | 3 | Todas, sempre (incluindo as de módulos novos). Não se pode editar. |
-| Gestor | 2 | Todas excepto as de administração: utilizadores, configurações, actualizações, facturação electrónica, importação, parametrização, certificação, auditoria e configuração de RH. |
+| Gestor | 2 | Todas excepto as de administração: utilizadores, configurações, actualizações, facturação electrónica, importação, parametrização, certificação, auditoria, configuração de RH e API e integrações. |
 | Caixa (POS) | 1 | Facturas, facturas-recibo, proformas, clientes, recibos; no POS: quantidade, apagar linha, suspender, fecho e relatório de caixa. |
 
 - Os perfis de origem podem ter as permissões alteradas; o botão **Repor as permissões de origem** volta à lista inicial.
