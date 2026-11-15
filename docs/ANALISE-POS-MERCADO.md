@@ -30,9 +30,9 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · **Esforço:** P pequeno (dia
 | **API para outros sistemas** (loja online, contabilidade, BI, apps) com chaves de acesso | Padrão | ✅ **feita neste trabalho** — ver [API.md](API.md) | — | — |
 | Webhooks: avisar outro sistema quando há uma venda, uma anulação ou uma mudança de stock | Comum | ✅ **feito:** avisos assinados (HMAC-SHA256) de documentos, anulações, stock e artigos, com novas tentativas | — | — |
 | Ligação pronta a lojas online (WooCommerce, Shopify) | Comum | ❌ (agora possível através da API) | Média | M |
-| Enviar a factura ao cliente por email ou WhatsApp (PDF) | Padrão | ❌ só impressão; o PDF faz-se pelo diálogo de impressão do sistema | Alta | M |
+| Enviar a factura ao cliente por email ou WhatsApp (PDF) | Padrão | ✅ **feito** (recibo digital: documentos por email e por WhatsApp) | — | — |
 | Painel ou app do dono no telemóvel (vendas em tempo real, fora da loja) | Padrão | ❌ (a API é a base para isto) | Média | G |
-| Cópia de segurança na nuvem | Padrão nos POS em nuvem | ❌ só cópias locais (14 dias na pasta de dados) | Alta | M |
+| Cópia de segurança na nuvem | Padrão nos POS em nuvem | 🟡 cópias periódicas também numa pasta externa (pen, disco de rede, OneDrive, Google Drive), cifradas com senha, e restauro no programa ([COPIAS.md](COPIAS.md)); sem envio directo para um serviço na nuvem | Média | P |
 | Importar extractos bancários e reconciliar | Comum nos ERP | ❌ | Baixa | M |
 
 ### B. Venda e pagamentos
@@ -62,8 +62,8 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · **Esforço:** P pequeno (dia
 
 | Função | Nos grandes POS | KanGest | Prioridade | Esforço |
 |---|---|---|---|---|
-| Promoções: leve 3 pague 2, combos, desconto por família, por horário (happy hour), cupões | Padrão | 🟡 só desconto % por artigo entre datas | Alta | M |
-| Fidelização: pontos ou cashback por cliente | Padrão | ❌ | Média | M |
+| Promoções: leve 3 pague 2, combos, desconto por família, por horário (happy hour), cupões | Padrão | ✅ **feito:** promoções por regras (leve/pague, quantidade, família) e cupões de desconto | — | — |
+| Fidelização: pontos ou cashback por cliente | Padrão | ✅ **feito:** cartão de pontos no POS (os pontos pagam vendas) | — | — |
 | Vales e cartões oferta (venda, saldo, resgate) | Padrão | ❌ | Média | M |
 | Campanhas (aniversários, SMS/WhatsApp/email aos clientes) | Comum | ❌ | Baixa | M |
 
@@ -95,8 +95,8 @@ suspender uma venda. É um módulo à parte (esforço G); a impressão ESC/POS j
 
 | Função | Nos grandes POS | KanGest | Prioridade | Esforço |
 |---|---|---|---|---|
-| Comissões de vendedores | Comum | 🟡 o vendedor fica no documento e há o relatório «por vendedor», sem cálculo de comissão | Média | P |
-| Sugestão automática de encomendas a fornecedores (pelo mínimo e pelas vendas) | Comum | 🟡 relatórios de ruptura e de mínimo; a encomenda faz-se à mão | Média | M |
+| Comissões de vendedores | Comum | ✅ **feito:** taxa por vendedor e por família sobre as vendas sem IVA (as NC descontam), relatório por período e lançamento nos salários do mês (Recursos Humanos → Comissões de Vendedores) | — | — |
+| Sugestão automática de encomendas a fornecedores (pelo mínimo e pelas vendas) | Comum | ✅ **feito:** sugestão de encomendas | — | — |
 | Picagem de ponto dos operadores no POS | Comum | ❌ (o RH tem faltas e férias) | Baixa | P |
 | Relatórios enviados por email todos os dias | Comum | ❌ | Baixa | M |
 
@@ -111,12 +111,14 @@ limite de pedidos, registo de pedidos, idempotência na emissão e exportação 
 2. ~~Artigos a peso (EAN-13 de balança) e vários códigos de barras/embalagens por artigo~~ — feito.
 3. ~~Contagem do fecho de caixa por notas e moedas e fecho cego~~ — feito.
 4. ~~Webhooks para a API (venda emitida, documento anulado, stock alterado), assinados com HMAC~~ — feito.
-5. Envio da factura por email/WhatsApp em PDF.
+5. ~~Envio da factura por email/WhatsApp em PDF~~ — feito (recibo digital).
 6. Fotografias dos artigos (úteis no POS táctil e na loja online ligada pela API).
-7. Cópia de segurança na nuvem (cifrada).
+7. ~~Cópia de segurança fora do computador (cifrada)~~ — feito com a pasta externa; falta o envio directo para um
+   serviço na nuvem.
+8. ~~Promoções por regras e cupões, cartão de pontos, sugestão de encomendas, comissões de vendedores~~ — feito.
 
-**Depois:** promoções avançadas, fidelização e vales, números de série/IMEI, comissões, sugestão de encomendas,
-receber em moeda estrangeira no POS, integração com TPA/Multicaixa Express.
+**Depois:** vales e cartões oferta, números de série/IMEI, receber em moeda estrangeira no POS, integração com
+TPA/Multicaixa Express.
 
 **Projectos grandes:** modo offline nos postos em rede, várias lojas pela Internet com sede central, app do dono,
 variantes (tamanho/cor) e o módulo de restauração.

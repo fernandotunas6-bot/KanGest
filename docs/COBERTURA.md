@@ -85,6 +85,7 @@ Legenda: ✅ feito · 🟡 parcial · ❌ falta
 | Retenção na fonte (IRT, II, IS, IPU, IAC, IVA cativo) | ✅ (SAF-T WithholdingTax) |
 | Relatórios: por artigo, entidade, dia, operador, tipo de pagamento, documento | ✅ |
 | Relatórios: por ponto (posto), por vendedor, artigos por entidade, detalhes de documentos | ✅ |
+| Comissões de vendedores (taxa por vendedor e por família, lançamento nos salários) | ✅ (novo no KanGest) |
 | Relatório gráfico | ✅ (painel) |
 | Vendas por mês e Relatório Síntese (ano a ano, mês a mês) | ✅ (inclui o histórico importado do KIGEST) |
 

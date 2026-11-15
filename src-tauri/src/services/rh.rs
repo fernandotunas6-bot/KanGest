@@ -678,7 +678,7 @@ pub async fn adiantamento(st: &AppState, a: AdiantamentoIn) -> AppResult<Value> 
 }
 
 // ------------------------------------------------------------------ processamento
-async fn processado(p: &SqlitePool, ano: i64, mes: i64) -> AppResult<bool> {
+pub(crate) async fn processado(p: &SqlitePool, ano: i64, mes: i64) -> AppResult<bool> {
     let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM rh_processamentos WHERE ano = ? AND mes = ? AND estado = 'PROCESSADO'").bind(ano).bind(mes).fetch_one(p).await?;
     Ok(n > 0)
 }

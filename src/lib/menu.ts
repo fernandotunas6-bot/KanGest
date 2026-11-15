@@ -132,6 +132,7 @@ export const MENU: GrupoMenu[] = [
       { label: "Recibos, Mapas IRT / INSS", to: "/rh/salarios?vista=processamentos", perm: "rh.processamento" },
       { label: "Férias e Faltas", to: "/rh/ferias", perm: "rh.funcionarios" },
       { label: "Honorários (Conta Própria)", to: "/rh/honorarios?vista=honorarios", perm: "rh.processamento" },
+      { label: "Comissões de Vendedores", to: "/rh/comissoes", perm: "relatorios.ver" },
       { label: "Prestações Sociais", to: "/rh/honorarios?vista=prestacoes", perm: "rh.funcionarios" },
       { label: "Configuração Salarial", to: "/rh/configuracao", perm: "rh.processamento" },
     ],

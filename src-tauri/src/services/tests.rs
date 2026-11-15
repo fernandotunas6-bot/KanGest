@@ -4063,3 +4063,91 @@ async fn webhooks_api() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Comissões de vendedores: taxa do vendedor, taxa própria da família, NC descontam (no vendedor da origem),
+/// anulados não contam, e o total do mês entra no processamento de salários (rubrica 019).
+#[tokio::test]
+async fn comissoes_de_vendedores() {
+    use chrono::Datelike;
+    let (st, pasta) = base_com_admin("comissoes").await;
+    let hoje = chrono::Local::now().date_naive();
+    let (ano, mes) = (hoje.year(), hoje.month());
+    let inicio = format!("{ano:04}-{mes:02}-01");
+    let servicos = rpc(&st, "tabela.guardar", json!({ "tabela": "familias", "descricao": "Serviços" })).await["id"].as_i64().unwrap();
+    let telemoveis = rpc(&st, "tabela.guardar", json!({ "tabela": "familias", "descricao": "Telemóveis" })).await["id"].as_i64().unwrap();
+    let artigo = |descricao: &'static str, preco: i64, familia: Option<i64>| {
+        let st = &st;
+        async move { rpc(st, "artigos.guardar", json!({ "descricao": descricao, "tipo": "S", "taxa_iva_id": 1, "preco1": preco, "familia_id": familia })).await["id"].as_i64().unwrap() }
+    };
+    let servico = artigo("Configuração", 1_000_000, Some(servicos)).await;
+    let telemovel = artigo("Telemóvel X", 10_000_000, Some(telemoveis)).await;
+    let capa = artigo("Capa", 200_000, None).await;
+    let func = |nome: &'static str| {
+        let st = &st;
+        async move { rpc(st, "rh.funcionarioGuardar", json!({ "nome": nome, "salario_base": 20000000, "desconta_inss": true, "desconta_irt": true })).await["id"].as_i64().unwrap() }
+    };
+    let (ana, beto, carla) = (func("Ana").await, func("Beto").await, func("Carla").await);
+    let cliente = rpc(&st, "entidades.guardar", json!({ "nome": "Cliente Comissões", "nif": "5417000000" })).await["id"].as_i64().unwrap();
+
+    // ---- taxas ----
+    assert!(rpc_err(&st, "comissoes.taxaGuardar", json!({ "tipo": "VENDEDOR", "id": ana, "pct": 150 })).await.contains("entre 0 e 100"));
+    assert!(rpc_err(&st, "comissoes.taxaGuardar", json!({ "tipo": "OUTRO", "id": ana, "pct": 1 })).await.contains("inválido"));
+    rpc(&st, "comissoes.taxaGuardar", json!({ "tipo": "VENDEDOR", "id": ana, "pct": 2 })).await;
+    rpc(&st, "comissoes.taxaGuardar", json!({ "tipo": "VENDEDOR", "id": beto, "pct": 3 })).await;
+    rpc(&st, "comissoes.taxaGuardar", json!({ "tipo": "FAMILIA", "id": servicos, "pct": 10 })).await;
+    let t = rpc(&st, "comissoes.taxas", Value::Null).await;
+    assert_eq!(t["vendedores"].as_array().unwrap().iter().find(|v| v["id"] == ana).unwrap()["pct"], 2.0);
+    assert_eq!(t["vendedores"].as_array().unwrap().iter().find(|v| v["id"] == carla).unwrap()["pct"], 0.0);
+    assert_eq!(t["familias"].as_array().unwrap().iter().find(|f| f["id"] == servicos).unwrap()["pct"], 10.0);
+
+    // ---- vendas do mês ----
+    let venda = |vendedor: i64, linhas: Value| {
+        let st = &st;
+        async move {
+            rpc(st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cliente, "vendedor_id": vendedor, "linhas": linhas })).await["documento"].clone()
+        }
+    };
+    let liquido = |id: i64, artigo: i64| {
+        let pool = st.pool.clone();
+        async move { sqlx::query_scalar::<_, i64>("SELECT SUM(valor_liquido) FROM documento_linhas WHERE documento_id = ? AND artigo_id = ?").bind(id).bind(artigo).fetch_one(&pool).await.unwrap() }
+    };
+    let ft1 = venda(ana, json!([{ "artigo_id": servico, "quantidade": 1 }, { "artigo_id": telemovel, "quantidade": 1 }])).await;
+    let ft2 = venda(beto, json!([{ "artigo_id": capa, "quantidade": 2 }])).await;
+    venda(carla, json!([{ "artigo_id": servico, "quantidade": 1 }])).await;
+    let anulada = venda(ana, json!([{ "artigo_id": telemovel, "quantidade": 3 }])).await;
+    rpc(&st, "documentos.anular", json!({ "id": anulada["id"], "motivo": "erro de digitação no documento" })).await;
+    // devolução do telemóvel, sem vendedor na NC: desconta à Ana (vendedora da factura)
+    rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": cliente, "doc_origem_id": ft1["id"], "motivo": "Devolução", "linhas": [{ "artigo_id": telemovel, "quantidade": 1 }] })).await;
+
+    let (ft1_id, ft2_id) = (ft1["id"].as_i64().unwrap(), ft2["id"].as_i64().unwrap());
+    let servico_liq = liquido(ft1_id, servico).await;
+    let capa_liq = liquido(ft2_id, capa).await;
+    let r = rpc(&st, "comissoes.relatorio", json!({ "de": inicio, "ate": hoje.format("%Y-%m-%d").to_string() })).await;
+    let de = |id: i64| r["vendedores"].as_array().unwrap().iter().find(|v| v["vendedor_id"] == id).cloned().unwrap_or(Value::Null);
+    // Ana: serviços a 10 % (taxa da família); telemóvel vendido e devolvido (base 0); a factura anulada não conta
+    assert_eq!(de(ana)["base"], servico_liq, "{r}");
+    assert_eq!(de(ana)["comissao"], (servico_liq as f64 * 0.10).round() as i64, "{r}");
+    let tel = de(ana)["familias"].as_array().unwrap().iter().find(|f| f["familia"] == "Telemóveis").cloned().unwrap();
+    assert_eq!((tel["base"].as_i64(), tel["comissao"].as_i64()), (Some(0), Some(0)));
+    // Beto: artigo sem família, à sua taxa
+    assert_eq!(de(beto)["comissao"], (capa_liq as f64 * 0.03).round() as i64);
+    // Carla: vende, mas sem comissão (a taxa da família só vale para quem tem comissão)
+    assert_eq!(de(carla)["comissao"], 0);
+
+    // ---- lançar no salário do mês (duas vezes: substitui, não duplica) ----
+    let l = rpc(&st, "comissoes.lancar", json!({ "ano": ano, "mes": mes })).await;
+    assert_eq!(l["lancados"], 2, "{l}");
+    rpc(&st, "comissoes.lancar", json!({ "ano": ano, "mes": mes })).await;
+    let alts = rpc(&st, "rh.alteracoes", json!({ "ano": ano, "mes": mes })).await;
+    let comissoes: Vec<&Value> = alts.as_array().unwrap().iter().filter(|a| a["rubrica"] == "019").collect();
+    assert_eq!(comissoes.len(), 2, "{alts}");
+    let sim = rpc(&st, "rh.simular", json!({ "ano": ano, "mes": mes })).await;
+    let recibo_ana = sim.as_array().unwrap().iter().find(|x| x["funcionario_id"] == ana).unwrap();
+    let linha = recibo_ana["linhas"].as_array().unwrap().iter().find(|x| x["rubrica"] == "019").cloned().expect("linha de comissões no recibo");
+    assert_eq!(linha["valor"], de(ana)["comissao"]);
+    assert_eq!(recibo_ana["total_remuneracoes"], 20000000 + de(ana)["comissao"].as_i64().unwrap(), "a comissão é remuneração");
+    // mês processado: as comissões já não mudam
+    rpc(&st, "rh.processar", json!({ "ano": ano, "mes": mes })).await;
+    assert!(rpc_err(&st, "comissoes.lancar", json!({ "ano": ano, "mes": mes })).await.contains("já foram processados"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}

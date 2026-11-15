@@ -1,6 +1,7 @@
 mod atualizacao;
 mod auth;
 mod caixa;
+mod comissoes;
 pub(crate) mod catalogo;
 mod contas;
 mod documentos;
@@ -269,6 +270,10 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "rh.ferias" => rh::ferias(st, p(params)?).await,
         "rh.feriasGuardar" => rh::ferias_guardar(st, p(params)?).await,
         "rh.vendedores" => rh::vendedores(st).await,
+        "comissoes.taxas" => comissoes::taxas(st).await,
+        "comissoes.taxaGuardar" => comissoes::taxa_guardar(st, p(params)?).await,
+        "comissoes.relatorio" => comissoes::relatorio(st, p(params)?).await,
+        "comissoes.lancar" => comissoes::lancar(st, p(params)?).await,
         "rh.honorarios" => rh::honorarios(st, p(params)?).await,
         "rh.honorarioProcessar" => rh::honorario_processar(st, p(params)?).await,
         "rh.honorarioAnular" => rh::honorario_anular(st, p(params)?).await,

@@ -46,6 +46,7 @@ import Salarios from "@/pages/rh/Salarios";
 import FeriasFaltas from "@/pages/rh/Ferias";
 import ConfigRH from "@/pages/rh/ConfigRH";
 import Honorarios from "@/pages/rh/Honorarios";
+import Comissoes from "@/pages/rh/Comissoes";
 import Viaturas from "@/pages/oficina/Viaturas";
 import Ordens from "@/pages/oficina/Ordens";
 import Utilizadores from "@/pages/Utilizadores";
@@ -132,6 +133,7 @@ export default function App() {
         <Route path="/rh/ferias" element={<FeriasFaltas />} />
         <Route path="/rh/configuracao" element={<ConfigRH />} />
         <Route path="/rh/honorarios" element={<Honorarios />} />
+        <Route path="/rh/comissoes" element={<Comissoes />} />
         <Route path="/oficina/viaturas" element={<Viaturas />} />
         <Route path="/oficina/ordens" element={<Ordens />} />
         <Route path="/utilizadores" element={<Utilizadores />} />
