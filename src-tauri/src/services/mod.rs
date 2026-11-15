@@ -12,6 +12,7 @@ mod integridade;
 pub mod licenca;
 mod oficina;
 mod parametros;
+mod promocoes;
 mod posto;
 mod rh;
 mod tesouraria;
@@ -182,6 +183,13 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "documentos.obter" => documentos::obter(st, p(params)?).await,
         "documentos.anular" => documentos::anular(st, p(params)?).await,
         "documentos.creditavel" => documentos::creditavel(st, p(params)?).await,
+
+        // ---- promoções por regras e cupões ----
+        "promocoes.calcular" => promocoes::calcular(st, p(params)?).await,
+        "promocoes.listar" => promocoes::listar(st).await,
+        "promocoes.regraGuardar" => promocoes::regra_guardar(st, p(params)?).await,
+        "promocoes.cupaoGuardar" => promocoes::cupao_guardar(st, p(params)?).await,
+        "cupoes.validar" => promocoes::validar(st, p(params)?).await,
         "documentos.auxiliares" => documentos::auxiliares(st).await,
 
         // ---- POS: suspensos ----

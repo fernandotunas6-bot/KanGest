@@ -3231,3 +3231,44 @@ async fn codigos_de_barras_embalagens_e_balanca() {
     assert_eq!(v["documento"]["total"], 375000);
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+#[tokio::test]
+async fn promocoes_por_regras_e_cupoes() {
+    let (st, pasta) = base_com_admin("promocoes").await;
+    let familia = rpc(&st, "tabela.guardar", json!({ "tabela": "familias", "descricao": "Bebidas" })).await["id"].as_i64().unwrap();
+    let sumo = rpc(&st, "artigos.guardar", json!({ "descricao": "Sumo", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000, "familia_id": familia })).await["id"].as_i64().unwrap();
+    let agua = rpc(&st, "artigos.guardar", json!({ "descricao": "Água", "tipo": "S", "taxa_iva_id": 1, "preco1": 10000, "familia_id": familia })).await["id"].as_i64().unwrap();
+    // regras inválidas são recusadas
+    assert!(rpc_err(&st, "promocoes.regraGuardar", json!({ "descricao": "x", "tipo": "LEVE_PAGUE", "artigo_id": sumo, "leve": 2, "pague": 3 })).await.contains("maior"));
+    rpc(&st, "promocoes.regraGuardar", json!({ "descricao": "Leve 3 pague 2", "tipo": "LEVE_PAGUE", "artigo_id": sumo, "leve": 3, "pague": 2 })).await;
+    rpc(&st, "promocoes.regraGuardar", json!({ "descricao": "Bebidas: 5% a partir de 10", "tipo": "QUANTIDADE", "familia_id": familia, "quantidade_min": 10, "desconto_pct": 5 })).await;
+    let calc = rpc(&st, "promocoes.calcular", json!({ "linhas": [{ "artigo_id": sumo, "quantidade": 3 }, { "artigo_id": agua, "quantidade": 12 }] })).await;
+    assert_eq!(calc[0]["regra"], "Leve 3 pague 2");
+    assert!((calc[0]["desconto"].as_f64().unwrap() - 33.3333).abs() < 0.001, "{calc}");
+    assert_eq!((calc[1]["desconto"].as_f64(), calc[1]["regra"].as_str()), (Some(5.0), Some("Bebidas: 5% a partir de 10")));
+
+    // a operadora (sem permissão de desconto) vende com a promoção sem pedir PIN
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Rita", "login": "rita", "senha": "rita1234", "perfil": "CAIXA", "mudar_senha": false })).await;
+    assert!(rpc_err(&st, "cupoes.validar", json!({ "codigo": "nada", "total": 0 })).await.contains("não existe"));
+    rpc(&st, "promocoes.cupaoGuardar", json!({ "codigo": "natal10", "descricao": "Natal", "tipo": "PCT", "valor": 10, "valor_minimo": 100000, "utilizacoes_max": 1 })).await;
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "rita", "senha": "rita1234" })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let v = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": sumo, "quantidade": 3 }], "pagamentos": [{ "modo": "NU", "valor": 228000 }] })).await;
+    assert_eq!(v["documento"]["total"], 228000, "3 sumos pelo preço de 2 (2 000,00 + IVA)");
+    // mais desconto do que a promoção já pede PIN
+    let e = rpc_err(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": sumo, "quantidade": 3, "desconto_pct": 50 }], "pagamentos": [{ "modo": "NU", "valor": 300000 }] })).await;
+    assert!(e.contains("supervisor"), "{e}");
+
+    // cupão: compra mínima, desconto sem PIN, uma só utilização, devolvida ao anular
+    assert!(rpc_err(&st, "cupoes.validar", json!({ "codigo": "NATAL10", "total": 50000 })).await.contains("a partir de"));
+    assert!(rpc_err(&st, "documentos.emitir", json!({ "tipo": "FR", "cupao": "NATAL10", "linhas": [{ "artigo_id": agua, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 11400 }] })).await.contains("a partir de"));
+    let c = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "cupao": "natal10", "linhas": [{ "artigo_id": sumo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    assert_eq!((c["documento"]["total"].as_i64(), c["documento"]["cupao"].as_str()), (Some(102600), Some("NATAL10")), "1 140,00 − 10%");
+    assert!(rpc_err(&st, "documentos.emitir", json!({ "tipo": "FR", "cupao": "NATAL10", "linhas": [{ "artigo_id": sumo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await.contains("número de vezes"));
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    rpc(&st, "documentos.anular", json!({ "id": c["documento"]["id"], "motivo": "Venda repetida" })).await;
+    assert_eq!(rpc(&st, "promocoes.listar", Value::Null).await["cupoes"][0]["utilizacoes"], 0);
+    let _ = std::fs::remove_dir_all(&pasta);
+}

@@ -142,6 +142,9 @@ pub struct EmitirIn {
     manual: Option<ManualIn>,
     /// Valor do recibo de adiantamento.
     valor: Option<i64>,
+    /// Cupão de desconto (vendas): aplica-se como desconto global, sem pedir autorização.
+    #[serde(default)]
+    cupao: Option<String>,
     /// Vendedor (funcionário) e local de entrega.
     vendedor_id: Option<i64>,
     endereco_entrega: Option<String>,
@@ -829,8 +832,32 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     if !liquida && !adiantamento && i.linhas.is_empty() {
         return Err(AppError::msg("O documento não tem linhas."));
     }
-    let desc_global = i.desconto_global_pct.unwrap_or(0.0).clamp(0.0, 100.0);
-    let desc_global_valor = i.desconto_global_valor.unwrap_or(0).max(0);
+    // promoções por regras e cupões: só nas vendas novas (não nas conversões nem nas notas de crédito)
+    let aplica_promocoes = tipo.grupo == "VENDAS" && matches!(tipo.classe.as_str(), "VENDA" | "PROFORMA") && i.doc_origem_id.is_none() && manual.is_none();
+    let cupao: Option<(String, String, f64)> = match txt(&i.cupao) {
+        Some(c) if aplica_promocoes => {
+            let (t, v, _) = super::promocoes::cupao_valido(&mut tx, &c, i64::MAX, &hoje).await?;
+            Some((c.to_uppercase(), t, v))
+        }
+        Some(_) => return Err(AppError::msg("Os cupões só se usam em vendas novas.")),
+        None => None,
+    };
+    let (desc_global, desc_global_valor) = match &cupao {
+        Some((_, t, v)) if t == "PCT" => (v.clamp(0.0, 100.0), 0),
+        Some((_, _, v)) => (0.0, v.round() as i64),
+        None => (i.desconto_global_pct.unwrap_or(0.0).clamp(0.0, 100.0), i.desconto_global_valor.unwrap_or(0).max(0)),
+    };
+    let regras: Vec<(f64, Option<String>)> = if aplica_promocoes {
+        let mut lp = Vec::with_capacity(i.linhas.len());
+        for l in &i.linhas {
+            let aid = l.artigo_id.unwrap_or_default();
+            let familia: Option<i64> = sqlx::query_scalar("SELECT familia_id FROM artigos WHERE id = ?").bind(aid).fetch_optional(&mut *tx).await?.flatten();
+            lp.push(super::promocoes::LinhaPromo { artigo_id: aid, familia_id: familia, quantidade: l.quantidade });
+        }
+        super::promocoes::descontos(&mut tx, &lp, chrono::Local::now().naive_local()).await?
+    } else {
+        vec![(0.0, None); i.linhas.len()]
+    };
     // Preço/desconto alterados em vendas exigem permissão (ou PIN de supervisor).
     // Documentos com origem (NC, conversão de proforma) herdam os valores já autorizados.
     let verificar = tipo.grupo == "VENDAS" && matches!(tipo.classe.as_str(), "VENDA" | "PROFORMA" | "TRANSPORTE") && i.doc_origem_id.is_none();
@@ -838,9 +865,10 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     let modo_iva = tipo.grupo == "VENDAS" && precos_com_iva(&mut *tx).await?;
     let inventario = tipo.stock == 3;
     let mut preco_alterado = false;
-    let mut desconto_extra = desc_global > 0.0 || desc_global_valor > 0;
+    // o desconto global do cupão não precisa de autorização
+    let mut desconto_extra = cupao.is_none() && (desc_global > 0.0 || desc_global_valor > 0);
     let mut linhas: Vec<Linha> = Vec::with_capacity(i.linhas.len());
-    for l in &i.linhas {
+    for (idx, l) in i.linhas.iter().enumerate() {
         if (inventario && l.quantidade < 0.0) || (!inventario && l.quantidade <= 0.0) {
             return Err(AppError::msg("As quantidades têm de ser positivas."));
         }
@@ -939,7 +967,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         };
         // promoção do artigo em vigor na data do documento (só vendas): é o desconto por omissão
         // e, até esse valor, não precisa de autorização
-        let promo = if tipo.grupo == "VENDAS" { promocao_vigente(&a, &data_doc) } else { 0.0 };
+        let promo = if tipo.grupo == "VENDAS" { promocao_vigente(&a, &data_doc).max(regras[idx].0) } else { 0.0 };
         // desconto de linha combinado com o desconto global
         let dl = l.desconto_pct.unwrap_or_else(|| na_origem.map(|o| o.desconto).unwrap_or(promo)).clamp(0.0, 100.0);
         if dl > ent_desconto.max(promo) + 1e-9 {
@@ -1177,6 +1205,11 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         return Err(AppError::msg("A retenção não pode exceder o total do documento."));
     }
     let a_pagar = total - total_retencao;
+    // compra mínima do cupão (sobre o total antes do desconto do cupão)
+    if let Some((codigo, t, v)) = &cupao {
+        let antes = if t == "PCT" { if *v < 100.0 { (total as f64 / (1.0 - v / 100.0)).round() as i64 } else { i64::MAX } } else { total + v.round() as i64 };
+        super::promocoes::cupao_valido(&mut tx, codigo, antes, &hoje).await?;
+    }
 
     // ---------- pagamentos ----------
     let mut pagamentos: Vec<(String, i64)> = i.pagamentos.iter().filter(|p| p.valor > 0).map(|p| (p.modo.clone(), p.valor)).collect();
@@ -1354,16 +1387,20 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     .execute(&mut *tx)
     .await?
     .last_insert_rowid();
-    sqlx::query("UPDATE documentos SET origem = ?, doc_manual = ?, credito_disponivel = ?, vendedor_id = ?, endereco_entrega = ?, hash_versao = ? WHERE id = ?")
+    sqlx::query("UPDATE documentos SET origem = ?, doc_manual = ?, credito_disponivel = ?, vendedor_id = ?, endereco_entrega = ?, hash_versao = ?, cupao = ? WHERE id = ?")
         .bind(if manual.is_some() { "M" } else { "P" })
         .bind(manual.as_ref().map(|m| m.0.clone()))
         .bind(if adiantamento { total } else { 0 })
         .bind(vendedor_id)
         .bind(txt(&i.endereco_entrega))
         .bind(if tipo.assinado { Some(versao_chave.as_str()) } else { None })
+        .bind(cupao.as_ref().map(|c| c.0.clone()))
         .bind(doc_id)
         .execute(&mut *tx)
         .await?;
+    if let Some((codigo, _, _)) = &cupao {
+        sqlx::query("UPDATE cupoes SET utilizacoes = utilizacoes + 1 WHERE codigo = ? COLLATE NOCASE").bind(codigo).execute(&mut *tx).await?;
+    }
     for (cid, valor) in &creditos_usar {
         sqlx::query("INSERT INTO credito_utilizacoes (documento_id, credito_id, valor) VALUES (?, ?, ?)").bind(doc_id).bind(cid).bind(valor).execute(&mut *tx).await?;
         sqlx::query("UPDATE documentos SET credito_disponivel = credito_disponivel - ? WHERE id = ?").bind(valor).bind(cid).execute(&mut *tx).await?;
@@ -1871,6 +1908,10 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
     for (did, valor) in liqs {
         sqlx::query("UPDATE documentos SET valor_pendente = valor_pendente + ? WHERE id = ?").bind(valor).bind(did).execute(&mut *tx).await?;
     }
+    sqlx::query("UPDATE cupoes SET utilizacoes = MAX(utilizacoes - 1, 0) WHERE codigo = (SELECT cupao FROM documentos WHERE id = ?) COLLATE NOCASE")
+        .bind(a.id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("UPDATE documentos SET estado = 'A', motivo_anulacao = ?, valor_pendente = 0, credito_disponivel = 0 WHERE id = ?")
         .bind(a.motivo.trim())
         .bind(a.id)

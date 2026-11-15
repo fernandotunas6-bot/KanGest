@@ -48,6 +48,7 @@ export const MENU: GrupoMenu[] = [
       { label: "Previsão de Venda", to: "/relatorios/stock?situacao=previsao", perm: "relatorios.ver" },
       { label: "Rastreabilidade de Lotes", to: "/relatorios/rastreio", perm: "relatorios.ver" },
       { label: "Etiquetas e Códigos de Barras", to: "/etiquetas" },
+      { label: "Promoções e Cupões", to: "/promocoes" },
       { label: "Recálculo de Stock", to: "/stock/recalculo", perm: "stock.inventario" },
     ],
   },

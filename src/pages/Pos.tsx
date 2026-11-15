@@ -52,6 +52,7 @@ interface Linha {
   quantidade: number;
   preco: number; // sem IVA (cêntimos)
   pvp?: number | null; // com IVA (cêntimos): o valor mestre com «preços com IVA incluído»
+  regra?: string | null; // promoção por regras aplicada (ex.: «Leve 3 pague 2»)
   desconto: number; // %
   descricao: string | null; // descrição de linha (F9)
   lote?: string | null; // lote escolhido (vazio = o que expira primeiro)
@@ -196,6 +197,8 @@ export default function Pos() {
   const [verSuspensos, setVerSuspensos] = useState(false);
   const [verProformas, setVerProformas] = useState(false);
   const [pedidoPin, setPedidoPin] = useState<PedidoPin>(null);
+  const [cupao, setCupao] = useState<{ codigo: string; tipo: "PCT" | "VALOR"; valor: number; descricao: string | null } | null>(null);
+  const [pedirCupao, setPedirCupao] = useState(false);
   const [docEmitido, setDocEmitido] = useState<number | null>(null);
   const [impressaoAuto, setImpressaoAuto] = useState<number | null>(null);
   const buscaRef = useRef<HTMLInputElement>(null);
@@ -217,7 +220,7 @@ export default function Pos() {
   const totais = useMemo(() => calcular(linhas, descGlobal, comIva), [linhas, descGlobal, comIva]);
   const idx = sel ?? (linhas.length ? linhas.length - 1 : null); // linha activa (seleccionada ou a última)
   const linhaAtiva = idx !== null ? linhas[idx] : null;
-  const algumModal = pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido;
+  const algumModal = pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido || pedirCupao;
 
   /** Executa a acção se o operador tiver permissão (e limite de desconto); caso contrário pede o PIN de um supervisor. */
   function comPermissao(permissao: string, descricao: string, acao: () => void, desconto?: number) {
@@ -285,9 +288,52 @@ export default function Pos() {
     setSel(null);
     setCliente(CONSUMIDOR);
     setDescGlobal({ tipo: "pct", valor: 0 });
+    setCupao(null);
     setOrigem(null);
     setPin(null);
     focar();
+  }
+
+  // ---------------- promoções por regras (o servidor calcula; aplicam-se às linhas não alteradas à mão) ----------------
+  const chavePromo = linhas.map((l) => `${l.artigo.id}:${l.quantidade}:${l.manual ? 1 : 0}`).join("|");
+  useEffect(() => {
+    if (!linhas.length) return;
+    const t = setTimeout(async () => {
+      try {
+        const r = await call<{ desconto: number; regra: string | null }[]>("promocoes.calcular", { linhas: linhas.map((l) => ({ artigo_id: l.artigo.id, quantidade: l.quantidade })) });
+        setLinhas((ls) =>
+          ls.map((l, i) => {
+            if (l.manual || !r[i] || ls.length !== r.length) return l;
+            const base = Math.max(cliente.desconto || 0, l.artigo.promo_atual || 0);
+            const desconto = Math.max(base, r[i].desconto);
+            const regra = r[i].desconto > base ? r[i].regra : null;
+            return desconto === l.desconto && regra === (l.regra ?? null) ? l : { ...l, desconto, regra };
+          }),
+        );
+      } catch {
+        // sem regras ou sem ligação: fica o desconto que já havia
+      }
+    }, 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chavePromo, cliente.id]);
+
+  // ---------------- cupão de desconto ----------------
+  async function aplicarCupao(codigo: string) {
+    if (!codigo.trim()) return;
+    try {
+      const c = await call<{ codigo: string; tipo: "PCT" | "VALOR"; valor: number; descricao: string | null }>("cupoes.validar", { codigo, total: totais.total });
+      setCupao(c);
+      setDescGlobal(c.tipo === "PCT" ? { tipo: "pct", valor: c.valor } : { tipo: "valor", valor: Math.round(c.valor) });
+      setPedirCupao(false);
+      toast.success(`Cupão ${c.codigo} aplicado${c.descricao ? ` (${c.descricao})` : ""}.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+  function retirarCupao() {
+    setCupao(null);
+    setDescGlobal({ tipo: "pct", valor: 0 });
   }
 
   // ---------------- operações sobre linhas ----------------
@@ -642,7 +688,8 @@ export default function Pos() {
     { k: "F3", label: "Quantidade", icon: <Hash className="size-4" />, on: () => abrirTeclado("qtd") },
     { k: "F6", label: "Desc. linha", icon: <Percent className="size-4" />, on: () => abrirTeclado("desc") },
     { k: "F7", label: "Preço", icon: <Tag className="size-4" />, on: () => abrirTeclado("preco") },
-    { k: "F8", label: "Desc. global", icon: <Percent className="size-4" />, on: () => abrirTeclado("global") },
+    { k: "F8", label: "Desc. global", icon: <Percent className="size-4" />, on: () => (cupao ? toast.info("Retire o cupão para dar outro desconto global.") : abrirTeclado("global")) },
+    { k: "", label: "Cupão", icon: <Tag className="size-4" />, on: () => (linhas.length ? setPedirCupao(true) : toast.info("Adicione artigos antes do cupão.")) },
     { k: "F9", label: "Descrição", icon: <Pencil className="size-4" />, on: () => linhaAtiva && setDescricaoLinha(true) },
     { k: "", label: "Lote", icon: <Boxes className="size-4" />, on: () => (linhaAtiva?.artigo.controla_lote ? setEscolherLote(true) : toast.info("Este artigo não é controlado por lotes.")) },
     { k: "Del", label: "Apagar linha", icon: <Trash2 className="size-4" />, on: () => apagarLinha() },
@@ -929,6 +976,7 @@ export default function Pos() {
                             {kzNum(l.pvp ?? comIvaArt(l.preco, l.artigo))} / {l.artigo.unidade ?? "UN"} · IVA {l.artigo.taxa_pct}%
                             {l.desconto ? ` · \u2212${numero(l.desconto, 2)}%` : ""}
                           </div>
+                          {l.regra && <div className="mt-0.5 inline-block rounded bg-accent-50 px-1.5 py-px text-[11.5px] font-medium text-accent-ink">{l.regra}</div>}
                           {/* preço líquido (já com os descontos) abaixo do custo médio: só aviso, a venda continua possível */}
                           {!!c && l.artigo.custo_medio > 0 && l.quantidade > 0 && c.liquido < Math.round(l.artigo.custo_medio * l.quantidade) && (
                             <div className="mt-0.5 text-[12px] font-medium text-danger">Abaixo do custo médio ({kzNum(l.artigo.custo_medio)} s/ IVA)</div>
@@ -1000,6 +1048,16 @@ export default function Pos() {
             <div className="space-y-1 text-[13px] text-ink-2">
               <Linha2 k={`Subtotal (${qtd(totais.itens)} ${totais.itens === 1 ? "item" : "itens"})`} v={kz(totais.bruto)} />
               {totais.desc > 0 && <Linha2 k="Descontos" v={`\u2212${kz(totais.desc)}`} />}
+              {cupao && (
+                <div className="flex items-center justify-between rounded-md bg-accent-50 px-2 py-1 text-accent-ink">
+                  <span>
+                    Cupão <b>{cupao.codigo}</b> ({cupao.tipo === "PCT" ? `\u2212${numero(cupao.valor, 2)}%` : `\u2212${kz(cupao.valor)}`})
+                  </span>
+                  <button className="text-[12px] underline" onClick={retirarCupao}>
+                    retirar
+                  </button>
+                </div>
+              )}
               <Linha2 k="IVA" v={kz(totais.iva)} />
             </div>
             <div className="mt-2 flex items-baseline justify-between">
@@ -1130,6 +1188,15 @@ export default function Pos() {
       />
 
       <TextoModal
+        open={pedirCupao}
+        titulo="Cupão de desconto"
+        label="Código do cupão"
+        valorInicial=""
+        onConfirm={aplicarCupao}
+        onClose={() => { setPedirCupao(false); focar(); }}
+      />
+
+      <TextoModal
         open={suspender}
         titulo="Suspender documento"
         label="Identificação (cliente, mesa, observação)"
@@ -1158,6 +1225,7 @@ export default function Pos() {
           cliente={cliente}
           linhas={linhas}
           descGlobal={descGlobal}
+          cupao={cupao?.codigo ?? null}
           origemId={origem?.id ?? null}
           pin={pin}
           modos={tabelas.data?.modos_pagamento ?? []}
@@ -1239,6 +1307,7 @@ function Pagamento({
   cliente,
   linhas,
   descGlobal,
+  cupao,
   origemId,
   pin,
   modos,
@@ -1249,6 +1318,7 @@ function Pagamento({
   cliente: Entidade;
   linhas: Linha[];
   descGlobal: DescGlobal;
+  cupao: string | null;
   origemId: number | null;
   pin: string | null;
   modos: { codigo: string; descricao: string }[];
@@ -1289,6 +1359,7 @@ function Pagamento({
         desconto_global_valor: descGlobal.tipo === "valor" && descGlobal.valor > 0 ? descGlobal.valor : undefined,
         doc_origem_id: origemId ?? undefined,
         autorizacao_pin: pin ?? undefined,
+        cupao: cupao ?? undefined,
         pagamentos: tipo === "FR" ? Object.entries(valores).map(([modo, v]) => ({ modo, valor: parseKz(v || "0") })) : [],
       });
       toast.success(`${d.documento.numero_doc} emitido.`);
