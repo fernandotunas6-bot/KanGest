@@ -11,6 +11,7 @@ pub mod importar;
 mod integridade;
 pub mod licenca;
 mod oficina;
+mod gestao;
 mod parametros;
 mod promocoes;
 mod posto;
@@ -190,6 +191,12 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "promocoes.regraGuardar" => promocoes::regra_guardar(st, p(params)?).await,
         "promocoes.cupaoGuardar" => promocoes::cupao_guardar(st, p(params)?).await,
         "cupoes.validar" => promocoes::validar(st, p(params)?).await,
+
+        // ---- sugestão de encomendas e lançamentos para a contabilidade ----
+        "compras.sugestao" => gestao::sugestao(st, p(params)?).await,
+        "contabilidade.contas" => gestao::contas_obter(st).await,
+        "contabilidade.contasGuardar" => gestao::contas_guardar(st, p(params)?).await,
+        "contabilidade.lancamentos" => gestao::lancamentos(st, p(params)?).await,
         "documentos.auxiliares" => documentos::auxiliares(st).await,
 
         // ---- POS: suspensos ----

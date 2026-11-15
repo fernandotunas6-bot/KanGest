@@ -3272,3 +3272,46 @@ async fn promocoes_por_regras_e_cupoes() {
     assert_eq!(rpc(&st, "promocoes.listar", Value::Null).await["cupoes"][0]["utilizacoes"], 0);
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+#[tokio::test]
+async fn sugestao_de_encomendas_e_lancamentos_contabilisticos() {
+    let (st, pasta) = base_com_admin("sugestao").await;
+    let forn = rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Fornecedor SA", "nif": "5410000000" })).await["id"].as_i64().unwrap();
+    let cli = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Cliente Lda", "nif": "5417000000" })).await["id"].as_i64().unwrap();
+    let arroz = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 100000, "qtd_minima": 10, "qtd_maxima": 50 })).await["id"].as_i64().unwrap();
+    let oleo = rpc(&st, "artigos.guardar", json!({ "descricao": "Óleo", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    // compra do arroz (5 un. a 600,00) e entrada do óleo (40 un.)
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FC", "entidade_id": forn, "doc_externo": "FT A/1", "linhas": [{ "artigo_id": arroz, "quantidade": 5, "preco_unitario": 60000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": oleo, "quantidade": 40, "preco_unitario": 50000 }] })).await;
+    // vendem-se 30 óleos (1 por dia nos últimos 30 dias, em média)
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": oleo, "quantidade": 30 }], "pagamentos": [{ "modo": "NU", "valor": 3420000 }] })).await;
+    // encomenda em curso de 3 arrozes: 5 + 3 = 8 continua abaixo do mínimo (10)
+    rpc(&st, "documentos.emitir", json!({ "tipo": "VNE", "entidade_id": forn, "doc_externo": "ENC-1", "linhas": [{ "artigo_id": arroz, "quantidade": 3, "preco_unitario": 60000 }] })).await;
+    let s = rpc(&st, "compras.sugestao", json!({ "dias": 30, "cobertura": 15 })).await;
+    let linha = |id: i64| s["linhas"].as_array().unwrap().iter().find(|l| l["artigo_id"] == id).cloned().unwrap();
+    let a = linha(arroz);
+    assert_eq!((a["sugerido"].as_f64(), a["fornecedor"].as_str(), a["custo"].as_i64()), (Some(42.0), Some("Fornecedor SA"), Some(60000)), "até ao máximo: 50 − 5 − 3; {a}");
+    let o = linha(oleo);
+    assert_eq!((o["sugerido"].as_f64(), o["motivo"].as_str()), (Some(5.0), Some("não cobre os dias pedidos")), "15 dias × 1/dia − 10 em stock; {o}");
+
+    // diário contabilístico: vendas a pronto e a crédito, recibo, nota de crédito e compra
+    let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": oleo, "quantidade": 2 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "RC", "entidade_id": cli, "liquidar": [{ "documento_id": ft["documento"]["id"], "valor": 114000 }], "pagamentos": [{ "modo": "TB", "valor": 114000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": cli, "doc_origem_id": ft["documento"]["id"], "motivo": "Devolução", "linhas": [{ "artigo_id": oleo, "quantidade": 1 }] })).await;
+    let hoje = db::hoje();
+    let l = rpc(&st, "contabilidade.lancamentos", json!({ "de": hoje, "ate": hoje })).await;
+    assert_eq!(l["equilibrado"], true, "débito = crédito: {}", l["balancete"]);
+    let saldo = |conta: &str| l["balancete"].as_array().unwrap().iter().find(|c| c["conta"] == conta).map(|c| c["saldo"].as_i64().unwrap()).unwrap_or(0);
+    // caixa: FR de 30 óleos (34 200,00); bancos: recibo (1 140,00); clientes: 2 280 − 1 140 − 1 140 = 0
+    assert_eq!((saldo("45.1"), saldo("43.1"), saldo("31.1.1")), (3420000, 114000, 0));
+    // vendas (crédito): 30 + 2 − 1 = 31 óleos a 1 000,00; IVA liquidado 14%
+    assert_eq!((saldo("61.1"), saldo("34.5.3")), (-3100000, -434000));
+    // compras: 600,00 × 5 + IVA, contra fornecedores
+    assert_eq!((saldo("21.1"), saldo("34.5.2"), saldo("32.1.1")), (300000, 42000, -342000));
+    // contas configuráveis
+    rpc(&st, "contabilidade.contasGuardar", json!({ "caixa": "45.1.1" })).await;
+    let l2 = rpc(&st, "contabilidade.lancamentos", json!({ "de": hoje, "ate": hoje })).await;
+    assert!(l2["balancete"].as_array().unwrap().iter().any(|c| c["conta"] == "45.1.1"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
