@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, Layers, Package, Plus, Search, Tags, Trash2 } from "lucide-react";
+import { Barcode, Copy, Layers, Package, Plus, Search, Tags, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { call } from "@/lib/api";
 import { useDebounce, useTabelas } from "@/lib/hooks";
 import { comIva, kz, parseKz, qtd, semIva, toInputKz } from "@/lib/format";
-import type { Artigo, Componente } from "@/lib/types";
+import type { Artigo, CodigoExtra, Componente } from "@/lib/types";
 import { ArtigoPicker } from "@/components/Pickers";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
@@ -141,7 +141,7 @@ export default function Artigos() {
 /** Cópia de um artigo para criar outro parecido (Clonar artigo do KIGEST): sem referência, código de barras nem stock. */
 function clonar(a: Partial<Artigo>): Partial<Artigo> {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { id, referencia, codigo_barras, stock, ...resto } = a;
+  const { id, referencia, codigo_barras, stock, codigo_balanca, codigos, ...resto } = a;
   return { ...resto, descricao: `${a.descricao ?? ""} (cópia)`, ativo: 1 };
 }
 
@@ -164,10 +164,15 @@ function ArtigoForm({
   const [custo, setCusto] = useState(toInputKz(a.custo ?? 0));
   const [busy, setBusy] = useState(false);
   const [comps, setComps] = useState<Componente[]>([]);
+  const [codigos, setCodigos] = useState<CodigoExtra[]>([]);
   useEffect(() => {
     const fonte = inicial.id ?? origem;
     if (fonte && inicial.composto) call<Componente[]>("artigos.componentes", { id: fonte }).then(setComps).catch(() => {});
   }, [inicial.id, origem, inicial.composto]);
+  useEffect(() => {
+    // outros códigos e embalagens (não se copiam ao clonar: um código só pode ser de um artigo)
+    if (inicial.id) call<Artigo>("artigos.obter", { id: inicial.id }).then((x) => setCodigos(x.codigos ?? [])).catch(() => {});
+  }, [inicial.id]);
   const custoKit = comps.reduce((s, c) => s + Math.round((c.custo_medio ?? 0) * c.quantidade), 0);
   const set = (k: keyof Artigo, v: unknown) => setA((x) => ({ ...x, [k]: v }));
 
@@ -215,6 +220,8 @@ function ArtigoForm({
         promo_inicio: a.promo_inicio || null,
         promo_fim: a.promo_fim || null,
         componentes: a.composto ? comps.map((c) => ({ componente_id: c.componente_id, quantidade: c.quantidade })) : null,
+        codigo_balanca: a.tipo === "P" ? (a.codigo_balanca ?? "").trim() : "",
+        codigos: codigos.filter((c) => c.codigo.trim()).map((c) => ({ codigo: c.codigo.trim(), quantidade: c.quantidade || 1, descricao: c.descricao || null })),
       });
       toast.success("Artigo guardado.");
       qc.invalidateQueries({ queryKey: ["artigos"] });
@@ -265,6 +272,11 @@ function ArtigoForm({
         <Field label="Código de barras">
           <Input value={a.codigo_barras ?? ""} onChange={(e) => set("codigo_barras", e.target.value)} />
         </Field>
+        {a.tipo === "P" && (
+          <Field label="Código na balança" hint="PLU das etiquetas com peso ou preço">
+            <Input className="font-mono" inputMode="numeric" value={a.codigo_balanca ?? ""} onChange={(e) => set("codigo_balanca", e.target.value.replace(/\D/g, "").slice(0, 6))} />
+          </Field>
+        )}
         <Field label="Família">
           <Select value={a.familia_id ?? ""} onChange={(e) => set("familia_id", Number(e.target.value))}>
             {t?.familias.map((f) => (
@@ -452,6 +464,59 @@ function ArtigoForm({
           )}
         </div>
       )}
+
+      <div className="mt-4 rounded-xl border border-line p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span>
+            <span className="flex items-center gap-2 font-medium">
+              <Barcode className="size-4" /> Outros códigos e embalagens
+            </span>
+            <span className="block text-[12px] text-ink-3">Outro código do mesmo artigo (quantidade 1) ou de uma embalagem: ler a caixa de 12 lança 12 unidades.</span>
+          </span>
+          <Button size="sm" variant="secondary" onClick={() => setCodigos((cs) => [...cs, { codigo: "", quantidade: 1, descricao: null }])}>
+            <Plus className="size-4" /> Código
+          </Button>
+        </div>
+        {codigos.length > 0 && (
+          <table className="w-full text-left">
+            <thead>
+              <tr className="text-[12px] text-ink-3">
+                <th className="py-1 font-normal">Código</th>
+                <th className="py-1 font-normal">Descrição</th>
+                <th className="w-28 py-1 text-right font-normal">Unidades</th>
+                <th className="w-10" />
+              </tr>
+            </thead>
+            <tbody>
+              {codigos.map((c, i) => (
+                <tr key={i} className="border-t border-line/70">
+                  <td className="py-1.5 pr-2">
+                    <Input className="h-8 font-mono" value={c.codigo} onChange={(e) => setCodigos((cs) => cs.map((x, j) => (j === i ? { ...x, codigo: e.target.value } : x)))} />
+                  </td>
+                  <td className="py-1.5 pr-2">
+                    <Input className="h-8" placeholder="Ex.: Caixa de 12" value={c.descricao ?? ""} onChange={(e) => setCodigos((cs) => cs.map((x, j) => (j === i ? { ...x, descricao: e.target.value } : x)))} />
+                  </td>
+                  <td className="py-1.5">
+                    <Input
+                      className="num h-8 text-right"
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={c.quantidade}
+                      onChange={(e) => setCodigos((cs) => cs.map((x, j) => (j === i ? { ...x, quantidade: Number(e.target.value) } : x)))}
+                    />
+                  </td>
+                  <td className="py-1.5 text-right">
+                    <button className="rounded-md p-1.5 text-ink-3 hover:bg-danger-50 hover:text-danger" onClick={() => setCodigos((cs) => cs.filter((_, j) => j !== i))}>
+                      <Trash2 className="size-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       {a.tipo === "P" && !a.composto && (
         <div className="mt-4 grid grid-cols-4 items-end gap-4">

@@ -1,7 +1,7 @@
 mod atualizacao;
 mod auth;
 mod caixa;
-mod catalogo;
+pub(crate) mod catalogo;
 mod contas;
 mod documentos;
 mod entidades;
@@ -162,6 +162,8 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "artigos.obter" => catalogo::artigos_obter(st, p(params)?).await,
         "artigos.porIds" => catalogo::artigos_por_ids(st, p(params)?).await,
         "artigos.codigo" => catalogo::artigos_codigo(st, p(params)?).await,
+        "balanca.obter" => catalogo::balanca_obter(st).await,
+        "balanca.guardar" => catalogo::balanca_guardar(st, p(params)?).await,
         "artigos.guardar" => catalogo::artigos_guardar(st, p(params)?).await,
         "stock.listar" => catalogo::stock_listar(st, p(params)?).await,
         "stock.movimentos" => catalogo::stock_movimentos(st, p(params)?).await,

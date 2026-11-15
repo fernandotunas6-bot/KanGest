@@ -110,6 +110,27 @@ export interface Artigo {
   promo_inicio?: string | null;
   promo_fim?: string | null;
   promo_atual?: number;
+  /** Código do artigo na balança (PLU) das etiquetas com peso ou preço. */
+  codigo_balanca?: string | null;
+  /** Outros códigos de barras e embalagens (quantidade = unidades por leitura). */
+  codigos?: CodigoExtra[];
+  /** Em `artigos.codigo`: quanto vale a leitura quando não é 1 (embalagem ou etiqueta da balança). */
+  leitura?: { origem: "embalagem" | "balanca"; quantidade: number; descricao?: string | null; peso?: number; preco_etiqueta?: number };
+}
+
+export interface CodigoExtra {
+  codigo: string;
+  quantidade: number;
+  descricao: string | null;
+}
+
+/** Formato das etiquetas da balança (EAN-13: prefixo + código do artigo + peso ou preço + controlo). */
+export interface BalancaConfig {
+  ativo: boolean;
+  prefixos: string;
+  digitos_codigo: number;
+  tipo: "PESO" | "PRECO";
+  decimais: number;
 }
 
 export interface Componente {

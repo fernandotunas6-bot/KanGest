@@ -2975,3 +2975,79 @@ async fn api_integracao() {
     arc.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Dígito de controlo EAN-13 (para montar etiquetas da balança nos testes).
+fn com_controlo(doze: &str) -> String {
+    let soma: u32 = doze.bytes().enumerate().map(|(i, b)| { let d = (b - b'0') as u32; if i % 2 == 0 { d } else { d * 3 } }).sum();
+    format!("{doze}{}", (10 - soma % 10) % 10)
+}
+
+/// Vários códigos de barras por artigo (embalagens) e etiquetas da balança (peso ou preço no código EAN-13).
+#[tokio::test]
+async fn codigos_embalagens_e_balanca() {
+    let pasta = std::env::temp_dir().join(format!("kigest-codigos-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Mercearia, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+
+    // ---- embalagens: a caixa de 12 lê-se como 12 unidades ----
+    let agua = rpc(&st, "artigos.guardar", json!({ "descricao": "Água 0,5L", "codigo_barras": "5601000000017", "taxa_iva_id": 1, "preco1": 10000,
+        "codigos": [{ "codigo": "15601000000014", "quantidade": 12, "descricao": "Caixa de 12" }, { "codigo": "ALT-AGUA" }] })).await["id"].as_i64().unwrap();
+    let a = rpc(&st, "artigos.obter", json!({ "id": agua })).await;
+    assert_eq!(a["codigos"].as_array().unwrap().len(), 2);
+    let cx = rpc(&st, "artigos.codigo", json!({ "codigo": "15601000000014" })).await;
+    assert_eq!((cx["id"].as_i64(), cx["leitura"]["quantidade"].as_f64(), cx["leitura"]["origem"].as_str()), (Some(agua), Some(12.0), Some("embalagem")));
+    let alt = rpc(&st, "artigos.codigo", json!({ "codigo": "ALT-AGUA" })).await;
+    assert_eq!(alt["id"], agua);
+    assert!(alt.get("leitura").is_none(), "outro código da mesma unidade vale 1");
+    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": "5601000000017" })).await.get("leitura").is_none());
+    assert_eq!(rpc(&st, "artigos.listar", json!({ "q": "1560100" })).await.as_array().unwrap().len(), 1, "a pesquisa encontra pelos códigos extra");
+    // um código não pode ser de dois artigos, nem repetir-se no mesmo
+    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Outro", "taxa_iva_id": 1, "preco1": 1, "codigos": [{ "codigo": "15601000000014" }] })).await.contains("já é do artigo"));
+    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Outro", "taxa_iva_id": 1, "preco1": 1, "codigos": [{ "codigo": "5601000000017" }] })).await.contains("já é do artigo"));
+    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Outro", "taxa_iva_id": 1, "preco1": 1, "codigos": [{ "codigo": "X1" }, { "codigo": "X1" }] })).await.contains("repetido"));
+    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Outro", "taxa_iva_id": 1, "preco1": 1, "codigos": [{ "codigo": "X2", "quantidade": 0 }] })).await.contains("positiva"));
+    // gravar o artigo sem «codigos» não os apaga; com a lista vazia, sim
+    rpc(&st, "artigos.guardar", json!({ "id": agua, "descricao": "Água 0,5 L", "codigo_barras": "5601000000017", "taxa_iva_id": 1, "preco1": 10000 })).await;
+    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": agua })).await["codigos"].as_array().unwrap().len(), 2);
+    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": agua })).await["referencia"], "A00001", "alterar sem referência mantém a que tinha");
+
+    // ---- balança: desligada, a etiqueta não se lê ----
+    let carne = rpc(&st, "artigos.guardar", json!({ "descricao": "Carne picada (kg)", "unidade_id": 2, "taxa_iva_id": 1, "preco1": 500000, "codigo_balanca": "01234" })).await["id"].as_i64().unwrap();
+    let etiqueta_peso = com_controlo("200123400750"); // prefixo 20, artigo 01234, 00750 g
+    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": etiqueta_peso })).await.is_null());
+    assert!(rpc_err(&st, "balanca.guardar", json!({ "ativo": true, "prefixos": "10", "digitos_codigo": 5, "tipo": "PESO", "decimais": 3 })).await.contains("20 a 29"));
+    rpc(&st, "balanca.guardar", json!({ "ativo": true, "prefixos": "20, 21", "digitos_codigo": 5, "tipo": "PESO", "decimais": 3 })).await;
+    let lido = rpc(&st, "artigos.codigo", json!({ "codigo": etiqueta_peso })).await;
+    assert_eq!((lido["id"].as_i64(), lido["leitura"]["quantidade"].as_f64(), lido["leitura"]["origem"].as_str()), (Some(carne), Some(0.75), Some("balanca")), "{lido}");
+    // dígito de controlo errado ou prefixo de fora: não é etiqueta
+    let mut errada = etiqueta_peso.clone();
+    errada.replace_range(12..13, &(((errada.as_bytes()[12] - b'0' + 1) % 10).to_string()));
+    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": errada })).await.is_null());
+    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": com_controlo("290123400750") })).await.is_null());
+    // o código da balança é único
+    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Frango (kg)", "taxa_iva_id": 1, "preco1": 1, "codigo_balanca": "1234" })).await.contains("já é do artigo"));
+    // venda com a quantidade lida: 0,750 kg × 5 000,00 = 3 750,00 + IVA
+    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": carne, "quantidade": 10, "preco_unitario": 300000 }] })).await;
+    assert!(fr["documento"]["id"].as_i64().is_some());
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let v = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": carne, "quantidade": lido["leitura"]["quantidade"] }], "pagamentos": [{ "modo": "NU", "valor": 427500 }] })).await;
+    assert_eq!(v["documento"]["total"], 427500);
+
+    // ---- etiquetas com o preço (Kz, sem casas): a quantidade é a que dá esse preço ----
+    rpc(&st, "balanca.guardar", json!({ "ativo": true, "prefixos": "20", "digitos_codigo": 5, "tipo": "PRECO", "decimais": 0 })).await;
+    let etiqueta_preco = com_controlo("200123402850"); // 2 850 Kz com IVA = 0,5 kg a 5 700 Kz/kg (5 000 + 14%)
+    let lido = rpc(&st, "artigos.codigo", json!({ "codigo": etiqueta_preco })).await;
+    assert_eq!((lido["leitura"]["quantidade"].as_f64(), lido["leitura"]["preco_etiqueta"].as_i64()), (Some(0.5), Some(285000)), "{lido}");
+    let cfg = rpc(&st, "balanca.obter", Value::Null).await;
+    assert_eq!((cfg["tipo"].as_str(), cfg["prefixos"].as_str()), (Some("PRECO"), Some("20")));
+
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

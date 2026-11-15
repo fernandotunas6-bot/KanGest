@@ -1126,7 +1126,7 @@ async fn tabelas(st: &AppState) -> Res {
 // ---------------------------------------------------------------- artigos
 
 const ARTIGO_SQL: &str = "
-    SELECT a.id, a.referencia, a.codigo_barras, a.descricao, a.descricao_curta, a.tipo,
+    SELECT a.id, a.referencia, a.codigo_barras, a.codigo_balanca, a.descricao, a.descricao_curta, a.tipo,
            a.familia_id, f.descricao AS familia, a.subfamilia_id, sf.descricao AS subfamilia,
            a.unidade_id, u.abreviatura AS unidade, a.taxa_iva_id, t.percentagem AS taxa_iva, a.motivo_isencao,
            a.preco1, a.preco2, a.preco3, a.preco4,
@@ -1197,19 +1197,24 @@ async fn artigo(st: &AppState, c: &Chave, p: &Pedido, id: i64) -> Res {
     Ok(Resposta::json(200, &artigo_json(&row, c)))
 }
 
+/// Pelo código de barras ou referência, por um código extra (embalagem) ou pela etiqueta da balança:
+/// `leitura.quantidade` diz quanto vale a leitura quando não é 1.
 async fn artigo_codigo(st: &AppState, c: &Chave, p: &Pedido, codigo: &str) -> Res {
-    let row = sqlx::query(&format!("{ARTIGO_SQL} WHERE a.ativo = 1 AND (a.codigo_barras = ?2 OR a.referencia = ?2) ORDER BY a.codigo_barras = ?2 DESC LIMIT 1"))
-        .bind(armazem_de(p, c)?)
-        .bind(codigo.trim())
-        .fetch_optional(&st.pool)
+    let (id, leitura) = services::catalogo::ler_codigo(&st.pool, codigo)
         .await?
         .ok_or_else(|| Resposta::erro(404, "nao_encontrado", format!("Nenhum artigo activo com o código {codigo}.")))?;
-    Ok(Resposta::json(200, &artigo_json(&row, c)))
+    let row = sqlx::query(&format!("{ARTIGO_SQL} WHERE a.id = ?2")).bind(armazem_de(p, c)?).bind(id).fetch_one(&st.pool).await?;
+    let mut v = artigo_json(&row, c);
+    if let Some(l) = leitura {
+        v["leitura"] = l;
+    }
+    Ok(Resposta::json(200, &v))
 }
 
 const CAMPOS_ARTIGO: &[&str] = &[
     "referencia",
     "codigo_barras",
+    "codigo_balanca",
     "descricao",
     "descricao_curta",
     "tipo",
@@ -1637,16 +1642,24 @@ async fn resolver_linhas(st: &AppState, corpo: &mut Map<String, Value>) -> Resul
         let n = n + 1;
         let o = l.as_object_mut().ok_or_else(|| Resposta::erro(422, "validacao", format!("A linha {n} não é um objecto.")))?;
         if o.get("artigo_id").map_or(true, Value::is_null) {
-            let (coluna, codigo) = match (o.get("referencia").and_then(Value::as_str), o.get("codigo_barras").and_then(Value::as_str)) {
-                (Some(r), _) => ("referencia", r.trim().to_string()),
-                (None, Some(cb)) => ("codigo_barras", cb.trim().to_string()),
+            let id = match (o.get("referencia").and_then(Value::as_str), o.get("codigo_barras").and_then(Value::as_str)) {
+                (Some(r), _) => {
+                    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM artigos WHERE referencia = ? AND ativo = 1 ORDER BY id LIMIT 1").bind(r.trim()).fetch_optional(&st.pool).await?;
+                    id.ok_or_else(|| Resposta::erro(422, "validacao", format!("Linha {n}: nenhum artigo activo com a referência «{}».", r.trim())))?
+                }
+                // código de barras: também os das embalagens (a quantidade multiplica pelas unidades) e as etiquetas da balança
+                (None, Some(cb)) => {
+                    let (id, leitura) = services::catalogo::ler_codigo(&st.pool, cb)
+                        .await?
+                        .ok_or_else(|| Resposta::erro(422, "validacao", format!("Linha {n}: nenhum artigo activo com o código de barras «{}».", cb.trim())))?;
+                    if let Some(f) = leitura.as_ref().and_then(|l| l["quantidade"].as_f64()) {
+                        let q = o.get("quantidade").and_then(Value::as_f64).unwrap_or(1.0);
+                        o.insert("quantidade".into(), json!(((q * f) * 1000.0).round() / 1000.0));
+                    }
+                    id
+                }
                 _ => return Err(Resposta::erro(422, "validacao", format!("Linha {n} sem artigo: indique artigo_id, referencia ou codigo_barras."))),
             };
-            let id: Option<i64> = sqlx::query_scalar(&format!("SELECT id FROM artigos WHERE {coluna} = ? AND ativo = 1 ORDER BY id LIMIT 1"))
-                .bind(&codigo)
-                .fetch_optional(&st.pool)
-                .await?;
-            let id = id.ok_or_else(|| Resposta::erro(422, "validacao", format!("Linha {n}: nenhum artigo activo com {coluna} «{codigo}».")))?;
             o.insert("artigo_id".into(), json!(id));
         }
         if let Some(piva) = o.remove("preco_com_iva").filter(|v| !v.is_null()) {
@@ -1804,6 +1817,8 @@ async fn emitir(st: &AppState, c: &Chave, p: &Pedido) -> Res {
     }
     resolver_cliente(st, c, &mut corpo).await?;
     resolver_linhas(st, &mut corpo).await?;
+    // as embalagens e a balança mudam as quantidades: volta a confirmar os limites
+    validar_valores(&corpo)?;
     precos_da_origem(st, c, &mut corpo).await?;
     let v = match executar(st, c, "documentos.emitir", Value::Object(corpo)).await {
         Ok(v) => v,

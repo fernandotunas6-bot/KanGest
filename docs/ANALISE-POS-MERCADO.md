@@ -50,8 +50,8 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · **Esforço:** P pequeno (dia
 
 | Função | Nos grandes POS | KanGest | Prioridade | Esforço |
 |---|---|---|---|---|
-| Vários códigos de barras por artigo e embalagens (caixa de 12 → 12 unidades) | Padrão | ❌ um só código de barras; a unidade é única | Alta | M |
-| Artigos a peso (código EAN-13 da balança com peso ou preço, prefixos 20–29) | Padrão em mercearias, talhos, padarias | ❌ | Alta | P |
+| Vários códigos de barras por artigo e embalagens (caixa de 12 → 12 unidades) | Padrão | ✅ **feito:** outros códigos e embalagens na ficha do artigo; o POS e a API multiplicam pelas unidades | — | — |
+| Artigos a peso (código EAN-13 da balança com peso ou preço, prefixos 20–29) | Padrão em mercearias, talhos, padarias | ✅ **feito:** formato configurável, código na balança na ficha, dígito de controlo confirmado | — | — |
 | Fotografias dos artigos (grelha do POS e loja online) | Padrão | ❌ | Média | P–M |
 | Variantes (tamanho e cor) com stock por variante | Padrão em vestuário e calçado | ❌ | Média | G |
 | Números de série / IMEI por unidade vendida | Padrão em electrónica e telemóveis | ❌ (há lotes, não números de série) | Média | M |
@@ -108,7 +108,7 @@ limite de pedidos, registo de pedidos, idempotência na emissão e exportação 
 **Fase seguinte (maior retorno para o retalho angolano, esforço pequeno a médio):**
 
 1. ~~Corrigir a compensação de saldo no POS~~ — feito: a FR paga-se com o crédito do cliente.
-2. Artigos a peso (EAN-13 de balança) e vários códigos de barras/embalagens por artigo.
+2. ~~Artigos a peso (EAN-13 de balança) e vários códigos de barras/embalagens por artigo~~ — feito.
 3. ~~Contagem do fecho de caixa por notas e moedas e fecho cego~~ — feito.
 4. Webhooks para a API (venda emitida, documento anulado, stock alterado), assinados com HMAC.
 5. Envio da factura por email/WhatsApp em PDF.

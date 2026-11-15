@@ -88,7 +88,8 @@ pub async fn artigos_listar(st: &AppState, f: ArtigosFiltro) -> AppResult<Value>
     let q = format!("%{}%", f.q.unwrap_or_default().trim());
     let sql = format!(
         "{ARTIGO_SELECT}
-         WHERE (a.descricao LIKE ?1 OR a.referencia LIKE ?1 OR IFNULL(a.codigo_barras,'') LIKE ?1)
+         WHERE (a.descricao LIKE ?1 OR a.referencia LIKE ?1 OR IFNULL(a.codigo_barras,'') LIKE ?1
+                OR EXISTS (SELECT 1 FROM artigo_codigos c WHERE c.artigo_id = a.id AND c.codigo LIKE ?1))
            AND (?2 IS NULL OR a.familia_id = ?2)
            AND (?3 = 1 OR a.ativo = 1)
          ORDER BY a.descricao LIMIT ?4"
@@ -119,7 +120,9 @@ pub async fn artigos_obter(st: &AppState, i: IdIn) -> AppResult<Value> {
         .fetch_optional(&st.pool)
         .await?
         .ok_or(AppError::NaoEncontrado)?;
-    Ok(db::row_json(&row))
+    let mut v = db::row_json(&row);
+    v["codigos"] = db::query_json_bind(&st.pool, "SELECT codigo, quantidade, descricao FROM artigo_codigos WHERE artigo_id = ? ORDER BY id", i.id).await?;
+    Ok(v)
 }
 
 #[derive(Deserialize)]
@@ -147,16 +150,165 @@ pub struct CodigoIn {
     codigo: String,
 }
 
-/// Leitura por código de barras ou referência exacta (leitor no POS).
+/// Leitura por código de barras ou referência exacta (leitor no POS), código extra (embalagem) ou etiqueta da
+/// balança. O artigo vem com `leitura` quando uma leitura vale outra quantidade: `{origem, quantidade, …}`.
 pub async fn artigos_codigo(st: &AppState, c: CodigoIn) -> AppResult<Value> {
     st.sessao()?;
-    let row = sqlx::query(&format!("{ARTIGO_SELECT} WHERE a.ativo = 1 AND (a.codigo_barras = ? OR a.referencia = ?) LIMIT 1"))
-        .bind(st.posto().armazem_id)
-        .bind(c.codigo.trim())
-        .bind(c.codigo.trim())
-        .fetch_optional(&st.pool)
+    let Some((id, leitura)) = ler_codigo(&st.pool, &c.codigo).await? else { return Ok(Value::Null) };
+    let row = sqlx::query(&format!("{ARTIGO_SELECT} WHERE a.id = ?")).bind(st.posto().armazem_id).bind(id).fetch_one(&st.pool).await?;
+    let mut v = db::row_json(&row);
+    if let Some(l) = leitura {
+        v["leitura"] = l;
+    }
+    Ok(v)
+}
+
+/// Artigo activo de um código lido (leitor do POS ou API): (id, leitura). A leitura diz a quantidade que a
+/// leitura vale quando não é 1: embalagem (unidades da caixa) ou etiqueta da balança (peso, ou o preço convertido).
+pub async fn ler_codigo(p: &sqlx::SqlitePool, codigo: &str) -> AppResult<Option<(i64, Option<Value>)>> {
+    let codigo = codigo.trim();
+    if codigo.is_empty() {
+        return Ok(None);
+    }
+    // 1. código de barras ou referência do artigo
+    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM artigos WHERE ativo = 1 AND (codigo_barras = ?1 OR referencia = ?1) ORDER BY codigo_barras = ?1 DESC, id LIMIT 1")
+        .bind(codigo)
+        .fetch_optional(p)
         .await?;
-    Ok(row.as_ref().map(db::row_json).unwrap_or(Value::Null))
+    if let Some(id) = id {
+        return Ok(Some((id, None)));
+    }
+    // 2. código extra (outra embalagem)
+    let extra: Option<(i64, f64, Option<String>)> = sqlx::query_as(
+        "SELECT c.artigo_id, c.quantidade, c.descricao FROM artigo_codigos c JOIN artigos a ON a.id = c.artigo_id WHERE c.codigo = ? AND a.ativo = 1",
+    )
+    .bind(codigo)
+    .fetch_optional(p)
+    .await?;
+    if let Some((id, q, d)) = extra {
+        return Ok(Some((id, (q != 1.0 || d.is_some()).then(|| json!({ "origem": "embalagem", "quantidade": q, "descricao": d })))));
+    }
+    // 3. etiqueta da balança (EAN-13 com o código do artigo e o peso ou o preço)
+    let cfg = balanca_ler(p).await?;
+    let Some((plu, valor)) = cfg.partir(codigo) else { return Ok(None) };
+    let artigo: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT a.id, CAST(ROUND(a.preco1 * (1 + t.percentagem / 100.0)) AS INTEGER) FROM artigos a JOIN taxas_iva t ON t.id = a.taxa_iva_id
+         WHERE a.ativo = 1 AND a.codigo_balanca IS NOT NULL AND (a.codigo_balanca = ?1 OR ltrim(a.codigo_balanca, '0') = ltrim(?1, '0')) LIMIT 1",
+    )
+    .bind(&plu)
+    .fetch_optional(p)
+    .await?;
+    let Some((id, preco_iva)) = artigo else { return Ok(None) };
+    let escala = 10f64.powi(cfg.decimais as i32);
+    let leitura = if cfg.tipo == "PRECO" {
+        // preço a pagar na etiqueta: a quantidade é a que dá esse preço ao preço do artigo (com IVA)
+        let preco = (valor as f64 / escala * 100.0).round() as i64;
+        if preco_iva <= 0 {
+            return Err(AppError::msg("O artigo da etiqueta não tem preço: não se pode calcular a quantidade."));
+        }
+        let q = ((preco as f64 / preco_iva as f64) * 1000.0).round() / 1000.0;
+        json!({ "origem": "balanca", "quantidade": q, "preco_etiqueta": preco })
+    } else {
+        let q = valor as f64 / escala;
+        json!({ "origem": "balanca", "quantidade": q, "peso": q })
+    };
+    if leitura["quantidade"].as_f64().unwrap_or(0.0) <= 0.0 {
+        return Err(AppError::msg("A etiqueta da balança tem quantidade zero."));
+    }
+    Ok(Some((id, Some(leitura))))
+}
+
+// ------------------------------------------------------------------ balança (etiquetas com peso ou preço)
+
+/// Formato das etiquetas EAN-13 da balança: prefixo (2 algarismos) + código do artigo + valor + controlo.
+pub struct Balanca {
+    pub ativo: bool,
+    pub prefixos: Vec<String>,
+    pub digitos_codigo: usize,
+    /// PESO | PRECO
+    pub tipo: String,
+    pub decimais: u32,
+}
+
+impl Balanca {
+    /// (código do artigo, valor) de uma etiqueta da balança, ou None se o código não for uma.
+    pub fn partir(&self, codigo: &str) -> Option<(String, i64)> {
+        if !self.ativo || codigo.len() != 13 || !codigo.bytes().all(|b| b.is_ascii_digit()) || !ean13_valido(codigo) {
+            return None;
+        }
+        if !self.prefixos.iter().any(|p| codigo.starts_with(p.as_str())) {
+            return None;
+        }
+        let n = self.digitos_codigo;
+        let plu = codigo.get(2..2 + n)?.to_string();
+        let valor = codigo.get(2 + n..12)?.parse().ok()?;
+        Some((plu, valor))
+    }
+}
+
+/// Dígito de controlo EAN-13 (pesos 1 e 3 alternados da esquerda para a direita).
+pub fn ean13_valido(codigo: &str) -> bool {
+    let d: Vec<u32> = codigo.bytes().map(|b| (b - b'0') as u32).collect();
+    if d.len() != 13 {
+        return false;
+    }
+    let soma: u32 = d[..12].iter().enumerate().map(|(i, x)| if i % 2 == 0 { *x } else { x * 3 }).sum();
+    (10 - soma % 10) % 10 == d[12]
+}
+
+pub async fn balanca_ler(p: &sqlx::SqlitePool) -> AppResult<Balanca> {
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT chave, valor FROM config WHERE chave LIKE 'balanca.%'").fetch_all(p).await?;
+    let v = |k: &str| rows.iter().find(|r| r.0 == k).map(|r| r.1.trim().to_string()).unwrap_or_default();
+    Ok(Balanca {
+        ativo: v("balanca.ativo") == "1",
+        prefixos: v("balanca.prefixos").split(|c: char| c == ',' || c.is_whitespace()).filter(|x| x.len() == 2).map(String::from).collect(),
+        digitos_codigo: v("balanca.digitos_codigo").parse().unwrap_or(5).clamp(4, 6),
+        tipo: if v("balanca.tipo") == "PRECO" { "PRECO".into() } else { "PESO".into() },
+        decimais: v("balanca.decimais").parse().unwrap_or(3).min(3),
+    })
+}
+
+pub async fn balanca_obter(st: &AppState) -> AppResult<Value> {
+    st.sessao()?;
+    let b = balanca_ler(&st.pool).await?;
+    Ok(json!({ "ativo": b.ativo, "prefixos": b.prefixos.join(","), "digitos_codigo": b.digitos_codigo, "tipo": b.tipo, "decimais": b.decimais }))
+}
+
+#[derive(Deserialize)]
+pub struct BalancaIn {
+    ativo: bool,
+    prefixos: String,
+    digitos_codigo: usize,
+    tipo: String,
+    decimais: u32,
+}
+
+pub async fn balanca_guardar(st: &AppState, b: BalancaIn) -> AppResult<Value> {
+    let s = st.exigir_perm("sistema.parametrizacao")?;
+    let prefixos: Vec<&str> = b.prefixos.split(|c: char| c == ',' || c.is_whitespace()).filter(|x| !x.is_empty()).collect();
+    if prefixos.is_empty() || prefixos.iter().any(|x| x.len() != 2 || !x.starts_with('2') || !x.bytes().all(|c| c.is_ascii_digit())) {
+        return Err(AppError::msg("Os prefixos das etiquetas da balança têm 2 algarismos, de 20 a 29 (ex.: 20,21,28)."));
+    }
+    if !(4..=6).contains(&b.digitos_codigo) || b.decimais > 3 || !matches!(b.tipo.as_str(), "PESO" | "PRECO") {
+        return Err(AppError::msg("Formato da balança inválido: o código do artigo tem 4 a 6 algarismos e o valor até 3 casas decimais."));
+    }
+    let mut tx = st.pool.begin().await?;
+    for (k, v) in [
+        ("balanca.ativo", if b.ativo { "1".to_string() } else { "0".to_string() }),
+        ("balanca.prefixos", prefixos.join(",")),
+        ("balanca.digitos_codigo", b.digitos_codigo.to_string()),
+        ("balanca.tipo", b.tipo.clone()),
+        ("balanca.decimais", b.decimais.to_string()),
+    ] {
+        sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").bind(k).bind(v).execute(&mut *tx).await?;
+    }
+    sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'CONFIGURACAO', ?)")
+        .bind(s.id)
+        .bind(format!("Etiquetas da balança: {}", if b.ativo { "ligadas" } else { "desligadas" }))
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    balanca_obter(st).await
 }
 
 #[derive(Deserialize)]
@@ -191,6 +343,17 @@ pub struct ArtigoIn {
     promo_fim: Option<String>,
     /// Composição do kit: [{componente_id, quantidade}]
     componentes: Option<Vec<ComponenteIn>>,
+    /// Código do artigo na balança (PLU). Vazio = sem balança; omitido = não muda.
+    codigo_balanca: Option<String>,
+    /// Outros códigos de barras e embalagens: [{codigo, quantidade, descricao}]. Omitido = não mudam.
+    codigos: Option<Vec<CodigoExtraIn>>,
+}
+
+#[derive(Deserialize)]
+pub struct CodigoExtraIn {
+    codigo: String,
+    quantidade: Option<f64>,
+    descricao: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -216,11 +379,14 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
     let tipo = a.tipo.unwrap_or_else(|| "P".into());
     let controla = a.controla_stock.unwrap_or(tipo == "P") && tipo == "P";
     let cobar = a.codigo_barras.filter(|c| !c.trim().is_empty());
+    let cobar_txt: Option<String> = cobar.as_ref().map(|c| c.trim().to_string());
 
     let mut tx = st.pool.begin().await?;
-    let referencia = match a.referencia.filter(|r| !r.trim().is_empty()) {
-        Some(r) => r.trim().to_string(),
-        None => {
+    let referencia = match (a.referencia.filter(|r| !r.trim().is_empty()), a.id) {
+        (Some(r), _) => r.trim().to_string(),
+        // ao alterar sem referência, fica a que tinha (antes gerava-se outra)
+        (None, Some(id)) => sqlx::query_scalar("SELECT referencia FROM artigos WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?.ok_or(AppError::NaoEncontrado)?,
+        (None, None) => {
             let n: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) + 1 FROM artigos").fetch_one(&mut *tx).await?;
             format!("A{n:05}")
         }
@@ -305,6 +471,59 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
             .bind(id)
             .execute(&mut *tx)
             .await?;
+    }
+    if let Some(plu) = &a.codigo_balanca {
+        let plu: String = plu.chars().filter(|c| !c.is_whitespace()).collect();
+        if !plu.is_empty() && (!plu.bytes().all(|c| c.is_ascii_digit()) || plu.len() > 6) {
+            return Err(AppError::msg("O código da balança tem só algarismos (até 6)."));
+        }
+        if !plu.is_empty() {
+            let outro: Option<String> = sqlx::query_scalar("SELECT descricao FROM artigos WHERE id <> ? AND ativo = 1 AND ltrim(codigo_balanca, '0') = ltrim(?, '0')")
+                .bind(id)
+                .bind(&plu)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if let Some(o) = outro {
+                return Err(AppError::msg(format!("O código da balança {plu} já é do artigo «{o}».")));
+            }
+        }
+        sqlx::query("UPDATE artigos SET codigo_balanca = ? WHERE id = ?").bind((!plu.is_empty()).then_some(&plu)).bind(id).execute(&mut *tx).await?;
+    }
+    if let Some(codigos) = &a.codigos {
+        sqlx::query("DELETE FROM artigo_codigos WHERE artigo_id = ?").bind(id).execute(&mut *tx).await?;
+        let mut vistos: Vec<String> = Vec::new();
+        for c in codigos {
+            let codigo = c.codigo.trim().to_string();
+            if codigo.is_empty() {
+                continue;
+            }
+            let q = c.quantidade.unwrap_or(1.0);
+            if !q.is_finite() || q <= 0.0 || q > 1_000_000.0 {
+                return Err(AppError::msg(format!("A quantidade da embalagem {codigo} tem de ser positiva.")));
+            }
+            if vistos.contains(&codigo) || cobar_txt.as_deref() == Some(codigo.as_str()) {
+                return Err(AppError::msg(format!("O código {codigo} está repetido neste artigo.")));
+            }
+            let dono: Option<String> = sqlx::query_scalar(
+                "SELECT descricao FROM artigos WHERE id <> ?1 AND (codigo_barras = ?2 OR referencia = ?2)
+                 UNION ALL SELECT a.descricao FROM artigo_codigos c JOIN artigos a ON a.id = c.artigo_id WHERE c.codigo = ?2 AND c.artigo_id <> ?1 LIMIT 1",
+            )
+            .bind(id)
+            .bind(&codigo)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if let Some(d) = dono {
+                return Err(AppError::msg(format!("O código {codigo} já é do artigo «{d}».")));
+            }
+            sqlx::query("INSERT INTO artigo_codigos (artigo_id, codigo, quantidade, descricao) VALUES (?, ?, ?, ?)")
+                .bind(id)
+                .bind(&codigo)
+                .bind(q)
+                .bind(c.descricao.as_deref().map(str::trim).filter(|d| !d.is_empty()))
+                .execute(&mut *tx)
+                .await?;
+            vistos.push(codigo);
+        }
     }
     if let Some(comps) = &a.componentes {
         sqlx::query("DELETE FROM artigo_componentes WHERE artigo_id = ?").bind(id).execute(&mut *tx).await?;

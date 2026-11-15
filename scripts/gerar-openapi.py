@@ -58,6 +58,7 @@ schemas = {
         "seguinte": {"type": "integer", "nullable": True, "description": "Valor a usar em desde_id para pedir a página seguinte (null na última)."}}},
     "Artigo": {"type": "object", "properties": {
         "id": {"type": "integer"}, "referencia": {"type": "string", "example": "ARZ5"}, "codigo_barras": {"type": "string", "nullable": True},
+        "codigo_balanca": {"type": "string", "nullable": True, "description": "Código do artigo na balança (PLU) das etiquetas com peso ou preço."},
         "descricao": {"type": "string"}, "descricao_curta": {"type": "string", "nullable": True},
         "tipo": {"type": "string", "enum": ["P", "S"], "description": "P produto, S serviço"},
         "familia_id": {"type": "integer", "nullable": True}, "familia": {"type": "string", "nullable": True},
@@ -73,10 +74,14 @@ schemas = {
         "composto": {"type": "boolean"}, "ativo": {"type": "boolean"},
         "custo": dict(kz, description="Só com a permissão api.custos."), "custo_medio": dict(kz, description="Só com a permissão api.custos."),
         "armazem_id": {"type": "integer"}, "stock": {"type": "number", "description": "Existência no armazém indicado (por omissão, o do posto da chave)."},
-        "criado_em": {"type": "string"}, "alterado_em": {"type": "string", "description": "Última alteração (AAAA-MM-DDTHH:MM:SS)."}}},
+        "criado_em": {"type": "string"}, "alterado_em": {"type": "string", "description": "Última alteração (AAAA-MM-DDTHH:MM:SS)."},
+        "leitura": {"type": "object", "description": "Só em /artigos/codigo/{codigo}: quanto vale a leitura quando não é 1.", "properties": {
+            "origem": {"type": "string", "enum": ["embalagem", "balanca"]}, "quantidade": {"type": "number"}, "descricao": {"type": "string", "nullable": True},
+            "peso": {"type": "number"}, "preco_etiqueta": kz}}}},
     "ArtigoEntrada": {"type": "object", "description": "Na criação: descricao, taxa_iva_id e preco1 (ou preco1_iva) são obrigatórios. Na alteração (PUT/PATCH) só se enviam os campos a mudar.",
         "properties": {
             "referencia": {"type": "string", "description": "Gerada automaticamente se omitida."}, "codigo_barras": {"type": "string"},
+            "codigo_balanca": {"type": "string", "description": "Código na balança (PLU), só algarismos."},
             "descricao": {"type": "string"}, "descricao_curta": {"type": "string"}, "tipo": {"type": "string", "enum": ["P", "S"]},
             "familia_id": {"type": "integer"}, "subfamilia_id": {"type": "integer"}, "unidade_id": {"type": "integer"},
             "taxa_iva_id": {"type": "integer", "description": "Ver GET /tabelas (taxas_iva)."}, "motivo_isencao": {"type": "string", "description": "Obrigatório nos artigos isentos (ex.: M10)."},
@@ -138,7 +143,7 @@ schemas = {
         "cliente": {"type": "object", "description": "Em vez de entidade_id: o cliente pelo NIF; se não existir é criado (exige a permissão clientes). Sem NIF: Consumidor Final.",
             "properties": {"nif": {"type": "string"}, "nome": {"type": "string"}, "endereco": {"type": "string"}, "localidade": {"type": "string"}, "provincia": {"type": "string"}, "pais": {"type": "string"}, "telefone": {"type": "string"}, "email": {"type": "string"}}},
         "linhas": {"type": "array", "items": {"type": "object", "properties": {
-            "artigo_id": {"type": "integer"}, "referencia": {"type": "string", "description": "Em vez de artigo_id."}, "codigo_barras": {"type": "string", "description": "Em vez de artigo_id."},
+            "artigo_id": {"type": "integer"}, "referencia": {"type": "string", "description": "Em vez de artigo_id."}, "codigo_barras": {"type": "string", "description": "Em vez de artigo_id. O código de uma embalagem multiplica a quantidade; uma etiqueta da balança dá o peso."},
             "quantidade": {"type": "number"}, "preco_unitario": dict(kz, description="Sem IVA. Omitido = preço da ficha (preço diferente exige pos.alterar_preco)."),
             "preco_com_iva": dict(kz, description="Em vez de preco_unitario: preço com IVA."), "desconto_pct": {"type": "number", "description": "Exige pos.desconto (acima da promoção em vigor)."},
             "descricao": {"type": "string"}, "lote": {"type": "string"}, "validade": {"type": "string", "format": "date"}}, "required": ["quantidade"]}},

@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Pencil } from "lucide-react";
 import { call } from "@/lib/api";
-import type { FechoConfig, OpcoesImpresso, TipoDocumento } from "@/lib/types";
+import type { BalancaConfig, FechoConfig, OpcoesImpresso, TipoDocumento } from "@/lib/types";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 
 interface Modo {
@@ -59,6 +59,7 @@ export default function Parametrizacao() {
         <>
           <OpcoesVenda modos={q.data.modos} contas={q.data.contas} />
           <FechoCaixa />
+          <Balanca />
         </>
       ) : (
         <Impresso opcoes={q.data.opcoes} />
@@ -301,6 +302,74 @@ function FechoCaixa() {
           <Input value={v.moedas} onChange={(e) => setF({ ...v, moedas: e.target.value })} />
         </Field>
       </div>
+      <div className="mt-5 flex justify-end gap-2">
+        {f && (
+          <Button variant="ghost" onClick={() => setF(null)}>
+            Cancelar
+          </Button>
+        )}
+        <Button loading={busy} onClick={gravar}>
+          Gravar
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+// ======================================================================= balança (etiquetas com peso ou preço)
+function Balanca() {
+  const cfg = useQuery({ queryKey: ["balanca"], queryFn: () => call<BalancaConfig>("balanca.obter") });
+  const [f, setF] = useState<BalancaConfig | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!cfg.data) return null;
+  const v = f ?? cfg.data;
+  const n = Number(v.digitos_codigo) || 5;
+  // exemplo de etiqueta com o formato escolhido: prefixo + código do artigo + valor + controlo
+  const exemplo = `${(v.prefixos.split(",")[0] || "20").trim()} ${"1".padStart(n, "0")} ${"750".padStart(10 - n, "0")} x`;
+  const valorEx = v.tipo === "PESO" ? `${(750 / 10 ** v.decimais).toLocaleString("pt-PT")} (peso)` : `${(750 / 10 ** v.decimais).toLocaleString("pt-PT")} Kz (preço a pagar)`;
+  async function gravar() {
+    setBusy(true);
+    try {
+      await call("balanca.guardar", { ...v, digitos_codigo: n, decimais: Number(v.decimais) || 0 });
+      toast.success("Formato das etiquetas da balança gravado.");
+      setF(null);
+      cfg.refetch();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card className="mt-5 max-w-3xl p-6">
+      <div className="mb-1 font-medium">Balança: etiquetas com peso ou preço</div>
+      <p className="mb-4 text-[13px] text-ink-3">
+        A balança imprime etiquetas EAN-13 com o código do artigo (o «Código na balança» da ficha) e o peso ou o preço. O leitor do POS lança o artigo com essa quantidade.
+      </p>
+      <label className="flex cursor-pointer items-center gap-2">
+        <input type="checkbox" checked={v.ativo} onChange={(e) => setF({ ...v, ativo: e.target.checked })} />
+        <span className="font-medium">Ler etiquetas da balança</span>
+      </label>
+      <div className="mt-4 grid grid-cols-4 gap-4">
+        <Field label="A etiqueta traz">
+          <Select value={v.tipo} onChange={(e) => setF({ ...v, tipo: e.target.value as BalancaConfig["tipo"], decimais: e.target.value === "PESO" ? 3 : 0 })}>
+            <option value="PESO">O peso</option>
+            <option value="PRECO">O preço</option>
+          </Select>
+        </Field>
+        <Field label="Prefixos" hint="20 a 29">
+          <Input value={v.prefixos} onChange={(e) => setF({ ...v, prefixos: e.target.value })} />
+        </Field>
+        <Field label="Algarismos do artigo" hint="4 a 6">
+          <Input className="num" value={v.digitos_codigo} onChange={(e) => setF({ ...v, digitos_codigo: Number(e.target.value.replace(/\D/g, "")) || 0 })} />
+        </Field>
+        <Field label="Casas decimais" hint={v.tipo === "PESO" ? "Gramas: 3" : "Kz: 0 · cêntimos: 2"}>
+          <Input className="num" value={v.decimais} onChange={(e) => setF({ ...v, decimais: Number(e.target.value.replace(/\D/g, "")) || 0 })} />
+        </Field>
+      </div>
+      <p className="mt-3 text-[12.5px] text-ink-3">
+        Exemplo: <span className="font-mono">{exemplo}</span> → artigo {"1".padStart(n, "0")}, {valorEx}.
+      </p>
       <div className="mt-5 flex justify-end gap-2">
         {f && (
           <Button variant="ghost" onClick={() => setF(null)}>

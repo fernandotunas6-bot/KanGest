@@ -202,7 +202,10 @@ export default function Pos() {
     try {
       const a = await call<Artigo | null>("artigos.codigo", { codigo });
       if (a) {
-        adicionar(a, quantidade);
+        // caixa de 12 → 12 unidades; etiqueta da balança → o peso (ou a quantidade do preço da etiqueta)
+        const q = +(quantidade * (a.leitura?.quantidade ?? 1)).toFixed(3);
+        adicionar(a, q);
+        if (a.leitura?.origem === "balanca") toast.info(`${a.descricao}: ${qtd(q)} ${a.unidade ?? ""}`.trim(), { duration: 2000 });
         setBusca("");
       } else if (artigos.data?.length === 1) {
         adicionar(artigos.data[0], quantidade);

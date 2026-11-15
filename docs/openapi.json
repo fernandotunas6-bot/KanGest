@@ -113,6 +113,11 @@
             "type": "string",
             "nullable": true
           },
+          "codigo_balanca": {
+            "type": "string",
+            "nullable": true,
+            "description": "Código do artigo na balança (PLU) das etiquetas com peso ou preço."
+          },
           "descricao": {
             "type": "string"
           },
@@ -252,6 +257,33 @@
           "alterado_em": {
             "type": "string",
             "description": "Última alteração (AAAA-MM-DDTHH:MM:SS)."
+          },
+          "leitura": {
+            "type": "object",
+            "description": "Só em /artigos/codigo/{codigo}: quanto vale a leitura quando não é 1.",
+            "properties": {
+              "origem": {
+                "type": "string",
+                "enum": [
+                  "embalagem",
+                  "balanca"
+                ]
+              },
+              "quantidade": {
+                "type": "number"
+              },
+              "descricao": {
+                "type": "string",
+                "nullable": true
+              },
+              "peso": {
+                "type": "number"
+              },
+              "preco_etiqueta": {
+                "type": "integer",
+                "description": "Valor em cêntimos de Kz (1 Kz = 100)."
+              }
+            }
           }
         }
       },
@@ -265,6 +297,10 @@
           },
           "codigo_barras": {
             "type": "string"
+          },
+          "codigo_balanca": {
+            "type": "string",
+            "description": "Código na balança (PLU), só algarismos."
           },
           "descricao": {
             "type": "string"
@@ -929,7 +965,7 @@
                 },
                 "codigo_barras": {
                   "type": "string",
-                  "description": "Em vez de artigo_id."
+                  "description": "Em vez de artigo_id. O código de uma embalagem multiplica a quantidade; uma etiqueta da balança dá o peso."
                 },
                 "quantidade": {
                   "type": "number"

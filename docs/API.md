@@ -133,7 +133,7 @@ Com limite por minuto, cada resposta traz `X-RateLimit-Limit` e `X-RateLimit-Rem
 | GET | `/tabelas` | qualquer chave | Famílias, unidades, IVA, isenções, armazéns, modos de pagamento, tipos de documento, prazos, retenções, moedas |
 | GET | `/artigos` | `api.artigos` | Lista (`q`, `familia_id`, `armazem_id`, `inativos`, `alterado_desde`, `desde_id`, `limite`) |
 | GET | `/artigos/{id}` | `api.artigos` | Um artigo (stock no `armazem_id` pedido ou no do posto da chave) |
-| GET | `/artigos/codigo/{código}` | `api.artigos` | Pelo código de barras ou pela referência |
+| GET | `/artigos/codigo/{código}` | `api.artigos` | Pelo código de barras, pela referência, por um código de embalagem ou por uma etiqueta da balança (`leitura.quantidade` diz quanto vale a leitura) |
 | POST | `/artigos` | `artigos.criar` | Criar (`descricao`, `taxa_iva_id`, `preco1` ou `preco1_iva`…) |
 | PUT/PATCH | `/artigos/{id}` | `artigos.editar` | Alterar só os campos enviados |
 | GET | `/stock` | `api.stock` | Existências por artigo, com o detalhe por armazém e o reservado (`artigo_id`, `armazem_id`, `q`, `abaixo_minimo`) |
@@ -170,7 +170,7 @@ A resposta (201) é o documento emitido: `numero_doc` (ex.: `FR W2026/15`), tota
 caracteres da assinatura) e, com a Facturação Electrónica ligada, `fe.estado` e `fe.url_consulta` (o conteúdo do QR
 code da AGT para mostrar ao cliente).
 
-- **Artigo:** `artigo_id`, ou `referencia`, ou `codigo_barras`.
+- **Artigo:** `artigo_id`, ou `referencia`, ou `codigo_barras` (o código de uma embalagem multiplica a quantidade pelas unidades da embalagem; uma etiqueta da balança dá o peso).
 - **Preço:** omitido = o da ficha (com a promoção em vigor). `preco_unitario` é sem IVA; `preco_com_iva` é com IVA (o
   total pode diferir 1 cêntimo por arredondamento). Um preço diferente do da ficha exige `pos.alterar_preco`; um
   desconto acima da promoção exige `pos.desconto` (e o limite de desconto do utilizador). Pela API **não há PIN de
