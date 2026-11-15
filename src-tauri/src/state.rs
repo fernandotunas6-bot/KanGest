@@ -30,6 +30,8 @@ pub const PERMISSOES: &[&str] = &[
     "tesouraria.fluxo",
     "documentos.anular",
     "caixa.movimentos",
+    // com o fecho cego, só quem tem esta permissão vê o valor esperado antes de fechar
+    "caixa.ver_totais",
     "pos.alterar_preco",
     "pos.desconto",
     "pos.quantidade",

@@ -351,6 +351,53 @@ export default function Pos() {
     }
   }
 
+  // ---------------- venda em curso gravada (falha de energia, programa fechado) ----------------
+  const chaveCarrinho = `kangest.carrinho.${tabelas.data?.posto?.id ?? 1}`;
+  const recuperado = useRef(false);
+  useEffect(() => {
+    if (recuperado.current || !tabelas.data) return;
+    recuperado.current = true;
+    let guardado: { linhas: (LinhaGuardada & { lote?: string | null; manual?: boolean })[]; cliente: number | null; desc_global: DescGlobal; origem: { id: number; numero: string } | null } | null = null;
+    try {
+      guardado = JSON.parse(localStorage.getItem(chaveCarrinho) ?? "null");
+    } catch {
+      guardado = null;
+    }
+    if (!guardado?.linhas?.length || linhas.length) return;
+    (async () => {
+      const arts = await call<Artigo[]>("artigos.porIds", { ids: guardado.linhas.map((l) => l.artigo_id) });
+      const mapa = new Map(arts.map((a) => [a.id, a]));
+      setLinhas(
+        guardado.linhas
+          .filter((l) => mapa.has(l.artigo_id))
+          .map((l) => ({ key: uid(), artigo: mapa.get(l.artigo_id)!, quantidade: l.quantidade, preco: l.preco, desconto: l.desconto, descricao: l.descricao ?? null, lote: l.lote ?? null, manual: !!l.manual })),
+      );
+      setDescGlobal(guardado.desc_global ?? { tipo: "pct", valor: 0 });
+      setOrigem(guardado.origem ?? null);
+      await carregarCliente(guardado.cliente);
+      toast.info(`Recuperada a venda que estava em curso (${guardado.linhas.length} linha(s)).`);
+    })().catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabelas.data]);
+  useEffect(() => {
+    if (!recuperado.current) return;
+    try {
+      if (!linhas.length) localStorage.removeItem(chaveCarrinho);
+      else
+        localStorage.setItem(
+          chaveCarrinho,
+          JSON.stringify({
+            linhas: linhas.map((l) => ({ artigo_id: l.artigo.id, quantidade: l.quantidade, preco: l.preco, desconto: l.desconto, descricao: l.descricao, lote: l.lote ?? null, manual: !!l.manual })),
+            cliente: cliente.id === 1 ? null : cliente.id,
+            desc_global: descGlobal,
+            origem,
+          }),
+        );
+    } catch {
+      // armazenamento indisponível: a venda continua só em memória
+    }
+  }, [linhas, cliente, descGlobal, origem, chaveCarrinho]);
+
   // ---------------- pagamento ----------------
   function abrirPagamento() {
     if (!linhas.length) return;

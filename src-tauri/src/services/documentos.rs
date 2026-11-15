@@ -478,6 +478,86 @@ fn lotes_txt(usados: &[(String, Option<String>, f64, i64)]) -> Option<String> {
     (!usados.is_empty()).then(|| usados.iter().map(|u| if usados.len() == 1 { u.0.clone() } else { format!("{} ({})", u.0, qtd_txt(u.2)) }).collect::<Vec<_>>().join(", "))
 }
 
+/// Um artigo de uma factura, visto por uma nota de crédito.
+struct ArtigoCreditavel {
+    descricao: String,
+    quantidade: f64,
+    /// Valor facturado com IVA (cêntimos).
+    total: i64,
+    /// Preço unitário sem IVA e desconto da primeira linha do artigo (os valores por omissão da nota).
+    preco: i64,
+    desconto: f64,
+    creditado_qtd: f64,
+    creditado_total: i64,
+}
+
+/// O que uma factura ainda pode creditar: por artigo e no total (NC não anuladas descontadas).
+struct Creditavel {
+    artigos: std::collections::BTreeMap<i64, ArtigoCreditavel>,
+    total: i64,
+    creditado: i64,
+}
+
+async fn creditavel_tx(tx: &mut Transaction<'_, Sqlite>, origem_id: i64) -> AppResult<Creditavel> {
+    let mut artigos = std::collections::BTreeMap::new();
+    let linhas: Vec<(i64, f64, i64, i64, f64, String)> = sqlx::query_as(
+        "SELECT artigo_id, quantidade, total, preco_unitario, desconto_pct, descricao FROM documento_linhas
+         WHERE documento_id = ? AND artigo_id IS NOT NULL ORDER BY linha",
+    )
+    .bind(origem_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    for (aid, q, t, preco, desconto, descricao) in linhas {
+        let e = artigos.entry(aid).or_insert(ArtigoCreditavel { descricao, quantidade: 0.0, total: 0, preco, desconto, creditado_qtd: 0.0, creditado_total: 0 });
+        e.quantidade += q;
+        e.total += t;
+    }
+    let creditados: Vec<(i64, f64, i64)> = sqlx::query_as(
+        "SELECT l.artigo_id, SUM(l.quantidade), SUM(l.total) FROM documento_linhas l
+         JOIN documentos d ON d.id = l.documento_id JOIN tipos_documento t ON t.codigo = d.tipo_codigo
+         WHERE d.doc_origem_id = ? AND t.credito = 1 AND d.estado <> 'A' AND l.artigo_id IS NOT NULL
+         GROUP BY l.artigo_id",
+    )
+    .bind(origem_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    for (aid, q, t) in creditados {
+        if let Some(e) = artigos.get_mut(&aid) {
+            e.creditado_qtd += q;
+            e.creditado_total += t;
+        }
+    }
+    let (total, creditado): (i64, i64) = sqlx::query_as(
+        "SELECT d.total, COALESCE((SELECT SUM(n.total) FROM documentos n JOIN tipos_documento t ON t.codigo = n.tipo_codigo
+                                   WHERE n.doc_origem_id = d.id AND t.credito = 1 AND n.estado <> 'A'), 0)
+         FROM documentos d WHERE d.id = ?",
+    )
+    .bind(origem_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(Creditavel { artigos, total, creditado })
+}
+
+/// Formulário da nota de crédito: o que cada artigo da factura ainda pode creditar.
+pub async fn creditavel(st: &AppState, i: IdIn) -> AppResult<Value> {
+    st.sessao()?;
+    let mut tx = st.pool.begin().await?;
+    let c = creditavel_tx(&mut tx, i.id).await?;
+    tx.rollback().await?;
+    let artigos: Vec<Value> = c
+        .artigos
+        .iter()
+        .map(|(aid, a)| {
+            json!({
+                "artigo_id": aid, "descricao": a.descricao, "facturado": a.quantidade, "creditado": a.creditado_qtd,
+                "disponivel": (a.quantidade - a.creditado_qtd).max(0.0),
+                "valor_facturado": a.total, "valor_creditado": a.creditado_total, "valor_disponivel": (a.total - a.creditado_total).max(0),
+            })
+        })
+        .collect();
+    Ok(json!({ "artigos": artigos, "total": c.total, "creditado": c.creditado, "disponivel": (c.total - c.creditado).max(0) }))
+}
+
 fn permissao_tipo(st: &AppState, tipo: &str) -> AppResult<i64> {
     let perm = match tipo {
         "FR" => "vendas.fatura_recibo",
@@ -503,6 +583,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     let utilizador_id = permissao_tipo(st, &i.tipo)?;
     // Chave carregada fora da transacção (a primeira geração pode demorar).
     let chave = agt::chave(&st.pool).await?;
+    let versao_chave = agt::versao_assinatura(&st.pool).await?;
     let _guard = st.emissao.lock().await;
 
     let posto = st.posto();
@@ -708,6 +789,12 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
             None => return Err(AppError::msg("A nota de crédito exige o documento de origem.")),
         }
     }
+    // Nota de crédito: o que a origem facturou e o que já foi creditado por notas não anuladas.
+    // Só se credita o que foi facturado (artigos, quantidades e valores), ao preço da factura.
+    let creditavel = match (&origem, tipo.credito) {
+        (Some(o), true) => Some(creditavel_tx(&mut tx, o.id).await?),
+        _ => None,
+    };
 
     // ---------- linhas ----------
     if adiantamento && !i.linhas.is_empty() {
@@ -748,10 +835,17 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
                 _ => "preco1",
             }),
         };
+        // nota de crédito: o artigo tem de constar da origem, e o preço e o desconto por omissão são os dela
+        let na_origem = match &creditavel {
+            Some(c) => Some(c.artigos.get(&aid).ok_or_else(|| {
+                AppError::msg(format!("\"{}\" não consta do documento de origem: só se credita o que foi facturado.", a.get::<String, _>("descricao")))
+            })?),
+            None => None,
+        };
         let preco = match l.preco_unitario {
             Some(p) if moeda != "AOA" => r(p as f64 * cambio),
             Some(p) => p,
-            None => preco_artigo,
+            None => na_origem.map(|o| o.preco).unwrap_or(preco_artigo),
         }
         .max(0);
         if preco != preco_artigo {
@@ -781,7 +875,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         // e, até esse valor, não precisa de autorização
         let promo = if tipo.grupo == "VENDAS" { promocao_vigente(&a, &data_doc) } else { 0.0 };
         // desconto de linha combinado com o desconto global
-        let dl = l.desconto_pct.unwrap_or(promo).clamp(0.0, 100.0);
+        let dl = l.desconto_pct.unwrap_or_else(|| na_origem.map(|o| o.desconto).unwrap_or(promo)).clamp(0.0, 100.0);
         if dl > ent_desconto.max(promo) + 1e-9 {
             desconto_extra = true;
         }
@@ -924,6 +1018,49 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         total_liquido + total_iva
     };
 
+    // ---------- nota de crédito: nunca mais do que o facturado ----------
+    if let Some(c) = &creditavel {
+        // por artigo: quantidade, valor (c/ IVA) e n.º de linhas desta nota
+        let mut pedido: std::collections::BTreeMap<i64, (f64, i64, i64)> = std::collections::BTreeMap::new();
+        for l in &linhas {
+            let e = pedido.entry(l.artigo_id.unwrap_or_default()).or_insert((0.0, 0, 0));
+            e.0 += l.quantidade;
+            e.1 += l.total;
+            e.2 += 1;
+        }
+        for (aid, (q, t, n)) in &pedido {
+            let o = &c.artigos[aid];
+            let disp_q = (o.quantidade - o.creditado_qtd).max(0.0);
+            if *q > disp_q + 1e-9 {
+                return Err(AppError::msg(format!(
+                    "\"{}\": só pode creditar {} (facturado {}, já creditado {}).",
+                    o.descricao,
+                    qtd_txt(disp_q),
+                    qtd_txt(o.quantidade),
+                    qtd_txt(o.creditado_qtd)
+                )));
+            }
+            // tolerância de 1 cêntimo por linha (arredondamento de devoluções parciais)
+            let disp_v = (o.total - o.creditado_total).max(0);
+            if *t > disp_v + n {
+                return Err(AppError::msg(format!(
+                    "\"{}\": o valor a creditar ({}) excede o valor ainda por creditar ({}).",
+                    o.descricao,
+                    agt::total_fmt(*t),
+                    agt::total_fmt(disp_v)
+                )));
+            }
+        }
+        let disp = (c.total - c.creditado).max(0);
+        if total > disp + linhas.len() as i64 {
+            return Err(AppError::msg(format!(
+                "O total da nota de crédito ({}) excede o valor ainda por creditar do documento de origem ({}).",
+                agt::total_fmt(total),
+                agt::total_fmt(disp)
+            )));
+        }
+    }
+
     // ---------- retenção na fonte ----------
     let mut retencoes: Vec<(String, String, f64, i64, i64)> = Vec::new(); // codigo, descricao, %, base, valor
     for rt in &i.retencoes {
@@ -1038,6 +1175,9 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     }
     let numero = ultimo + 1;
     let numero_doc = format!("{} {}/{}", tipo.codigo, serie, numero);
+    if tipo.assinado {
+        agt::exigir_certificacao(&st.pool).await?;
+    }
     let (hash, controlo) = if tipo.assinado {
         let h = agt::assinar(&chave, &agt::mensagem(&data_doc, &agora, &numero_doc, total, &hash_ant));
         let c = agt::controlo(&h);
@@ -1115,12 +1255,13 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     .execute(&mut *tx)
     .await?
     .last_insert_rowid();
-    sqlx::query("UPDATE documentos SET origem = ?, doc_manual = ?, credito_disponivel = ?, vendedor_id = ?, endereco_entrega = ? WHERE id = ?")
+    sqlx::query("UPDATE documentos SET origem = ?, doc_manual = ?, credito_disponivel = ?, vendedor_id = ?, endereco_entrega = ?, hash_versao = ? WHERE id = ?")
         .bind(if manual.is_some() { "M" } else { "P" })
         .bind(manual.as_ref().map(|m| m.0.clone()))
         .bind(if adiantamento { total } else { 0 })
         .bind(vendedor_id)
         .bind(txt(&i.endereco_entrega))
+        .bind(if tipo.assinado { Some(versao_chave.as_str()) } else { None })
         .bind(doc_id)
         .execute(&mut *tx)
         .await?;

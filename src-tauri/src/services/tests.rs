@@ -271,9 +271,11 @@ async fn fluxo_completo() {
     // ---- cópias de segurança ----
     let bk = rpc(&st, "sistema.backup", Value::Null).await;
     assert!(std::path::Path::new(bk["ficheiro"].as_str().unwrap()).exists());
-    assert!(super::sistema::backup_automatico(&st.pool, &pasta).await.unwrap().is_some());
+    // o fecho de caixa já fez uma cópia (verificada); ao abrir no mesmo dia não se repete
+    let copias = rpc(&st, "sistema.copias", Value::Null).await;
+    assert_eq!(copias["copias"].as_array().unwrap().len(), 1, "{copias}");
+    assert_eq!(copias["copias"][0]["verificada"], true);
     assert!(super::sistema::backup_automatico(&st.pool, &pasta).await.unwrap().is_none(), "uma cópia automática por dia");
-    assert_eq!(rpc(&st, "sistema.copias", Value::Null).await["copias"].as_array().unwrap().len(), 1);
 
     // ---- posto 2 com série própria ----
     let p2 = rpc(&st, "posto.guardar", json!({ "descricao": "Posto#2", "armazem_id": 1, "serie_prefixo": "p2" })).await["id"].as_i64().unwrap();
@@ -628,7 +630,8 @@ async fn gc_paridade_e_importacao() {
     assert_eq!(emp["nome"], "Loja KIGEST");
     let agt_info = rpc(&st, "agt.info", Value::Null).await;
     assert_eq!(agt_info["certificado_anterior"], "123/AGT/2019");
-    assert_eq!(agt_info["certificado"], "", "o certificado do KIGEST não é activado automaticamente");
+    // o certificado do KIGEST não é activado: fica o desta versão (vazio numa compilação de desenvolvimento)
+    assert_eq!(agt_info["certificado"], crate::produtor::certificado().unwrap_or_default(), "o certificado do KIGEST não é activado automaticamente");
     let coca = rpc(&st, "artigos.codigo", json!({ "codigo": "5449000000996" })).await;
     assert_eq!(coca["preco1"], 25000);
     assert_eq!(coca["stock"].as_f64().unwrap(), 24.0);
@@ -1167,7 +1170,12 @@ async fn series_manuais_creditos_estado() {
     validar_xsd(sv["ficheiro"].as_str().unwrap());
     let xml = std::fs::read_to_string(sv["ficheiro"].as_str().unwrap()).unwrap();
     assert!(xml.contains("<SourceBilling>M</SourceBilling>"));
-    assert!(xml.contains("<HashControl>0</HashControl>") && !xml.contains("<HashControl>1</HashControl>"), "sem certificado: HashControl 0");
+    // sem certificado: HashControl 0; numa compilação com o certificado do produtor, a versão da chave
+    let hc = if crate::produtor::certificado().is_some() { crate::produtor::versao_chave() } else { "0".to_string() };
+    assert!(xml.contains(&format!("<HashControl>{hc}</HashControl>")), "HashControl {hc}");
+    if hc == "0" {
+        assert!(!xml.contains("<HashControl>1</HashControl>"), "sem certificado: HashControl 0");
+    }
     assert!(!xml.contains("RA "), "o recibo de adiantamento não é documento fiscal");
     let se = rpc(&st, "saft.exportarEstado", json!({ "de": format!("{ano}-01-01"), "ate": format!("{ano}-12-31") })).await;
     validar_xsd(se["ficheiro"].as_str().unwrap());
@@ -1315,49 +1323,51 @@ async fn rede_multiposto() {
     // ---- abre o servidor numa porta livre ----
     let porta = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let arc = std::sync::Arc::new(st);
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta, servidor: String::new(), chave: "segredo123".into() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta, servidor: String::new(), chave: "segredo123".into(), sal: String::new() };
     crate::rede::registar_estado(arc.clone());
     assert!(crate::rede::iniciar_servidor(arc.clone(), &crate::rede::Config { chave: "curta".into(), ..cfg.clone() }).is_err(), "a chave tem de ter 6 caracteres");
     assert_eq!(crate::rede::iniciar_servidor(arc.clone(), &cfg).unwrap(), porta);
+    let gravado: crate::rede::Config = serde_json::from_str(&std::fs::read_to_string(pasta.join("rede.json")).unwrap()).unwrap();
+    assert!(!gravado.sal.is_empty(), "o servidor guarda o sal da derivação da chave");
 
-    let pedir = |corpo: Value| -> Value {
+    // posto cliente: fala com o servidor pelo protocolo cifrado
+    let cliente = crate::rede::Config { modo: "cliente".into(), porta, servidor: format!("127.0.0.1:{porta}"), chave: "segredo123".into(), sal: String::new() };
+    let pedir_v2 = |token: &str, metodo: &str, params: Value| -> Result<Value, String> {
+        crate::rede::pedir_com_token(&cliente, token, metodo, params, posto2, "Caixa 2").map_err(|e| e.to_string())
+    };
+    let bruto = |corpo: &str| -> String {
         let mut s = std::net::TcpStream::connect(("127.0.0.1", porta)).expect("ligar ao servidor");
-        let b = corpo.to_string();
-        s.write_all(format!("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes()).unwrap();
+        s.write_all(format!("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}", corpo.len()).as_bytes()).unwrap();
         let mut r = String::new();
         s.read_to_string(&mut r).unwrap();
-        serde_json::from_str(r.split_once("\r\n\r\n").expect("resposta HTTP").1.trim()).expect("JSON")
-    };
-    let como = |token: &str, metodo: &str, params: Value| {
-        json!({ "chave": "segredo123", "token": token, "posto": posto2, "metodo": metodo, "params": params, "descricao_posto": "Caixa 2" })
+        r
     };
 
-    // ---- a chave de rede é obrigatória ----
-    let mau = pedir(json!({ "chave": "errada", "token": "t1", "posto": posto2, "metodo": "setup.estado", "params": null }));
-    assert_eq!(mau["ok"], false);
-    assert!(mau["erro"].as_str().unwrap().contains("Chave de rede"));
+    // ---- a chave de rede é obrigatória (e nunca vai na rede) ----
+    let errado = crate::rede::Config { chave: "outra-chave-qualquer".into(), ..cliente.clone() };
+    let mau = crate::rede::pedir_com_token(&errado, "t1", "setup.estado", Value::Null, posto2, "Caixa 2").unwrap_err().to_string();
+    assert!(mau.contains("Chave de rede"), "{mau}");
+    // um posto com o protocolo antigo (chave em claro) não é atendido e é avisado
+    let antigo = bruto(&json!({ "chave": "segredo123", "token": "t9", "posto": posto2, "metodo": "artigos.listar", "params": {} }).to_string());
+    assert!(antigo.contains("vers") && antigo.contains("antiga") && !antigo.contains("\"dados\""), "{antigo}");
 
     // ---- sem sessão não se lê nada; cada posto tem a sua ----
-    let sem = pedir(como("t1", "artigos.listar", json!({})));
-    assert_eq!(sem["ok"], false);
-    assert!(sem["erro"].as_str().unwrap().contains("Sessão"));
-    let entrada = pedir(como("t1", "auth.login", json!({ "login": "joana", "senha": "432100" })));
-    assert_eq!(entrada["ok"], true);
-    assert_eq!(entrada["dados"]["nome"], "Joana");
-    assert_eq!(pedir(como("t1", "artigos.listar", json!({})))["dados"].as_array().unwrap().len(), 1);
-    let outro = pedir(como("t2", "artigos.listar", json!({})));
-    assert_eq!(outro["ok"], false, "a sessão de um posto não serve outro posto");
+    let sem = pedir_v2("t1", "artigos.listar", json!({})).unwrap_err();
+    assert!(sem.contains("Sessão"), "{sem}");
+    let entrada = pedir_v2("t1", "auth.login", json!({ "login": "joana", "senha": "432100" })).unwrap();
+    assert_eq!(entrada["nome"], "Joana");
+    assert_eq!(pedir_v2("t1", "artigos.listar", json!({})).unwrap().as_array().unwrap().len(), 1);
+    assert!(pedir_v2("t2", "artigos.listar", json!({})).is_err(), "a sessão de um posto não serve outro posto");
     // e a máquina do servidor continua sem sessão
     assert!(arc.sessao_opcional().is_none(), "o login de um posto em rede não entra na máquina do servidor");
 
     // ---- o posto do pedido é o que manda: série e caixa são do posto 2 ----
-    assert_eq!(pedir(como("t1", "posto.obter", Value::Null))["dados"]["atual"]["descricao"], "Caixa 2");
-    assert_eq!(pedir(como("t1", "caixa.abrir", json!({ "valor_inicial": 500000 })))["ok"], true);
-    let venda = pedir(como("t1", "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 2 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })));
-    assert_eq!(venda["ok"], true, "{venda}");
-    let numero = venda["dados"]["documento"]["numero_doc"].as_str().unwrap().to_string();
+    assert_eq!(pedir_v2("t1", "posto.obter", Value::Null).unwrap()["atual"]["descricao"], "Caixa 2");
+    pedir_v2("t1", "caixa.abrir", json!({ "valor_inicial": 500000 })).unwrap();
+    let venda = pedir_v2("t1", "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 2 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).unwrap();
+    let numero = venda["documento"]["numero_doc"].as_str().unwrap().to_string();
     assert!(numero.contains("P2"), "o documento tem de sair na série do posto 2: {numero}");
-    assert_eq!(venda["dados"]["documento"]["posto_id"], posto2);
+    assert_eq!(venda["documento"]["posto_id"], posto2);
     assert_eq!(arc.posto().id, 1, "o posto desta máquina não muda por servir outro");
 
     // ---- o GET serve para confirmar que há um KanGest à escuta ----
@@ -1375,6 +1385,22 @@ async fn rede_multiposto() {
     let ligados = estado["ligados"].as_array().unwrap();
     assert!(ligados.iter().any(|l| l["utilizador"] == "Joana" && l["posto"] == "Caixa 2"), "{ligados:?}");
     assert!(rpc_err(&arc, "rede.testar", Value::Null).await.contains("posto cliente"));
+    // a chave de rede só a vê quem pode mudar a configuração
+    assert_eq!(estado["chave"], "segredo123");
+
+    // ---- um pedido capturado na rede não pode ser repetido ----
+    let (corpo, k) = crate::rede::teste_pedido_cifrado(&cliente, "t1", "artigos.listar", json!({}), posto2);
+    assert!(!corpo.contains("artigos.listar") && !corpo.contains("segredo123"), "o pedido vai cifrado");
+    assert_eq!(crate::rede::teste_abrir_resposta(&k, &bruto(&corpo))["ok"], true);
+    let repetido = crate::rede::teste_abrir_resposta(&k, &bruto(&corpo));
+    assert!(repetido["erro"].as_str().unwrap().contains("repetido"), "{repetido}");
+
+    // ---- quem erra a chave muitas vezes fica bloqueado uns minutos ----
+    for _ in 0..6 {
+        let _ = crate::rede::pedir_com_token(&errado, "t3", "setup.estado", Value::Null, posto2, "Caixa 3");
+    }
+    let bloqueado = pedir_v2("t1", "artigos.listar", json!({})).unwrap_err();
+    assert!(bloqueado.contains("Demasiadas tentativas"), "{bloqueado}");
 
     arc.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
@@ -1611,7 +1637,9 @@ async fn parametrizacao_documentos() {
 }
 
 /// Servidor local que imita os serviços `sigt/fe/v1` da AGT e guarda os pedidos recebidos.
-fn agt_simulada() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<(String, String, Value)>>>) {
+type PedidosAgt = std::sync::Arc<std::sync::Mutex<Vec<(String, String, Value)>>>;
+
+fn agt_simulada() -> (u16, PedidosAgt) {
     use std::io::{Read, Write};
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let porta = l.local_addr().unwrap().port();
@@ -1784,7 +1812,7 @@ async fn facturacao_electronica() {
     let ft2 = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
     rpc(&st, "fe.corrigir", json!({ "rejeitado_id": ft_id, "numero_novo": ft2["documento"]["numero_doc"] })).await;
     rpc(&st, "fe.processar", Value::Null).await;
-    let ultimo = pedidos.lock().unwrap().iter().filter(|p| p.0.ends_with("/registarFactura")).last().cloned().unwrap();
+    let ultimo = pedidos.lock().unwrap().iter().rfind(|p| p.0.ends_with("/registarFactura")).cloned().unwrap();
     let dc = &ultimo.2["documents"][0];
     assert_eq!(dc["documentStatus"], "C");
     assert_eq!(dc["rejectedDocumentNo"], ft["documento"]["numero_doc"]);
@@ -1871,7 +1899,6 @@ async fn importacao_volume() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn servidor_demo() {
-    use std::io::{Read, Write};
     let pasta = std::env::temp_dir().join("kigest-auditoria");
     let _ = std::fs::remove_dir_all(&pasta);
     std::fs::create_dir_all(&pasta).unwrap();
@@ -1968,14 +1995,10 @@ async fn servidor_demo() {
     // servidor de rede + posto da auditoria já autenticado
     let arc = std::sync::Arc::new(st);
     crate::rede::registar_estado(arc.clone());
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new() };
     crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
-    let corpo = json!({ "chave": "auditoria123", "token": "auditoria", "posto": 1, "metodo": "auth.login", "params": { "login": "admin", "senha": "1234" } }).to_string();
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", 7799)).unwrap();
-    s.write_all(format!("POST / HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}", corpo.len()).as_bytes()).unwrap();
-    let mut r = String::new();
-    s.read_to_string(&mut r).unwrap();
-    assert!(r.contains("\"ok\":true"), "{r}");
+    let cliente = crate::rede::Config { modo: "cliente".into(), servidor: "127.0.0.1:7799".into(), ..cfg.clone() };
+    crate::rede::pedir_com_token(&cliente, "auditoria", "auth.login", json!({ "login": "admin", "senha": "1234" }), 1, "Auditoria").expect("entrar");
     eprintln!("SERVIDOR-DEMO-PRONTO porta 7799");
     tokio::time::sleep(std::time::Duration::from_secs(3 * 3600)).await;
 }
@@ -2122,7 +2145,6 @@ async fn licencas_experiencia_e_assinatura() {
 #[tokio::test]
 #[ignore]
 async fn servidor_base() {
-    use std::io::{Read, Write};
     let Ok(pasta) = std::env::var("KANGEST_PASTA") else { return };
     let pasta = std::path::PathBuf::from(pasta);
     let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
@@ -2132,14 +2154,10 @@ async fn servidor_base() {
     st.carregar_posto(1).await.unwrap();
     let arc = std::sync::Arc::new(st);
     crate::rede::registar_estado(arc.clone());
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new() };
     crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
-    let corpo = json!({ "chave": "auditoria123", "token": "auditoria", "posto": 1, "metodo": "auth.login", "params": { "login": "admin", "senha": "1234" } }).to_string();
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", 7799)).unwrap();
-    s.write_all(format!("POST / HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}", corpo.len()).as_bytes()).unwrap();
-    let mut r = String::new();
-    s.read_to_string(&mut r).unwrap();
-    assert!(r.contains("\"ok\":true"), "{r}");
+    let cliente = crate::rede::Config { modo: "cliente".into(), servidor: "127.0.0.1:7799".into(), ..cfg.clone() };
+    crate::rede::pedir_com_token(&cliente, "auditoria", "auth.login", json!({ "login": "admin", "senha": "1234" }), 1, "Auditoria").expect("entrar");
     eprintln!("SERVIDOR-BASE-PRONTO porta 7799");
     tokio::time::sleep(std::time::Duration::from_secs(3 * 3600)).await;
 }
@@ -2660,5 +2678,351 @@ async fn licencas_servidor_local() {
     admin("maquina", Some(json!({ "nif": "5000000000", "maquina": maquina, "bloqueada": true }))).await;
     assert!(rpc_err(&st, "licenca.sincronizar", json!({ "forcar": true })).await.contains("bloqueado"));
     assert_eq!(rpc(&st, "licenca.estado", Value::Null).await["modo"].as_str(), Some("ACTIVA"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Base temporária com a empresa criada e o administrador com sessão iniciada.
+async fn base_com_admin(nome: &str) -> (AppState, std::path::PathBuf) {
+    let pasta = std::env::temp_dir().join(format!("kigest-{nome}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.expect("posto 1");
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Loja Teste, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    (st, pasta)
+}
+
+#[tokio::test]
+async fn notas_de_credito_limitadas_a_origem() {
+    let (st, pasta) = base_com_admin("nc-limites").await;
+    let arroz = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 100000, "custo": 50000 })).await["id"].as_i64().unwrap();
+    let oleo = rpc(&st, "artigos.guardar", json!({ "descricao": "Óleo", "taxa_iva_id": 1, "preco1": 500000, "custo": 50000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": arroz, "quantidade": 20, "preco_unitario": 50000 }, { "artigo_id": oleo, "quantidade": 20, "preco_unitario": 50000 }] })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": arroz, "quantidade": 3 }], "pagamentos": [{ "modo": "NU", "valor": 342000 }] })).await;
+    let fr_id = fr["documento"]["id"].as_i64().unwrap();
+    // o preço mudou depois da venda: a nota usa o preço da factura
+    rpc(&st, "artigos.guardar", json!({ "id": arroz, "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 900000, "custo": 50000 })).await;
+    let nc = |q: f64, artigo: i64| json!({ "tipo": "NC", "entidade_id": 1, "doc_origem_id": fr_id, "motivo": "Devolução de mercadoria", "linhas": [{ "artigo_id": artigo, "quantidade": q }] });
+
+    // mais do que o facturado, ou um artigo que não estava na factura: recusado
+    assert!(rpc_err(&st, "documentos.emitir", nc(5.0, arroz)).await.contains("só pode creditar 3"));
+    assert!(rpc_err(&st, "documentos.emitir", nc(1.0, oleo)).await.contains("não consta do documento de origem"));
+    // preço acima do facturado: o valor excede o que falta creditar
+    let caro = json!({ "tipo": "NC", "entidade_id": 1, "doc_origem_id": fr_id, "motivo": "Devolução de mercadoria", "linhas": [{ "artigo_id": arroz, "quantidade": 1, "preco_unitario": 400000 }] });
+    assert!(rpc_err(&st, "documentos.emitir", caro).await.contains("excede"));
+
+    // duas notas parciais que somam a factura; a terceira já não cabe
+    let n1 = rpc(&st, "documentos.emitir", nc(2.0, arroz)).await;
+    assert_eq!(n1["documento"]["total"], 228000, "preço da factura (1 000,00 + IVA), não o preço novo");
+    let disp = rpc(&st, "documentos.creditavel", json!({ "id": fr_id })).await;
+    assert_eq!(disp["artigos"][0]["disponivel"].as_f64(), Some(1.0));
+    assert_eq!(disp["disponivel"], 114000);
+    let n2 = rpc(&st, "documentos.emitir", nc(1.0, arroz)).await;
+    assert!(rpc_err(&st, "documentos.emitir", nc(1.0, arroz)).await.contains("só pode creditar 0"));
+    // a devolução em dinheiro nunca passa do que a venda recebeu
+    let cx = rpc(&st, "caixa.estado", Value::Null).await;
+    assert_eq!(cx["saidas"], 342000);
+    assert_eq!(cx["numerario_esperado"], 0);
+    // a nota que devolveu dinheiro não se anula (regra que já existia)
+    assert!(rpc_err(&st, "documentos.anular", json!({ "id": n2["documento"]["id"], "motivo": "Nota emitida por engano" })).await.contains("movimentado"));
+
+    // factura a crédito: anular a nota liberta a quantidade
+    let cli = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Cliente Lda", "nif": "5417000000" })).await["id"].as_i64().unwrap();
+    let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": oleo, "quantidade": 2 }] })).await;
+    let ft_id = ft["documento"]["id"].as_i64().unwrap();
+    let nc_ft = |q: f64| json!({ "tipo": "NC", "entidade_id": cli, "doc_origem_id": ft_id, "motivo": "Devolução de mercadoria", "linhas": [{ "artigo_id": oleo, "quantidade": q }] });
+    let n3 = rpc(&st, "documentos.emitir", nc_ft(2.0)).await;
+    assert_eq!(rpc(&st, "documentos.obter", json!({ "id": ft_id })).await["documento"]["valor_pendente"], 0);
+    assert!(rpc_err(&st, "documentos.emitir", nc_ft(1.0)).await.contains("só pode creditar 0"));
+    rpc(&st, "documentos.anular", json!({ "id": n3["documento"]["id"], "motivo": "Nota emitida por engano" })).await;
+    assert_eq!(rpc(&st, "documentos.creditavel", json!({ "id": ft_id })).await["artigos"][0]["disponivel"].as_f64(), Some(2.0));
+    rpc(&st, "documentos.emitir", nc_ft(1.0)).await;
+
+    // compras: a V/Nota de crédito segue as mesmas regras
+    let forn = rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Fornecedor SA", "nif": "5410000000" })).await["id"].as_i64().unwrap();
+    let fc = rpc(&st, "documentos.emitir", json!({ "tipo": "FC", "entidade_id": forn, "doc_externo": "FT A/1", "linhas": [{ "artigo_id": oleo, "quantidade": 4, "preco_unitario": 60000 }] })).await;
+    let vnc = |q: f64| json!({ "tipo": "VNC", "entidade_id": forn, "doc_externo": "NC 9", "motivo": "Devolução ao fornecedor", "doc_origem_id": fc["documento"]["id"], "linhas": [{ "artigo_id": oleo, "quantidade": q }] });
+    assert!(rpc_err(&st, "documentos.emitir", vnc(5.0)).await.contains("só pode creditar 4"));
+    let v = rpc(&st, "documentos.emitir", vnc(4.0)).await;
+    assert_eq!(v["documento"]["total"], 273600, "4 × 600,00 + IVA, ao custo da factura do fornecedor");
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn integridade_da_cadeia_e_proteccao() {
+    let (st, pasta) = base_com_admin("integridade").await;
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 100000, "custo": 50000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": art, "quantidade": 20, "preco_unitario": 50000 }] })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let mut ids = Vec::new();
+    for q in [1, 2, 3] {
+        let d = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": art, "quantidade": q }], "pagamentos": [{ "modo": "NU", "valor": 114000 * q }] })).await;
+        ids.push(d["documento"]["id"].as_i64().unwrap());
+    }
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert!(v["verificados"].as_i64().unwrap() >= 3);
+    assert_eq!(v["protecao"]["ativa"], true);
+
+    // os dados fiscais de um documento assinado não se alteram nem se apagam
+    let e = sqlx::query("UPDATE documentos SET total = 1 WHERE id = ?").bind(ids[0]).execute(&st.pool).await.unwrap_err().to_string();
+    assert!(e.contains("Documento assinado"), "{e}");
+    assert!(sqlx::query("DELETE FROM documentos WHERE id = ?").bind(ids[2]).execute(&st.pool).await.is_err());
+    assert!(sqlx::query("UPDATE documento_linhas SET quantidade = 9 WHERE documento_id = ?").bind(ids[1]).execute(&st.pool).await.is_err());
+    assert!(sqlx::query("DELETE FROM documento_pagamentos WHERE documento_id = ?").bind(ids[1]).execute(&st.pool).await.is_err());
+    assert!(sqlx::query("UPDATE series SET ultimo_numero = 1 WHERE tipo_codigo = 'FR'").execute(&st.pool).await.is_err());
+    assert!(sqlx::query("DELETE FROM series WHERE tipo_codigo = 'FR'").execute(&st.pool).await.is_err());
+    // o que a aplicação muda depois de emitir continua a funcionar (anulação, conta corrente)
+    rpc(&st, "documentos.anular", json!({ "id": ids[2], "motivo": "Venda registada por engano" })).await;
+    assert!(sqlx::query("UPDATE documentos SET estado = 'N' WHERE id = ?").bind(ids[2]).execute(&st.pool).await.is_err(), "anulado não volta a valer");
+    assert_eq!(rpc(&st, "agt.verificarIntegridade", Value::Null).await["ok"], true, "anular não quebra a cadeia");
+
+    // quem desligar a protecção e mexer no total é apanhado pela verificação
+    sqlx::query("DROP TRIGGER trg_doc_assinado_upd").execute(&st.pool).await.unwrap();
+    sqlx::query("UPDATE documentos SET total = 1000 WHERE id = ?").bind(ids[1]).execute(&st.pool).await.unwrap();
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["protecao"]["em_falta"][0], "trg_doc_assinado_upd");
+    let fr = v["series"].as_array().unwrap().iter().find(|s| s["tipo"] == "FR").unwrap().clone();
+    let problemas: Vec<String> = fr["erros"].as_array().unwrap().iter().map(|e| format!("{}: {}", e["documento"], e["problema"])).collect();
+    assert!(problemas.iter().any(|p| p.contains("/2") && p.contains("assinatura não confere")), "{problemas:?}");
+    assert!(problemas.iter().any(|p| p.contains("/2") && p.contains("totais")), "{problemas:?}");
+
+    // trocar de chave não estraga a verificação dos documentos antigos (só em desenvolvimento se carrega uma chave)
+    if crate::produtor::chave_agt().unwrap().is_some() {
+        let _ = std::fs::remove_dir_all(&pasta);
+        return;
+    }
+    let (st2, pasta2) = base_com_admin("integridade-chave").await;
+    let a2 = rpc(&st2, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st2, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    rpc(&st2, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a2, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    let nova = {
+        use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+        rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 1024).unwrap().to_pkcs8_pem(LineEnding::LF).unwrap().to_string()
+    };
+    rpc(&st2, "agt.importarChave", json!({ "pem": nova })).await;
+    rpc(&st2, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a2, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    let v2 = rpc(&st2, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v2["ok"], true, "{v2}");
+    assert_eq!(v2["chaves"], 2);
+    let _ = std::fs::remove_dir_all(&pasta);
+    let _ = std::fs::remove_dir_all(&pasta2);
+}
+
+#[tokio::test]
+async fn chave_do_produtor_sai_da_base_de_dados() {
+    // simula a passagem de uma instalação de desenvolvimento para a versão oficial
+    if crate::produtor::chave_agt().unwrap().is_some() {
+        return;
+    }
+    let (st, pasta) = base_com_admin("chave-produtor").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    assert_eq!(fr["documento"]["hash_versao"], "0", "sem certificado: HashControl 0");
+    let antes = agt::chave(&st.pool).await.unwrap();
+    // o que a versão oficial faz no arranque: a chave privada que estava na base sai, fica a pública
+    let produtor = rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 1024).unwrap();
+    agt::retirar_chave_da_base(&st.pool, &produtor).await.unwrap();
+    let privada: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(agt::CHAVE_CONFIG).fetch_optional(&st.pool).await.unwrap();
+    assert!(privada.is_none(), "a chave privada já não está na base de dados");
+    let arquivadas: Vec<(String, String)> = sqlx::query_as("SELECT chave_publica, origem FROM agt_chaves").fetch_all(&st.pool).await.unwrap();
+    assert_eq!(arquivadas.len(), 1);
+    assert_eq!(arquivadas[0], (agt::chave_publica_pem(&antes).unwrap(), "DESENVOLVIMENTO".to_string()));
+    // os documentos já assinados continuam verificáveis pela chave pública arquivada
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["series"][0]["total_erros"], 0, "{v}");
+    // com certificado configurado, os documentos novos levam a versão da chave
+    rpc(&st, "agt.guardarCertificado", json!({ "certificado": "123" })).await;
+    let fr2 = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    assert_eq!(fr2["documento"]["hash_versao"], "1");
+    let info = rpc(&st, "agt.info", Value::Null).await;
+    assert_eq!((info["chave_origem"].as_str(), info["certificado"].as_str()), (Some("DESENVOLVIMENTO"), Some("123")));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Só faz alguma coisa numa compilação com a chave do produtor embutida (KANGEST_AGT_CHAVE), como no CI.
+#[tokio::test]
+async fn chave_embutida_quando_existe() {
+    let Some(produtor) = crate::produtor::chave_agt().unwrap() else { return };
+    let (st, pasta) = base_com_admin("chave-embutida").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    let privada: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(agt::CHAVE_CONFIG).fetch_optional(&st.pool).await.unwrap();
+    assert!(privada.is_none(), "com a chave do produtor, nenhuma chave privada fica na base de dados");
+    let info = rpc(&st, "agt.info", Value::Null).await;
+    assert_eq!(info["chave_origem"], "PRODUTOR");
+    assert_eq!(info["chave_publica"].as_str().unwrap(), agt::chave_publica_pem(produtor).unwrap());
+    assert!(rpc_err(&st, "agt.importarChave", json!({ "pem": "x" })).await.contains("já traz a chave"));
+    assert_eq!(rpc(&st, "agt.verificarIntegridade", Value::Null).await["ok"], true);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn segredos_cifrados_na_configuracao() {
+    let (st, pasta) = base_com_admin("segredos").await;
+    let pem = {
+        use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+        rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap().to_pkcs8_pem(LineEnding::LF).unwrap().to_string()
+    };
+    rpc(&st, "fe.guardar", json!({ "ativo": false, "ambiente": "HML", "utilizador": "produtor", "senha": "senha-secreta", "numero_validacao": "C_1",
+        "estabelecimento": "SEDE", "chave_contribuinte": pem })).await;
+    let bruto = |k: &'static str| {
+        let pool = st.pool.clone();
+        async move { sqlx::query_scalar::<_, String>("SELECT valor FROM config WHERE chave = ?").bind(k).fetch_one(&pool).await.unwrap() }
+    };
+    for k in ["fe.senha", "fe.chave_contribuinte"] {
+        let v = bruto(k).await;
+        assert!(v.starts_with("kgs1:") && !v.contains("BEGIN") && !v.contains("senha-secreta"), "{k} fica cifrado: {v}");
+    }
+    // o programa continua a ler os valores
+    let estado = rpc(&st, "fe.estado", Value::Null).await;
+    assert_eq!((estado["senha"].as_bool(), estado["chave_contribuinte"].as_bool()), (Some(true), Some(true)));
+    // segredos gravados em texto por versões anteriores são cifrados no arranque
+    sqlx::query("UPDATE config SET valor = 'antiga' WHERE chave = 'fe.senha'").execute(&st.pool).await.unwrap();
+    assert_eq!(crate::segredos::cifrar_existentes(&st.pool).await.unwrap(), 1);
+    assert!(bruto("fe.senha").await.starts_with("kgs1:"));
+    assert_eq!(crate::segredos::ler(&st.pool, "fe.senha").await.unwrap().as_deref(), Some("antiga"));
+    // a chave de desenvolvimento também fica cifrada
+    if crate::produtor::chave_agt().unwrap().is_none() {
+        assert!(bruto("agt.chave_privada").await.starts_with("kgs1:"));
+    }
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn actualizacao_conferida_antes_de_instalar() {
+    let (st, pasta) = base_com_admin("actualizacao").await;
+    let origem = pasta.join("origem");
+    std::fs::create_dir_all(&origem).unwrap();
+    let plat = rpc(&st, "atualizacao.estado", Value::Null).await["plataforma"].as_str().unwrap().to_string();
+    let pacote = b"instalador de teste";
+    std::fs::write(origem.join("KanGest_9.9.9.bin"), pacote).unwrap();
+    let manifesto = json!({ "versao": "9.9.9", "data": "2026-12-01", "notas": "teste",
+        "pacotes": { plat: { "ficheiro": "KanGest_9.9.9.bin", "sha256": crate::services::atualizacao::sha256_hex(pacote) } } });
+    std::fs::write(origem.join("kangest-atualizacao.json"), manifesto.to_string()).unwrap();
+    rpc(&st, "atualizacao.guardar", json!({ "fonte": origem.display().to_string() })).await;
+    let d = rpc(&st, "atualizacao.descarregar", Value::Null).await;
+    let ficheiro = d["ficheiro"].as_str().unwrap().to_string();
+    // trocado depois de descarregado: não se abre
+    std::fs::write(&ficheiro, b"outro programa").unwrap();
+    assert!(rpc_err(&st, "atualizacao.instalar", json!({ "ficheiro": ficheiro })).await.contains("alterado"));
+    // sem chave embutida (desenvolvimento) a assinatura continua opcional; com ela é obrigatória
+    if crate::produtor::chave_actualizacoes().is_some() {
+        assert_eq!(rpc(&st, "atualizacao.estado", Value::Null).await["chave_embutida"], true);
+    }
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn copias_externas_cifradas_e_restauro() {
+    let (st, pasta) = base_com_admin("copias").await;
+    let pen = pasta.join("pen");
+    std::fs::create_dir_all(&pen).unwrap();
+    rpc(&st, "artigos.guardar", json!({ "descricao": "Antes da cópia", "taxa_iva_id": 1, "preco1": 100000 })).await;
+    // pasta externa inexistente é recusada; a pen, aceite, com cópias cifradas
+    assert!(rpc_err(&st, "sistema.copiasGuardar", json!({ "intervalo_horas": 4, "manter": 5, "pasta_externa": pasta.join("nao-existe").display().to_string() })).await.contains("não existe"));
+    assert!(rpc_err(&st, "sistema.copiasGuardar", json!({ "intervalo_horas": 4, "manter": 5, "pasta_externa": pen.display().to_string(), "cifrar_externa": true })).await.contains("senha"));
+    rpc(&st, "sistema.copiasGuardar", json!({ "intervalo_horas": 2, "manter": 5, "pasta_externa": pen.display().to_string(), "cifrar_externa": true, "senha": "senha-da-pen-123" })).await;
+    let c = rpc(&st, "sistema.copiaAgora", Value::Null).await;
+    let externa = c["externa"].as_str().expect("cópia na pen").to_string();
+    assert!(externa.ends_with(".kgc"));
+    let bytes = std::fs::read(&externa).unwrap();
+    assert!(bytes.starts_with(b"KGCOPIA1") && !bytes.windows(15).any(|w| w == b"Antes da c\xc3\xb3pia"), "a cópia da pen está cifrada");
+    let lista = rpc(&st, "sistema.copias", Value::Null).await;
+    assert_eq!(lista["externas"].as_array().unwrap().len(), 1);
+    assert_eq!(lista["copias"][0]["verificada"], true);
+    assert!(lista["estado"]["erro_externa"].is_null());
+
+    // depois da cópia entra outro artigo; restaurar a cópia da pen (com a senha) volta ao estado anterior
+    rpc(&st, "artigos.guardar", json!({ "descricao": "Depois da cópia", "taxa_iva_id": 1, "preco1": 100000 })).await;
+    assert!(rpc_err(&st, "sistema.restaurar", json!({ "ficheiro": externa, "senha": "errada-errada" })).await.contains("Senha errada"));
+    let r = rpc(&st, "sistema.restaurar", json!({ "ficheiro": externa, "senha": "senha-da-pen-123" })).await;
+    assert_eq!(r["reiniciar"], true);
+    assert!(std::path::Path::new(r["copia_da_base_atual"].as_str().unwrap()).exists(), "a base actual fica guardada antes do restauro");
+    // o que o arranque faz: fecha a base, troca o ficheiro e volta a abrir
+    st.pool.close().await;
+    assert!(super::sistema::aplicar_restauro_pendente(&pasta).unwrap().is_some());
+    let pool = db::abrir(&pasta.join("kigest.db")).await.unwrap();
+    let nomes: Vec<String> = sqlx::query_scalar("SELECT descricao FROM artigos ORDER BY id").fetch_all(&pool).await.unwrap();
+    assert!(nomes.contains(&"Antes da cópia".to_string()) && !nomes.contains(&"Depois da cópia".to_string()), "{nomes:?}");
+    pool.close().await;
+
+    // um ficheiro que não é uma cópia do KanGest é recusado
+    let (st2, pasta2) = base_com_admin("copias-2").await;
+    let lixo = pasta2.join("lixo.db");
+    std::fs::write(&lixo, b"nada de sqlite aqui").unwrap();
+    let e = rpc_err(&st2, "sistema.restaurar", json!({ "ficheiro": lixo.display().to_string() })).await;
+    assert!(e.contains("não é uma cópia de segurança"), "{e}");
+    // o restauro inicial só existe enquanto o KanGest não está configurado
+    assert!(rpc_err(&st2, "setup.restaurar", json!({ "ficheiro": externa })).await.contains("já está configurado"));
+    let _ = std::fs::remove_dir_all(&pasta);
+    let _ = std::fs::remove_dir_all(&pasta2);
+}
+
+/// Base restaurada noutro computador (compilação de desenvolvimento): a chave cifrada não se lê,
+/// gera-se outra e os documentos antigos continuam verificáveis.
+#[tokio::test]
+async fn chave_ilegivel_depois_de_restaurar() {
+    if crate::produtor::chave_agt().unwrap().is_some() {
+        return;
+    }
+    let (st, pasta) = base_com_admin("chave-ilegivel").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let venda = json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] });
+    rpc(&st, "documentos.emitir", venda.clone()).await;
+    // o que acontece com a chave mestra de outra máquina: o valor cifrado não abre
+    sqlx::query("UPDATE config SET valor = 'kgs1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' WHERE chave = ?").bind(agt::CHAVE_CONFIG).execute(&st.pool).await.unwrap();
+    rpc(&st, "documentos.emitir", venda).await;
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["chaves"], 2);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn fecho_de_caixa_cego_por_notas_e_formas_de_pagamento() {
+    let (st, pasta) = base_com_admin("fecho-cego").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    // o posto fecha às cegas; a operadora (perfil Caixa) não tem «ver totais»
+    rpc(&st, "posto.guardar", json!({ "id": 1, "descricao": "Caixa 1", "armazem_id": 1, "opcoes": { "fecho_cego": true } })).await;
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Ana", "login": "ana", "senha": "ana12345", "perfil": "CAIXA", "mudar_senha": false })).await;
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "ana", "senha": "ana12345" })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 500000 })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 200000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 2 }], "pagamentos": [{ "modo": "MB", "valor": 228000 }] })).await;
+    let aberto = rpc(&st, "caixa.estado", Value::Null).await;
+    assert_eq!(aberto["cego"], true);
+    assert!(aberto["numerario_esperado"].is_null() && aberto["total_vendido"].is_null(), "às cegas: {aberto}");
+    assert!(aberto["por_modo"].as_array().unwrap().iter().all(|m| m["total"].is_null()));
+
+    // nota que não existe é recusada; a contagem por notas dá o total
+    assert!(rpc_err(&st, "caixa.fechar", json!({ "contagem": { "3000": 1 } })).await.contains("3000"));
+    // esperado em numerário: 5 000 + 1 140 = 6 140 Kz; contados 6 100 (faltam 40) e o talão do TPA certo
+    let z = rpc(&st, "caixa.fechar", json!({ "contagem": { "5000": 1, "1000": 1, "100": 1 }, "contado_modos": { "MB": 228000 }, "observacoes": "Faltam 40 Kz" })).await;
+    assert_eq!(z["sessao"]["numero_z"], 1);
+    assert_eq!(z["sessao"]["valor_contado"], 610000);
+    assert_eq!(z["sessao"]["contagem"]["5000"], 1);
+    assert_eq!(z["numerario_esperado"], 614000, "depois de fechar, o relatório Z mostra tudo");
+    let conf = |c: &str| z["conferencia"].as_array().unwrap().iter().find(|m| m["codigo"] == c).cloned().unwrap();
+    assert_eq!((conf("NU")["diferenca"].as_i64(), conf("MB")["diferenca"].as_i64()), (Some(-4000), Some(0)));
+    // o fecho seguinte do mesmo posto é o Z n.º 2
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let z2 = rpc(&st, "caixa.fechar", json!({ "valor_contado": 0 })).await;
+    assert_eq!(z2["sessao"]["numero_z"], 2);
+    // quem tem «ver totais» (o gestor/administrador) vê o esperado mesmo às cegas
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 100 })).await;
+    assert_eq!(rpc(&st, "caixa.estado", Value::Null).await["numerario_esperado"], 100);
     let _ = std::fs::remove_dir_all(&pasta);
 }

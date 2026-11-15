@@ -1,14 +1,18 @@
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { Building2, ShieldCheck } from "lucide-react";
+import { Building2, DatabaseBackup, ShieldCheck } from "lucide-react";
 import { call } from "@/lib/api";
 import { Button, Card, Field, Input, Select } from "@/components/ui";
 import { Logo } from "@/components/Logo";
+import { RestaurarCopia } from "@/pages/Configuracoes";
 
 export default function Setup({ onDone }: { onDone: () => void }) {
   const [e, setE] = useState({ nome: "", nif: "", endereco: "", localidade: "Luanda", provincia: "Luanda", telefone: "", email: "", regime_iva: "GERAL" });
   const [a, setA] = useState({ nome: "Administrador", login: "admin", senha: "", confirmar: "" });
   const [busy, setBusy] = useState(false);
+  // computador novo: restaurar uma cópia de segurança em vez de configurar do zero
+  const [copia, setCopia] = useState("");
+  const [restaurar, setRestaurar] = useState(false);
 
   async function guardar(ev: FormEvent) {
     ev.preventDefault();
@@ -94,6 +98,29 @@ export default function Setup({ onDone }: { onDone: () => void }) {
           <Button size="lg" loading={busy}>Concluir configuração</Button>
         </div>
       </form>
+
+      <Card className="mx-auto mt-8 max-w-3xl p-6">
+        <div className="mb-2 flex items-center gap-2 font-semibold">
+          <DatabaseBackup className="size-5 text-brand" /> Já tem uma cópia de segurança do KanGest?
+        </div>
+        <p className="mb-3 text-ink-2">Num computador novo, restaure a cópia (de uma pen ou da pasta do OneDrive / Google Drive) em vez de configurar do zero.</p>
+        <div className="flex items-end gap-2">
+          <Field label="Caminho da cópia (.db ou .kgc)" className="flex-1">
+            <Input className="font-mono" value={copia} onChange={(x) => setCopia(x.target.value)} placeholder="E:\Copias KanGest\kangest-….kgc" />
+          </Field>
+          <Button type="button" variant="secondary" disabled={!copia.trim()} onClick={() => setRestaurar(true)}>
+            Restaurar
+          </Button>
+        </div>
+      </Card>
+      {restaurar && (
+        <RestaurarCopia
+          alvo={{ ficheiro: copia.trim(), cifrada: copia.trim().endsWith(".kgc"), descricao: copia.trim() }}
+          temSenha={false}
+          onClose={() => setRestaurar(false)}
+          metodo="setup.restaurar"
+        />
+      )}
     </div>
   );
 }

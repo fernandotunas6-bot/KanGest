@@ -17,7 +17,13 @@ npx tauri signer generate -w ~/.kigest/actualizacoes.key
 npx tauri signer sign -f ~/.kigest/actualizacoes.key KanGest_0.2.0_x64-setup.exe   # cria KanGest_0.2.0_x64-setup.exe.sig
 ```
 
-Cole a **chave pública** em cada instalação (campo «Chave pública de assinatura»). A partir daí, só se instalam pacotes assinados com essa chave.
+Na compilação oficial, a **chave pública vem dentro do programa** (variável `KANGEST_CHAVE_ACTUALIZACOES` do repositório,
+ver [CERTIFICACAO-AGT.md](CERTIFICACAO-AGT.md)): a assinatura passa a ser obrigatória e a chave não se pode trocar no
+ecrã, por isso uma origem adulterada não consegue instalar nada. Nas compilações de desenvolvimento, pode-se colar a
+chave pública em cada instalação (campo «Chave pública de assinatura»).
+
+O SHA-256 conferido no descarregamento fica ao lado do pacote e volta a conferir-se antes de abrir o instalador: um
+ficheiro trocado entretanto não se instala.
 
 ## 3. Manifesto `kangest-atualizacao.json`
 

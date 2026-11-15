@@ -30,6 +30,8 @@ interface L {
   validade: string;
   /** custo médio do artigo (cêntimos, s/ IVA), para avisar das vendas abaixo do custo */
   custo?: number;
+  /** Nota de crédito: quantidade máxima que ainda se pode creditar nesta linha. */
+  max?: number;
 }
 
 interface Custo {
@@ -214,26 +216,43 @@ export default function NovoDocumento() {
       const fichas = ids.length ? await call<Artigo[]>("artigos.porIds", { ids }) : [];
       const comLote = new Set(fichas.filter((a) => a.controla_lote && !a.composto).map((a) => a.id));
       const custoDe = new Map(fichas.map((a) => [a.id, a.custo_medio]));
-      setLinhas(
-        d.linhas.map((l) => ({
-          key: crypto.randomUUID(),
-          artigo_id: l.artigo_id,
-          referencia: l.referencia,
-          descricao: l.descricao,
-          quantidade: l.quantidade,
-          preco: toInputKz(l.preco_unitario),
-          desconto: l.desconto_pct,
-          taxa: l.taxa_iva_pct,
-          unidade: l.unidade,
-          existencia: 0,
-          controla_lote: comLote.has(l.artigo_id),
-          lote: l.lote && !l.lote.includes("(") ? l.lote : "",
-          validade: l.validade ?? "",
-          custo: custoDe.get(l.artigo_id),
-        })),
-      );
+      // nota de crédito: só o que ainda não foi creditado (o servidor recusa o resto)
+      const credito = ["NC", "VNC"].includes(codigo);
+      const disp = credito ? await call<{ artigos: { artigo_id: number; disponivel: number }[] }>("documentos.creditavel", { id: origemId }) : null;
+      const resta = new Map((disp?.artigos ?? []).map((a) => [a.artigo_id, a.disponivel]));
+      const novas: L[] = d.linhas
+        .map((l) => {
+          let quantidade = l.quantidade;
+          let max: number | undefined;
+          if (disp) {
+            const r = resta.get(l.artigo_id) ?? 0;
+            quantidade = Math.min(l.quantidade, r);
+            max = quantidade;
+            resta.set(l.artigo_id, +(r - quantidade).toFixed(3));
+          }
+          return {
+            key: crypto.randomUUID(),
+            artigo_id: l.artigo_id,
+            referencia: l.referencia,
+            descricao: l.descricao,
+            quantidade,
+            max,
+            preco: toInputKz(l.preco_unitario),
+            desconto: l.desconto_pct,
+            taxa: l.taxa_iva_pct,
+            unidade: l.unidade,
+            existencia: 0,
+            controla_lote: comLote.has(l.artigo_id),
+            lote: l.lote && !l.lote.includes("(") ? l.lote : "",
+            validade: l.validade ?? "",
+            custo: custoDe.get(l.artigo_id),
+          };
+        })
+        .filter((l) => !disp || l.quantidade > 0);
+      if (disp && !novas.length) toast.warning(`${d.documento.numero_doc} já foi creditado na totalidade.`);
+      setLinhas(novas);
     });
-  }, [origemId]);
+  }, [origemId, codigo]);
 
   const moedaSel = aux?.moedas.find((m) => m.codigo === moeda);
   const estrangeira = eCompra && moeda !== "AOA";
@@ -633,7 +652,16 @@ export default function NovoDocumento() {
                     </Td>
                     {inventario && <Td className="num text-right text-ink-2">{qtd(l.existencia)}</Td>}
                     <Td>
-                      <Input className="num h-8 min-w-[56px] text-right" type="number" min={0} step="any" value={l.quantidade} onChange={(e) => upd(l.key, { quantidade: Number(e.target.value) })} />
+                      <Input
+                        className="num h-8 min-w-[56px] text-right"
+                        type="number"
+                        min={0}
+                        max={l.max}
+                        step="any"
+                        value={l.quantidade}
+                        onChange={(e) => upd(l.key, { quantidade: l.max !== undefined ? Math.min(Number(e.target.value), l.max) : Number(e.target.value) })}
+                      />
+                      {l.max !== undefined && <div className="mt-0.5 text-right text-[11px] text-ink-3">máx. {qtd(l.max)}</div>}
                     </Td>
                     {inventario ? (
                       <Td className={cn("num text-right font-medium", l.quantidade - l.existencia < 0 ? "text-danger" : l.quantidade - l.existencia > 0 ? "text-ok" : "text-ink-3")}>

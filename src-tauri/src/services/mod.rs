@@ -8,6 +8,7 @@ mod entidades;
 pub mod fe;
 mod impressao;
 pub mod importar;
+mod integridade;
 pub mod licenca;
 mod oficina;
 mod parametros;
@@ -42,7 +43,7 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
     // Senha provisória por mudar ou sessão bloqueada: só se pode mudar a senha, retomar ou sair.
     let livre = matches!(
         metodo,
-        "setup.estado" | "setup.inicializar" | "auth.login" | "auth.loginPin" | "auth.logout" | "auth.sessao" | "auth.alterarSenha" | "auth.desbloquear" | "seguranca.politica"
+        "setup.estado" | "setup.inicializar" | "setup.restaurar" | "auth.login" | "auth.loginPin" | "auth.logout" | "auth.sessao" | "auth.alterarSenha" | "auth.desbloquear" | "seguranca.politica"
     );
     if !livre {
         if let Some(s) = st.sessao_opcional() {
@@ -58,6 +59,7 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         // ---- públicos ----
         "setup.estado" => setup::estado(st).await,
         "setup.inicializar" => setup::inicializar(st, p(params)?).await,
+        "setup.restaurar" => sistema::restaurar_inicial(st, p(params)?).await,
         "auth.login" => auth::login(st, p(params)?).await,
         "auth.logout" => auth::logout(st).await,
         "auth.loginPin" => auth::login_pin(st, p(params)?).await,
@@ -85,6 +87,7 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "agt.info" => setup::agt_info(st).await,
         "agt.guardarCertificado" => setup::agt_guardar(st, p(params)?).await,
         "agt.importarChave" => setup::agt_importar_chave(st, p(params)?).await,
+        "agt.verificarIntegridade" => integridade::verificar(st).await,
 
         // ---- importação do KIGEST (SQL Server) ----
         "importar.analisar" => importar::analisar(st, p(params)?).await,
@@ -178,6 +181,7 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "documentos.listar" => documentos::listar(st, p(params)?).await,
         "documentos.obter" => documentos::obter(st, p(params)?).await,
         "documentos.anular" => documentos::anular(st, p(params)?).await,
+        "documentos.creditavel" => documentos::creditavel(st, p(params)?).await,
         "documentos.auxiliares" => documentos::auxiliares(st).await,
 
         // ---- POS: suspensos ----
@@ -254,6 +258,9 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "saft.exportarEstado" => saft::exportar_estado(st, p(params)?).await,
         "sistema.backup" => sistema::backup(st).await,
         "sistema.copias" => sistema::copias(st).await,
+        "sistema.copiasGuardar" => sistema::copias_guardar(st, p(params)?).await,
+        "sistema.copiaAgora" => sistema::copia_agora(st).await,
+        "sistema.restaurar" => sistema::restaurar(st, p(params)?).await,
         "sistema.info" => sistema::info(st).await,
         "fe.estado" => fe::estado(st).await,
         "fe.guardar" => fe::guardar(st, p(params)?).await,

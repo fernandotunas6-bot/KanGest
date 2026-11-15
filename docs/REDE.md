@@ -28,10 +28,23 @@ Cada posto tem a **sua sessão**: quem entra num posto não entra nos outros, e 
 na série do posto que o emitiu (ex.: `FR P22026/15`). A numeração nunca salta porque a emissão
 continua a ser serializada num só lugar — o servidor.
 
+## Segurança da ligação (KanGest 1.2)
+
+- O corpo de cada pedido e de cada resposta vai **cifrado e autenticado** (AES-256-GCM). A chave vem da chave de rede
+  (PBKDF2-HMAC-SHA256, 100 000 iterações, com um sal guardado no servidor, em `rede.json`). A **chave de rede nunca
+  passa na rede**: quem a não tiver não consegue ler nem forjar pedidos.
+- Cada pedido leva a hora do posto e um identificador único: um pedido capturado não se pode repetir, e um posto com o
+  relógio desacertado mais de 15 minutos é avisado para acertar a data e a hora.
+- Um endereço que erre a chave 10 vezes fica bloqueado 10 minutos.
+- Chaves novas têm pelo menos 10 caracteres; no servidor, **Gerar chave** cria uma de 20 caracteres. Uma chave antiga
+  mais curta continua a funcionar, com um aviso para a trocar.
+- Só quem tem a permissão *Configurações* vê a chave de rede no ecrã.
+- Os postos e o servidor têm de estar **todos na versão 1.2** (ou superior): um posto antigo recebe a mensagem para se
+  actualizar, e um servidor antigo é detectado pelo posto novo.
+
 ## Limites e cuidados
 
-- A ligação é **HTTP em texto na rede local**, protegida pela chave de rede — como o SQL Server do
-  KIGEST, que também falava em claro na LAN. **Não exponha a porta à Internet** nem a encaminhe no router.
+- Mesmo cifrada, a porta é para a rede local: **não a exponha à Internet** nem a encaminhe no router.
 - **Sem rede não há venda** no posto cliente: os dados estão no servidor. Quem precisa de vender
   sempre deve ficar em modo *Sozinho*.
 - O servidor só abre (ou muda de porta) ao arrancar a aplicação: depois de mudar a porta, feche e

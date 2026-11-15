@@ -3,7 +3,7 @@ name = "kigest"
 version = "1.1.0"
 description = "KanGest — Gestão Comercial e POS"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.82"
 
 [lib]
 name = "kigest_lib"
@@ -45,6 +45,9 @@ opt-level = 3
 [profile.dev.package.argon2]
 opt-level = 3
 [profile.dev.package.blake2]
+opt-level = 3
+# PBKDF2 da rede entre postos e AES/ChaCha dos segredos
+[profile.dev.package.ring]
 opt-level = 3
 
 [profile.release]

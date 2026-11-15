@@ -23,6 +23,7 @@ interface SessaoLista {
   valor_contado: number | null;
   estado: string;
   total_vendido: number;
+  numero_z?: number | null;
 }
 
 export default function Caixa() {
@@ -98,9 +99,15 @@ export default function Caixa() {
           />
           <div className="grid grid-cols-4 gap-4">
             <Stat label="Fundo de maneio" value={kz(c.sessao.valor_inicial)} />
-            <Stat label="Total recebido" value={kz(c.total_vendido)} hint={`${c.documentos} documentos`} />
+            <Stat label="Total recebido" value={c.cego ? "—" : kz(c.total_vendido)} hint={`${c.documentos} documentos`} />
             <Stat label="Entradas / Saídas" value={kz(c.entradas - c.saidas)} hint={`+${kz(c.entradas)} · −${kz(c.saidas)}`} tone="accent" />
-            <Stat label="Numerário esperado na gaveta" value={kz(c.numerario_esperado)} tone="ok" icon={<Wallet className="size-4" />} />
+            <Stat
+              label="Numerário esperado na gaveta"
+              value={c.cego ? "Fecho cego" : kz(c.numerario_esperado)}
+              hint={c.cego ? "Os totais aparecem no relatório depois de fechar" : undefined}
+              tone="ok"
+              icon={<Wallet className="size-4" />}
+            />
           </div>
           <div className="mt-4 grid grid-cols-2 gap-4">
             <Card>
@@ -110,7 +117,7 @@ export default function Caixa() {
                   {c.por_modo.map((m) => (
                     <tr key={m.codigo}>
                       <Td>{m.descricao}</Td>
-                      <Td className="num text-right font-medium">{kz(m.total)}</Td>
+                      <Td className="num text-right font-medium">{m.total === null ? "—" : kz(m.total)}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -147,7 +154,7 @@ export default function Caixa() {
       {mov && <Movimento onClose={() => setMov(false)} onDone={() => { setMov(false); refetch(); }} />}
       {fechar && c && (
         <Fechar
-          esperado={c.numerario_esperado}
+          resumo={c}
           onClose={() => setFechar(false)}
           onDone={(r) => {
             setFechar(false);
@@ -221,33 +228,120 @@ function Movimento({ onClose, onDone }: { onClose: () => void; onDone: () => voi
   );
 }
 
-function Fechar({ esperado, onClose, onDone }: { esperado: number; onClose: () => void; onDone: (r: CaixaResumo) => void }) {
+/** Notas e moedas de kwanza (iguais às aceites pelo servidor). */
+const NOTAS = [5000, 2000, 1000, 500, 200, 100, 50];
+const MOEDAS = [20, 10, 5, 2, 1];
+
+function Fechar({ resumo, onClose, onDone }: { resumo: CaixaResumo; onClose: () => void; onDone: (r: CaixaResumo) => void }) {
+  const modos = useTabelas().data?.modos_pagamento ?? [];
+  const [porNotas, setPorNotas] = useState(true);
+  const [qtds, setQtds] = useState<Record<number, string>>({});
   const [contado, setContado] = useState("");
-  const dif = parseKz(contado || "0") - esperado;
+  const [outros, setOutros] = useState<Record<string, string>>({});
+  const [obs, setObs] = useState("");
+  const [busy, setBusy] = useState(false);
+  const totalNotas = [...NOTAS, ...MOEDAS].reduce((s, d) => s + d * 100 * (Number(qtds[d]) || 0), 0);
+  const valor = porNotas ? totalNotas : parseKz(contado || "0");
+  const esperado = resumo.numerario_esperado;
+  const dif = esperado === null ? null : valor - esperado;
+  // outras formas de pagamento a conferir (talão do TPA, transferências…)
+  const outrosModos = modos.filter((m) => m.codigo !== "NU" && m.codigo !== "CS" && (resumo.cego || (resumo.por_modo.find((p) => p.codigo === m.codigo)?.total ?? 0) !== 0));
+
   async function fechar() {
+    setBusy(true);
     try {
-      const r = await call<CaixaResumo>("caixa.fechar", { valor_contado: parseKz(contado || "0") });
-      toast.success("Caixa fechado.");
+      const contagem = porNotas ? Object.fromEntries(Object.entries(qtds).filter(([, q]) => Number(q) > 0).map(([d, q]) => [d, Number(q)])) : undefined;
+      const contado_modos = Object.fromEntries(Object.entries(outros).filter(([, v]) => v.trim() !== "").map(([k, v]) => [k, parseKz(v)]));
+      const r = await call<CaixaResumo>("caixa.fechar", {
+        contagem: porNotas ? contagem : undefined,
+        valor_contado: porNotas ? undefined : parseKz(contado || "0"),
+        contado_modos,
+        observacoes: obs || undefined,
+      });
+      toast.success(`Caixa fechado (Z n.º ${r.sessao.numero_z ?? r.sessao.id}).`);
       onDone(r);
     } catch (e) {
       toast.error((e as Error).message);
+      setBusy(false);
     }
   }
+  const celula = (d: number) => (
+    <label key={d} className="flex items-center gap-2">
+      <span className="num w-14 text-right text-ink-2">{d.toLocaleString("pt-PT")}</span>
+      <span className="text-ink-3">×</span>
+      <Input className="num h-8 w-16 text-right" inputMode="numeric" value={qtds[d] ?? ""} onChange={(e) => setQtds({ ...qtds, [d]: e.target.value.replace(/\D/g, "") })} />
+    </label>
+  );
   return (
-    <Modal open onClose={onClose} title="Fecho de caixa" width="max-w-md" footer={<Button variant="danger" onClick={fechar}>Finalizar fecho</Button>}>
-      <p className="mb-4 text-ink-2">Conte o numerário na gaveta e indique o valor físico. O sistema compara com o total do sistema.</p>
-      <Field label="Valor físico (Kz)">
-        <Input autoFocus className="num text-right text-lg" value={contado} onChange={(e) => setContado(e.target.value)} />
+    <Modal
+      open
+      onClose={onClose}
+      title="Fecho de caixa"
+      width="max-w-2xl"
+      footer={
+        <Button variant="danger" loading={busy} onClick={fechar}>
+          Finalizar fecho
+        </Button>
+      }
+    >
+      <p className="mb-3 text-ink-2">
+        {resumo.cego
+          ? "Fecho cego: conte o dinheiro e os talões sem ver o valor do sistema. A diferença aparece no relatório, depois de fechar."
+          : "Conte o numerário na gaveta. O sistema compara com o total esperado."}
+      </p>
+      <div className="mb-3 flex gap-2">
+        <Button size="sm" variant={porNotas ? "primary" : "secondary"} onClick={() => setPorNotas(true)}>
+          Contar notas e moedas
+        </Button>
+        <Button size="sm" variant={porNotas ? "secondary" : "primary"} onClick={() => setPorNotas(false)}>
+          Indicar o total
+        </Button>
+      </div>
+      {porNotas ? (
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-line p-4">
+          <div className="space-y-2">
+            <div className="text-[12px] font-medium uppercase tracking-wide text-ink-2">Notas</div>
+            {NOTAS.map(celula)}
+          </div>
+          <div className="space-y-2">
+            <div className="text-[12px] font-medium uppercase tracking-wide text-ink-2">Moedas</div>
+            {MOEDAS.map(celula)}
+          </div>
+        </div>
+      ) : (
+        <Field label="Numerário contado (Kz)">
+          <Input autoFocus className="num text-right text-lg" value={contado} onChange={(e) => setContado(e.target.value)} />
+        </Field>
+      )}
+      {outrosModos.length > 0 && (
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          {outrosModos.map((m) => (
+            <Field key={m.codigo} label={`${m.descricao} (talão / extracto)`} hint="Deixe vazio se não confere esta forma">
+              <Input className="num text-right" value={outros[m.codigo] ?? ""} onChange={(e) => setOutros({ ...outros, [m.codigo]: e.target.value })} />
+            </Field>
+          ))}
+        </div>
+      )}
+      <Field label="Observações" className="mt-3">
+        <Input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: nota de 1000 Kz rasgada; reforço de trocos" />
       </Field>
       <div className="mt-4 space-y-1 rounded-xl bg-sunken p-4">
-        <div className="flex justify-between">
-          <span>Total do sistema (numerário)</span>
-          <span className="num">{kz(esperado)}</span>
+        <div className="flex justify-between font-medium">
+          <span>Numerário contado</span>
+          <span className="num">{kz(valor)}</span>
         </div>
-        <div className={cn("flex justify-between font-medium", dif < 0 ? "text-danger" : dif > 0 ? "text-accent-ink" : "text-ok")}>
-          <span>Diferença</span>
-          <span className="num">{kz(dif)}</span>
-        </div>
+        {esperado !== null && dif !== null && (
+          <>
+            <div className="flex justify-between">
+              <span>Total do sistema (numerário)</span>
+              <span className="num">{kz(esperado)}</span>
+            </div>
+            <div className={cn("flex justify-between font-medium", dif < 0 ? "text-danger" : dif > 0 ? "text-accent-ink" : "text-ok")}>
+              <span>Diferença</span>
+              <span className="num">{kz(dif)}</span>
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );
@@ -260,6 +354,7 @@ function Historico({ onClose, onAbrir }: { onClose: () => void; onAbrir: (id: nu
       <Table className="max-h-[60vh]">
         <thead>
           <tr>
+            <Th>Z</Th>
             <Th>Posto</Th>
             <Th>Operador</Th>
             <Th>Abertura</Th>
@@ -272,6 +367,7 @@ function Historico({ onClose, onAbrir }: { onClose: () => void; onAbrir: (id: nu
         <tbody>
           {data?.map((s) => (
             <tr key={s.id}>
+              <Td className="num text-ink-2">{s.numero_z ?? "—"}</Td>
               <Td>{s.posto ?? "—"}</Td>
               <Td>{s.utilizador}</Td>
               <Td className="text-ink-2">{dataHora(s.aberta_em)}</Td>
@@ -293,7 +389,7 @@ function Historico({ onClose, onAbrir }: { onClose: () => void; onAbrir: (id: nu
 }
 
 function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void }) {
-  const dif = (r.sessao.valor_contado ?? 0) - r.numerario_esperado;
+  const dif = (r.sessao.valor_contado ?? 0) - (r.numerario_esperado ?? 0);
   const t58 = useTalao58();
   const e = useEmpresa();
   const tabelas = useTabelas();
@@ -320,7 +416,9 @@ function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void })
           <div>{e.localidade || e.provincia || "Luanda"} - Angola</div>
         </div>
       )}
-      <div className="mt-2 text-[12.5px] font-bold">FECHO DE CAIXA Nº - {r.sessao.id}</div>
+      <div className="mt-2 text-[12.5px] font-bold">
+        {r.sessao.estado === "ABERTA" ? "CAIXA EM ABERTO (X)" : `FECHO DE CAIXA (Z) Nº ${r.sessao.numero_z ?? r.sessao.id}`}
+      </div>
       {linha("Data Abertura:", dataHora(r.sessao.aberta_em))}
       {linha("Data de Fecho:", r.sessao.fechada_em ? dataHora(r.sessao.fechada_em) : "(em aberto)")}
       {armazem && linha("Armazém:", armazem.nome)}
@@ -331,7 +429,7 @@ function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void })
         <span>Valor</span>
       </div>
       {r.por_modo.map((m) => (
-        <div key={m.codigo}>{linha(m.descricao, kz(m.total))}</div>
+        <div key={m.codigo}>{linha(m.descricao, m.total === null ? "—" : kz(m.total))}</div>
       ))}
       <div className="mt-1 border-t border-black pt-1">
         {linha(`Total de ${r.documentos} documento(s):`, kz(r.total_vendido), true)}
@@ -342,6 +440,27 @@ function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void })
         {linha("Valor Físico:", r.sessao.valor_contado === null ? "—" : kz(r.sessao.valor_contado), true)}
         {r.sessao.valor_contado !== null && linha(dif < 0 ? "Diferença (falta):" : dif > 0 ? "Diferença (sobra):" : "Diferença:", kz(dif), true)}
       </div>
+      {r.sessao.contagem && Object.keys(r.sessao.contagem).length > 0 && (
+        <>
+          <div className="mt-2 border-y border-black py-0.5 text-center">Contagem do numerário</div>
+          {Object.entries(r.sessao.contagem)
+            .sort(([a], [b]) => Number(b) - Number(a))
+            .map(([d, q]) => (
+              <div key={d}>{linha(`${Number(d).toLocaleString("pt-PT")} Kz × ${q}`, kz(Number(d) * 100 * q))}</div>
+            ))}
+        </>
+      )}
+      {(r.conferencia ?? []).some((c) => c.codigo !== "NU" && c.contado !== null) && (
+        <>
+          <div className="mt-2 border-y border-black py-0.5 text-center">Conferência (contado − sistema)</div>
+          {(r.conferencia ?? [])
+            .filter((c) => c.codigo !== "NU" && c.contado !== null)
+            .map((c) => (
+              <div key={c.codigo}>{linha(`${c.descricao}: ${kz(c.contado)}`, kz(c.diferenca), c.diferenca !== 0)}</div>
+            ))}
+        </>
+      )}
+      {r.sessao.observacoes && <div className="mt-2">Obs.: {r.sessao.observacoes}</div>}
       {r.artigos.length > 0 && (
         <>
           <div className="mt-2 border-y border-black py-0.5 text-center">Artigos vendidos</div>

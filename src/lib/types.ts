@@ -60,6 +60,8 @@ export interface PostoOpcoes {
   visor?: VisorOpcoes;
   /** abrir o POS em ecrã inteiro (terminais dedicados) */
   pos_ecra_inteiro?: boolean;
+  /** fecho de caixa cego: o operador conta sem ver o valor esperado */
+  fecho_cego?: boolean;
 }
 
 export interface Posto {
@@ -343,15 +345,26 @@ export interface CaixaResumo {
     estado: string;
     utilizador: string;
     posto: string | null;
+    /** N.º do fecho (relatório Z) do posto. */
+    numero_z?: number | null;
+    /** Notas e moedas contadas: valor em Kz → quantidade. */
+    contagem?: Record<string, number> | null;
+    contado_modos?: Record<string, number> | null;
+    observacoes?: string | null;
   };
-  por_modo: { codigo: string; descricao: string; total: number }[];
+  /** Com o fecho cego e o caixa aberto, os totais vêm a null. */
+  por_modo: { codigo: string; descricao: string; total: number | null }[];
   documentos: number;
-  total_vendido: number;
+  total_vendido: number | null;
   entradas: number;
   saidas: number;
   movimentos: { id: number; data_hora: string; tipo: string; valor: number; descricao: string; rubrica: string | null; modo_codigo: string | null }[];
   artigos: { referencia: string; descricao: string; quantidade: number; total: number }[];
-  numerario_esperado: number;
+  numerario_esperado: number | null;
+  /** Fecho cego: quem conta não vê o esperado até fechar. */
+  cego?: boolean;
+  /** Depois do fecho: esperado × contado de cada forma de pagamento. */
+  conferencia?: { codigo: string; descricao: string; esperado: number; contado: number | null; diferenca: number | null }[];
 }
 
 // ---------------- Oficina ----------------
