@@ -112,7 +112,13 @@ Corpo:      Content-Type: application/json
 - **Sincronização:** `alterado_desde=2026-11-14T08:00:00` em artigos, clientes e fornecedores devolve só o que mudou
   desde essa hora (incluindo os desactivados, com `ativo: false`). Para o stock, peça `/stock/movimentos` desde o
   último `id` visto: cada movimento traz o `saldo` do armazém.
-- **Erros:** `{"erro": {"codigo": "…", "mensagem": "…"}}`. As mensagens das regras de negócio são as do programa.
+- **Erros:** `{"erro": {"codigo": "…", "mensagem": "…", "pedido": 1234}}`. As mensagens das regras de negócio são as
+  do programa.
+- **Número do pedido:** cada resposta a um pedido autenticado (ou recusado) leva `X-KanGest-Pedido: <n.º>` e, nos
+  erros, o mesmo número em `erro.pedido`. É o número da linha no registo de pedidos (Sistema → API e Integrações,
+  coluna «N.º»): cite-o ao pedir ajuda.
+- **Rotas:** a lista completa está em `docs/openapi.json` e no código (`api::ROTAS`); um teste confirma que as duas
+  descrevem as mesmas rotas e métodos.
 
 | HTTP | Códigos | Quando |
 |---|---|---|

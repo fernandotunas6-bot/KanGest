@@ -934,6 +934,7 @@ function Pedidos({ chaves }: { chaves: ChaveApi[] }) {
         <Table className="max-h-[420px]">
           <thead>
             <tr>
+              <Th>N.º</Th>
               <Th>Data e hora</Th>
               <Th>Chave</Th>
               <Th>IP</Th>
@@ -946,6 +947,7 @@ function Pedidos({ chaves }: { chaves: ChaveApi[] }) {
           <tbody>
             {pedidos.data.map((p) => (
               <tr key={p.id}>
+                <Td className="num text-[12px] text-ink-3" title="Número do pedido (cabeçalho X-KanGest-Pedido na resposta)">{p.id}</Td>
                 <Td className="whitespace-nowrap text-ink-2">{dataHora(p.data_hora)}</Td>
                 <Td>{p.chave ?? <span className="text-ink-3">—</span>}</Td>
                 <Td className="font-mono text-[12px]">{p.ip}</Td>

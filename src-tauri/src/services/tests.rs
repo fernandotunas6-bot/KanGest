@@ -3632,6 +3632,12 @@ async fn api_integracao() {
     assert_eq!(http("GET", "/api/v1", Some(&falsa), None).2["erro"]["codigo"], "chave_invalida");
     assert_eq!(http("GET", "/api/v1/naoexiste", Some(&k1), None).0, 404);
     assert_eq!(http("DELETE", "/api/v1/artigos", Some(&k1), None).0, 405);
+    // cada resposta leva o número do pedido no registo; nos erros, também dentro de «erro»
+    let (_, cab, erro) = http("GET", "/api/v1/naoexiste", Some(&k1), None);
+    let numero: i64 = cab.lines().find_map(|l| l.strip_prefix("X-KanGest-Pedido: ")).expect("cabeçalho X-KanGest-Pedido").trim().parse().unwrap();
+    assert_eq!(erro["erro"]["pedido"], numero, "{erro}");
+    let registado: String = sqlx::query_scalar("SELECT caminho FROM api_pedidos WHERE id = ?").bind(numero).fetch_one(&arc.pool).await.unwrap();
+    assert_eq!(registado, "/api/v1/naoexiste");
     // a chave por X-API-Key também serve
     let (s, _, info) = api_http(porta, "GET", "/api/v1", None, None, &[("X-API-Key", &k1)]);
     assert_eq!(s, 200, "{info}");

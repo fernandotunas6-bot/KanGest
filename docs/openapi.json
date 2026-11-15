@@ -74,6 +74,11 @@
               "mensagem": {
                 "type": "string",
                 "example": "Sem permissão: «Emitir Factura (FT) e Guia de Transporte (GT)» (vendas.fatura)."
+              },
+              "pedido": {
+                "type": "integer",
+                "example": 1234,
+                "description": "Número do pedido no registo da API (o mesmo do cabeçalho X-KanGest-Pedido)."
               }
             }
           }
