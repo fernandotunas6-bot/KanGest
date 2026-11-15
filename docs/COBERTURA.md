@@ -44,7 +44,7 @@ Legenda: ✅ feito · 🟡 parcial · ❌ falta
 | Séries de documentos | ✅ | Automáticas por posto e ano, com ecrã de gestão (série por defeito, validade, séries manuais, bloqueio) |
 | Vendas por operador / artigos por operador | ✅ | Em Relatórios: «Por operador» e «Artigos por operador» |
 | Exportar SAF-T | ✅ | Validado nos testes contra o XSD oficial SAF-T AO 1.01_01; falta passar no validador da AGT |
-| Cópia de segurança (manual + automática diária) | ✅ | Também cifrada com senha (`.kgc`) e restauro no programa ([SEGURANCA.md](SEGURANCA.md)) |
+| Cópia de segurança (manual + automática diária) | ✅ | |
 | Fluxo de caixa: inserir dinheiro, regularização, pagamentos com rubrica e centro de custo, contas | ✅ | Caixa do POS + Tesouraria (contas, centros de custo, depósitos) |
 | Lotes de artigos (seleccionar lote na venda) | ✅ | Botão «Lote» em cada linha: escolha manual com validade e quantidade, ou automático (expira primeiro) |
 | Artigos compostos (kits) | ✅ | A venda do kit baixa o stock de cada componente |
@@ -111,6 +111,7 @@ Legenda: ✅ feito · 🟡 parcial · ❌ falta
 | Exportar SAF-T (Vendas) | ✅ |
 | Exportar SAF-T (Compras) | ✅ (TaxAccountingBasis A: fornecedores, PurchaseInvoices, IVA dedutível, moeda estrangeira, retenções; validado contra o XSD) |
 | Exportar SAF-T (Estado) | ✅ (TaxAccountingBasis E: só documentos de entidades públicas; validado contra o XSD) |
+| SAF-T de inventários (anual, todos os contribuintes desde 2026) | ✅ (Relatórios → SAF-T (AO) → Inventários: existências a 31/12 ao custo médio, «sem operações» sem stock, livro Excel para o Portal do Contribuinte; confirmar os nomes das colunas no modelo da AGT — ver [ANALISE-ERP-REFERENCIA.md](ANALISE-ERP-REFERENCIA.md)) |
 
 ### Recursos Humanos
 | Menu original | Novo |

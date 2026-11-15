@@ -317,7 +317,7 @@ async fn datas(p: &SqlitePool) -> AppResult<Datas> {
     if cfg_i != Some(inicio) {
         cfg_gravar(p, "licenca.instalada_em", &inicio.format("%Y-%m-%d").to_string()).await?;
     }
-    if !atrasado && cfg_v.map_or(true, |c| agora > c + Duration::seconds(60)) {
+    if !atrasado && cfg_v.is_none_or(|c| agora > c + Duration::seconds(60)) {
         cfg_gravar(p, "licenca.ultimo_visto", &agora.format("%Y-%m-%dT%H:%M:%S").to_string()).await?;
     }
     Ok(Datas { inicio, atrasado: atrasado.then(|| visto.format("%d/%m/%Y %H:%M").to_string()) })
@@ -395,7 +395,7 @@ pub async fn calcular(st: &AppState) -> AppResult<Estado> {
             Err(erro) => problema = Some(erro),
             Ok(lic) => {
                 let nif_ok = nif_empresa.as_deref().map(so_algarismos) == Some(so_algarismos(&lic.nif));
-                let maquina_ok = lic.maquina.as_deref().map_or(true, |m| so_algarismos(m) == so_algarismos(&e.maquina));
+                let maquina_ok = lic.maquina.as_deref().is_none_or(|m| so_algarismos(m) == so_algarismos(&e.maquina));
                 if !nif_ok {
                     problema = Some(format!("A licença activada é da empresa com o NIF {}, e esta empresa tem o NIF {}.", lic.nif, nif_empresa.clone().unwrap_or_default()));
                 } else if !maquina_ok {
@@ -675,18 +675,25 @@ pub async fn abrir_site(i: AbrirIn) -> AppResult<Value> {
     if !i.url.starts_with("https://kangest.pages.dev/") || i.url.chars().any(|c| c.is_whitespace() || c == '"') {
         return Err(AppError::msg("Endereço não permitido."));
     }
+    abrir_no_navegador(&i.url)?;
+    Ok(Value::Null)
+}
+
+/// Abre um endereço (já validado por quem chama) no navegador do sistema, sem passar pelo
+/// interpretador de comandos (no Windows, o `%` e o `&` dos endereços não são reinterpretados).
+pub(super) fn abrir_no_navegador(url: &str) -> AppResult<()> {
     #[cfg(target_os = "windows")]
     let r = {
         let mut c = std::process::Command::new("rundll32");
         super::impressao::sem_consola(&mut c);
-        c.args(["url.dll,FileProtocolHandler", &i.url]).spawn()
+        c.args(["url.dll,FileProtocolHandler", url]).spawn()
     };
     #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg(&i.url).spawn();
+    let r = std::process::Command::new("open").arg(url).spawn();
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let r = std::process::Command::new("xdg-open").arg(&i.url).spawn();
+    let r = std::process::Command::new("xdg-open").arg(url).spawn();
     r.map_err(|e| AppError::msg(format!("Não foi possível abrir o navegador: {e}")))?;
-    Ok(Value::Null)
+    Ok(())
 }
 
 #[cfg(test)]

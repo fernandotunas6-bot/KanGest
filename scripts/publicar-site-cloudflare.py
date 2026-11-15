@@ -102,7 +102,10 @@ def _verificar_blake3():
 
 # ------------------------------------------------------------------ API
 def _contexto_tls():
-    """O Python do python.org no macOS não usa os certificados do sistema: usa os do certifi ou /etc/ssl/cert.pem."""
+    """O Python do python.org no macOS não usa os certificados do sistema: usa os do certifi ou /etc/ssl/cert.pem.
+    SSL_CERT_FILE, quando definido (ex.: atrás de um proxy da empresa), tem prioridade."""
+    if os.environ.get("SSL_CERT_FILE") and os.path.exists(os.environ["SSL_CERT_FILE"]):
+        return ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
     try:
         import certifi
         return ssl.create_default_context(cafile=certifi.where())

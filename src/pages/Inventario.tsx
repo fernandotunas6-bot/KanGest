@@ -109,7 +109,7 @@ export default function Inventario() {
       </div>
 
       <Card>
-        <Table className="max-h-[calc(100vh-420px)]">
+        <Table className="max-h-[calc(100vh-464px)]">
           <thead>
             <tr>
               <Th>Artigo</Th>

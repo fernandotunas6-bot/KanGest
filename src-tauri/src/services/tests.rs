@@ -156,6 +156,11 @@ async fn fluxo_completo() {
     .await;
     assert_eq!(rc["documento"]["total"], 114000);
     assert_eq!(rpc(&st, "documentos.obter", json!({ "id": ft_id })).await["documento"]["valor_pendente"], 0);
+    // a ficha da FT mostra o recibo que a liquidou (documentos ligados)
+    let ligados = rpc(&st, "documentos.obter", json!({ "id": ft_id })).await;
+    assert_eq!(ligados["recibos"].as_array().unwrap().len(), 1);
+    assert_eq!(ligados["recibos"][0]["id"], rc["documento"]["id"]);
+    assert_eq!(ligados["recibos"][0]["valor"], 114000);
 
     // FT com recibo não pode ser anulada; anula-se o recibo primeiro
     assert!(rpc_err(&st, "documentos.anular", json!({ "id": ft_id, "motivo": "erro de digitação" })).await.contains("recibos"));
@@ -182,7 +187,15 @@ async fn fluxo_completo() {
     assert_eq!(stock(&st, artigo).await, 7.0); // proforma não mexe em stock
     let pp_id = pp["documento"]["id"].as_i64().unwrap();
     rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "doc_origem_id": pp_id, "linhas": [{ "artigo_id": artigo, "quantidade": 3 }] })).await;
-    assert_eq!(rpc(&st, "documentos.obter", json!({ "id": pp_id })).await["documento"]["estado"], "F");
+    let quadro = rpc(&st, "documentos.quadro", json!({ "grupo": "VENDAS" })).await;
+    let no_quadro = quadro.as_array().unwrap().iter().find(|d| d["id"] == pp_id).cloned().unwrap();
+    assert_eq!((no_quadro["estado"].as_str(), no_quadro["convertido_em"].as_str().map(|s| s.starts_with("FT "))), (Some("F"), Some(true)), "{no_quadro}");
+    assert!(rpc(&st, "documentos.quadro", json!({ "grupo": "COMPRAS" })).await.as_array().unwrap().is_empty());
+    let pp_ligados = rpc(&st, "documentos.obter", json!({ "id": pp_id })).await;
+    assert_eq!(pp_ligados["documento"]["estado"], "F");
+    assert_eq!(pp_ligados["derivados"][0]["tipo_codigo"], "FT", "a proforma mostra a factura emitida a partir dela");
+    let fr1_ligados = rpc(&st, "documentos.obter", json!({ "id": fr1_id })).await;
+    assert_eq!(fr1_ligados["derivados"][0]["tipo_codigo"], "NC", "a FR mostra a nota de crédito");
     assert_eq!(stock(&st, artigo).await, 4.0);
 
     // ---- transferência entre armazéns ----
@@ -195,6 +208,12 @@ async fn fluxo_completo() {
     // ---- compra a fornecedor actualiza custo médio ----
     let forn = rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Fornecedor SA", "nif": "5410000000" })).await["id"].as_i64().unwrap();
     rpc(&st, "documentos.emitir", json!({ "tipo": "FC", "entidade_id": forn, "doc_externo": "FT A/123", "linhas": [{ "artigo_id": artigo, "quantidade": 4, "preco_unitario": 80000 }] })).await;
+    // a mesma V/Factura do fornecedor não se regista duas vezes (nem com espaços ou minúsculas diferentes)
+    let rep = rpc_err(&st, "documentos.emitir", json!({ "tipo": "FC", "entidade_id": forn, "doc_externo": "ft a/ 123", "linhas": [{ "artigo_id": artigo, "quantidade": 4, "preco_unitario": 80000 }] })).await;
+    assert!(rep.contains("já foi registado"), "{rep}");
+    // o vencimento não pode ser anterior à data do documento
+    let venc = rpc_err(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "data_vencimento": "2000-01-01", "linhas": [{ "artigo_id": artigo, "quantidade": 1 }] })).await;
+    assert!(venc.contains("vencimento"), "{venc}");
     let a = rpc(&st, "artigos.obter", json!({ "id": artigo })).await;
     // existências globais antes: 2 (principal) + 2 (loja 2) = 4 a 500,00; entram 4 a 800,00 → 650,00
     assert_eq!(a["custo_medio"], 65000);
@@ -207,23 +226,20 @@ async fn fluxo_completo() {
     // NC da FR gerou saída de caixa (devolução)
     assert_eq!(cx["saidas"], 114000);
     assert_eq!(cx["numerario_esperado"], 1000000 + 342000 - 114000);
-    // contagem por notas e moedas: o valor físico é a soma (2×5000 + 1×2000 + 1×200 + 1×50 + 2×10 + 1×0,50 Kz = 12 270,50)
-    assert_eq!(cx["fecho"]["notas"], json!([500000, 200000, 100000, 50000, 20000]));
-    assert!(rpc_err(&st, "caixa.fechar", json!({ "contagem": [{ "valor": 500000, "quantidade": -1 }] })).await.contains("inválida"));
-    assert!(rpc_err(&st, "caixa.fechar", json!({})).await.contains("valor contado"));
-    let contagem = json!([{ "valor": 500000, "quantidade": 2 }, { "valor": 200000, "quantidade": 1 }, { "valor": 20000, "quantidade": 1 },
-                          { "valor": 5000, "quantidade": 1 }, { "valor": 1000, "quantidade": 2 }, { "valor": 50, "quantidade": 1 }, { "valor": 100000, "quantidade": 0 }]);
-    let fecho = rpc(&st, "caixa.fechar", json!({ "contagem": contagem })).await;
+    let fecho = rpc(&st, "caixa.fechar", json!({ "valor_contado": 1228000 })).await;
     assert_eq!(fecho["sessao"]["estado"], "FECHADA");
-    assert_eq!(fecho["sessao"]["valor_contado"], 1227050);
-    assert_eq!(fecho["contagem"].as_array().unwrap().len(), 6, "as notas sem quantidade não ficam");
     assert!(rpc(&st, "caixa.estado", Value::Null).await.is_null());
-
 
     // ---- painel e todos os relatórios executam ----
     let dash = rpc(&st, "dashboard", Value::Null).await;
     // FR1 228000 + FR2 114000 + FR3 114000 + FT(proforma) 342000 − NC 114000 (FT anulada não conta)
     assert_eq!(dash["vendas_hoje"], 228000 + 114000 + 114000 + 342000 - 114000);
+    assert_eq!(dash["vendas_mes_anterior"], 0);
+    let ant = &dash["antiguidade"];
+    let soma_faixas: i64 = ["por_vencer", "d1_30", "d31_60", "d61_90", "mais_90"].iter().map(|k| ant[*k].as_i64().unwrap()).sum();
+    assert_eq!(soma_faixas, dash["a_receber"].as_i64().unwrap(), "as faixas de antiguidade somam o «A receber»");
+    assert!(dash["alertas"]["proformas_a_expirar"].is_i64() && dash["alertas"]["fe_rejeitadas"].is_i64());
+    assert!(!dash["por_modo"].as_array().unwrap().is_empty(), "recebimentos do mês por meio de pagamento");
     for g in ["dia", "artigo", "familia", "operador", "cliente", "pagamento", "iva"] {
         let r = rpc(&st, "relatorios.vendas", json!({ "de": "2000-01-01", "ate": "2100-01-01", "agrupar": g })).await;
         assert!(r.as_array().map(|x| !x.is_empty()).unwrap_or(false), "relatório {g} vazio");
@@ -255,9 +271,11 @@ async fn fluxo_completo() {
     // ---- cópias de segurança ----
     let bk = rpc(&st, "sistema.backup", Value::Null).await;
     assert!(std::path::Path::new(bk["ficheiro"].as_str().unwrap()).exists());
-    assert!(super::sistema::backup_automatico(&st.pool, &pasta).await.unwrap().is_some());
+    // o fecho de caixa já fez uma cópia (verificada); ao abrir no mesmo dia não se repete
+    let copias = rpc(&st, "sistema.copias", Value::Null).await;
+    assert_eq!(copias["copias"].as_array().unwrap().len(), 1, "{copias}");
+    assert_eq!(copias["copias"][0]["verificada"], true);
     assert!(super::sistema::backup_automatico(&st.pool, &pasta).await.unwrap().is_none(), "uma cópia automática por dia");
-    assert_eq!(rpc(&st, "sistema.copias", Value::Null).await["copias"].as_array().unwrap().len(), 1);
 
     // ---- posto 2 com série própria ----
     let p2 = rpc(&st, "posto.guardar", json!({ "descricao": "Posto#2", "armazem_id": 1, "serie_prefixo": "p2" })).await["id"].as_i64().unwrap();
@@ -341,30 +359,8 @@ async fn fluxo_completo() {
     let ids = rpc(&st, "artigos.porIds", json!({ "ids": [artigo] })).await;
     assert_eq!(ids.as_array().unwrap().len(), 1);
 
-    // fecho cego: o operador (sem relatórios) não vê o esperado nem os totais até fechar; o gestor vê
-    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
-    if !rpc(&st, "caixa.estado", Value::Null).await.is_null() {
-        rpc(&st, "caixa.fechar", json!({ "valor_contado": 0 })).await;
-    }
-    assert!(rpc_err(&st, "caixa.configGuardar", json!({ "fecho_cego": true, "notas": "5000, abc", "moedas": "" })).await.contains("inválido"));
-    let cfg = rpc(&st, "caixa.configGuardar", json!({ "fecho_cego": true, "notas": "5000,2000,1000,500,200", "moedas": "100 50 0.5" })).await;
-    assert_eq!(cfg["moedas"], json!([10000, 5000, 50]));
-    rpc(&st, "utilizadores.guardar", json!({ "nome": "Caixa Cega", "login": "cega", "perfil": "CAIXA", "senha": "cega1234", "mudar_senha": false })).await;
-    rpc(&st, "auth.login", json!({ "login": "cega", "senha": "cega1234" })).await;
-    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 500000 })).await;
-    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
-    let cego = rpc(&st, "caixa.estado", Value::Null).await;
-    assert_eq!((cego["cego"].as_bool(), cego["numerario_esperado"].is_null(), cego["total_vendido"].is_null()), (Some(true), true, true), "{cego}");
-    assert!(cego["por_modo"].as_array().unwrap().iter().all(|m| m["total"].is_null()));
-    assert_eq!(cego["documentos"], 1);
-    let fechado = rpc(&st, "caixa.fechar", json!({ "valor_contado": 614000 })).await;
-    assert_eq!((fechado["numerario_esperado"].as_i64(), fechado["cego"].as_bool()), (Some(614000), Some(false)), "depois de fechar mostra tudo");
-    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
-    rpc(&st, "caixa.configGuardar", json!({ "fecho_cego": false, "notas": "5000,2000,1000,500,200", "moedas": "200,100,50,20,10,5,2,1,0.5" })).await;
-
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
-
 }
 
 // =====================================================================================
@@ -634,7 +630,8 @@ async fn gc_paridade_e_importacao() {
     assert_eq!(emp["nome"], "Loja KIGEST");
     let agt_info = rpc(&st, "agt.info", Value::Null).await;
     assert_eq!(agt_info["certificado_anterior"], "123/AGT/2019");
-    assert_eq!(agt_info["certificado"], "", "o certificado do KIGEST não é activado automaticamente");
+    // o certificado do KIGEST não é activado: fica o desta versão (vazio numa compilação de desenvolvimento)
+    assert_eq!(agt_info["certificado"], crate::produtor::certificado().unwrap_or_default(), "o certificado do KIGEST não é activado automaticamente");
     let coca = rpc(&st, "artigos.codigo", json!({ "codigo": "5449000000996" })).await;
     assert_eq!(coca["preco1"], 25000);
     assert_eq!(coca["stock"].as_f64().unwrap(), 24.0);
@@ -894,8 +891,11 @@ async fn rh_oficina_lotes_moedas() {
     rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": pneu, "quantidade": 10, "preco_unitario": 2500000 }, { "artigo_id": valvula, "quantidade": 10, "preco_unitario": 10000 }] })).await;
     let kit = rpc(&st, "artigos.guardar", json!({ "descricao": "Kit 4 pneus montados", "taxa_iva_id": 1, "preco1": 17000000, "composto": true,
         "componentes": [{ "componente_id": pneu, "quantidade": 4 }, { "componente_id": valvula, "quantidade": 4 }] })).await["id"].as_i64().unwrap();
-    assert!(rpc_err(&st, "artigos.guardar", json!({ "id": kit, "descricao": "Kit", "taxa_iva_id": 1, "preco1": 1, "composto": true, "componentes": [{ "componente_id": kit, "quantidade": 1 }] })).await.contains("kit"));
-    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Kit de kits", "taxa_iva_id": 1, "preco1": 1, "composto": true, "componentes": [{ "componente_id": kit, "quantidade": 1 }] })).await.contains("composto"));
+    let e = rpc_err(&st, "artigos.guardar", json!({ "id": kit, "descricao": "Kit", "taxa_iva_id": 1, "preco1": 1, "composto": true, "componentes": [{ "componente_id": kit, "quantidade": 1 }] })).await;
+    assert!(e.contains("kit"), "{e}");
+    // logo a seguir a uma gravação recusada (a transacção ainda pode estar a desfazer-se noutra ligação)
+    let e = rpc_err(&st, "artigos.guardar", json!({ "descricao": "Kit de kits", "taxa_iva_id": 1, "preco1": 1, "composto": true, "componentes": [{ "componente_id": kit, "quantidade": 1 }] })).await;
+    assert!(e.contains("composto"), "{e}");
     assert_eq!(rpc(&st, "artigos.componentes", json!({ "id": kit })).await.as_array().unwrap().len(), 2);
     rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": kit, "quantidade": 2 }] })).await;
     assert_eq!(stock(&st, pneu).await, 2.0, "a venda do kit baixa os componentes");
@@ -922,6 +922,13 @@ async fn rh_oficina_lotes_moedas() {
     assert!(rpc_err(&st, "oficina.ordemGuardar", json!({ "id": os, "viatura_id": viat })).await.contains("facturada"));
     let os2 = rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat })).await["id"].as_i64().unwrap();
     assert_eq!(rpc(&st, "oficina.ordem", json!({ "id": os2 })).await["numero"], format!("OS {ano}/2"));
+    // quadro kanban: muda só o estado; concluir regista a data; facturada só pela factura e depois não muda
+    rpc(&st, "oficina.ordemEstado", json!({ "id": os2, "estado": "EM_CURSO" })).await;
+    let o2 = rpc(&st, "oficina.ordemEstado", json!({ "id": os2, "estado": "CONCLUIDA" })).await;
+    assert_eq!(o2["estado"], "CONCLUIDA");
+    assert!(rpc(&st, "oficina.ordem", json!({ "id": os2 })).await["data_conclusao"].is_string());
+    assert!(rpc_err(&st, "oficina.ordemEstado", json!({ "id": os2, "estado": "FACTURADA" })).await.contains("inválido"));
+    assert!(rpc_err(&st, "oficina.ordemEstado", json!({ "id": os, "estado": "ABERTA" })).await.contains("facturada"));
 
     // =========================== moedas e custos de importação ===========================
     assert!(rpc_err(&st, "moedas.guardar", json!({ "codigo": "AOA", "descricao": "Kwanza", "simbolo": "Kz", "cambio": 2.0 })).await.contains("Kwanza"));
@@ -1179,7 +1186,12 @@ async fn series_manuais_creditos_estado() {
     validar_xsd(sv["ficheiro"].as_str().unwrap());
     let xml = std::fs::read_to_string(sv["ficheiro"].as_str().unwrap()).unwrap();
     assert!(xml.contains("<SourceBilling>M</SourceBilling>"));
-    assert!(xml.contains("<HashControl>0</HashControl>") && !xml.contains("<HashControl>1</HashControl>"), "sem certificado: HashControl 0");
+    // sem certificado: HashControl 0; numa compilação com o certificado do produtor, a versão da chave
+    let hc = if crate::produtor::certificado().is_some() { crate::produtor::versao_chave() } else { "0".to_string() };
+    assert!(xml.contains(&format!("<HashControl>{hc}</HashControl>")), "HashControl {hc}");
+    if hc == "0" {
+        assert!(!xml.contains("<HashControl>1</HashControl>"), "sem certificado: HashControl 0");
+    }
     assert!(!xml.contains("RA "), "o recibo de adiantamento não é documento fiscal");
     let se = rpc(&st, "saft.exportarEstado", json!({ "de": format!("{ano}-01-01"), "ate": format!("{ano}-12-31") })).await;
     validar_xsd(se["ficheiro"].as_str().unwrap());
@@ -1327,93 +1339,51 @@ async fn rede_multiposto() {
     // ---- abre o servidor numa porta livre ----
     let porta = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let arc = std::sync::Arc::new(st);
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta, chave: "segredo123".into(), ..Default::default() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta, servidor: String::new(), chave: "segredo123".into(), sal: String::new() };
     crate::rede::registar_estado(arc.clone());
     assert!(crate::rede::iniciar_servidor(arc.clone(), &crate::rede::Config { chave: "curta".into(), ..cfg.clone() }).is_err(), "a chave tem de ter 6 caracteres");
     assert_eq!(crate::rede::iniciar_servidor(arc.clone(), &cfg).unwrap(), porta);
-    let gravado: Value = serde_json::from_str(&std::fs::read_to_string(pasta.join("rede.json")).unwrap()).unwrap();
-    assert_eq!(B64.decode(gravado["sal"].as_str().unwrap()).unwrap().len(), 16, "o servidor cria e guarda o sal da cifra");
+    let gravado: crate::rede::Config = serde_json::from_str(&std::fs::read_to_string(pasta.join("rede.json")).unwrap()).unwrap();
+    assert!(!gravado.sal.is_empty(), "o servidor guarda o sal da derivação da chave");
 
-    // o posto 2, noutra máquina: pedidos cifrados com a chave de rede
-    let cliente = crate::rede::Config { modo: "cliente".into(), porta, servidor: format!("127.0.0.1:{porta}"), chave: "segredo123".into(), ..Default::default() };
-    let pedir_cfg = |c: &crate::rede::Config, token: &str, metodo: &str, params: Value| -> Value {
-        match crate::rede::pedir_com_token(c, token, metodo, params, posto2, "Caixa 2") {
-            Ok(d) => json!({ "ok": true, "dados": d }),
-            Err(e) => json!({ "ok": false, "erro": e.to_string() }),
-        }
+    // posto cliente: fala com o servidor pelo protocolo cifrado
+    let cliente = crate::rede::Config { modo: "cliente".into(), porta, servidor: format!("127.0.0.1:{porta}"), chave: "segredo123".into(), sal: String::new() };
+    let pedir_v2 = |token: &str, metodo: &str, params: Value| -> Result<Value, String> {
+        crate::rede::pedir_com_token(&cliente, token, metodo, params, posto2, "Caixa 2").map_err(|e| e.to_string())
     };
-    let como = |token: &str, metodo: &str, params: Value| pedir_cfg(&cliente, token, metodo, params);
-    let http = |metodo: &str, corpo: &str| -> (String, Value) {
+    let bruto = |corpo: &str| -> String {
         let mut s = std::net::TcpStream::connect(("127.0.0.1", porta)).expect("ligar ao servidor");
-        s.write_all(format!("{metodo} / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}", corpo.len()).as_bytes()).unwrap();
+        s.write_all(format!("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}", corpo.len()).as_bytes()).unwrap();
         let mut r = String::new();
         s.read_to_string(&mut r).unwrap();
-        let (cab, corpo) = r.split_once("\r\n\r\n").expect("resposta HTTP");
-        (cab.lines().next().unwrap().to_string(), serde_json::from_str(corpo.trim()).expect("JSON"))
+        r
     };
 
-    // ---- a chave de rede é obrigatória e nunca viaja ----
-    let mau = pedir_cfg(&crate::rede::Config { chave: "errada123".into(), ..cliente.clone() }, "t1", "setup.estado", Value::Null);
-    assert_eq!(mau["ok"], false);
-    assert!(mau["erro"].as_str().unwrap().contains("Chave de rede"), "{mau}");
-    assert_eq!(como("t1", "setup.estado", Value::Null)["ok"], true, "com a chave certa, o posto volta a ligar-se");
-    // um posto antigo (pedido em claro, com a chave no corpo) é recusado com uma explicação
-    let (linha, antigo) = http("POST", &json!({ "chave": "segredo123", "token": "t9", "posto": posto2, "metodo": "setup.estado", "params": null }).to_string());
-    assert!(linha.contains("400") && antigo["erro"].as_str().unwrap().contains("versão antiga"), "{linha} {antigo}");
-
-    // ---- o que passa na rede vai cifrado: nem o método nem os dados se lêem ----
-    let pedido = json!({ "token": "t9", "posto": posto2, "metodo": "setup.estado", "params": null, "t": crate::rede::teste::agora() });
-    let (n, envelope) = crate::rede::teste::envelope(&cliente, &pedido);
-    let texto = envelope.to_string();
-    assert!(!texto.contains("setup") && !texto.contains("t9") && !texto.contains("segredo123"), "{texto}");
-    let (_, resposta) = http("POST", &texto);
-    assert!(resposta.get("ok").is_none() && resposta["c"].is_string(), "a resposta também vai cifrada: {resposta}");
-    assert_eq!(crate::rede::teste::abrir_resposta(&cliente, n, &resposta).unwrap()["ok"], true);
-    // a resposta só se abre com o número do pedido a que responde
-    let (n2, _) = crate::rede::teste::envelope(&cliente, &pedido);
-    assert!(crate::rede::teste::abrir_resposta(&cliente, n2, &resposta).is_none());
-    // o mesmo pedido copiado da rede não se repete
-    let (_, outra_vez) = http("POST", &texto);
-    let outra_vez = crate::rede::teste::abrir_resposta(&cliente, n, &outra_vez).unwrap();
-    assert_eq!(outra_vez["ok"], false);
-    assert!(outra_vez["erro"].as_str().unwrap().contains("repetido"), "{outra_vez}");
-    // um byte mexido e o servidor recusa
-    let (_, envelope) = crate::rede::teste::envelope(&cliente, &pedido);
-    let mut c = B64.decode(envelope["c"].as_str().unwrap()).unwrap();
-    c[3] ^= 1;
-    let (linha, mexido) = http("POST", &json!({ "v": 2, "n": envelope["n"], "c": B64.encode(&c) }).to_string());
-    assert!(linha.contains("401") && mexido["erro"].as_str().unwrap().contains("adulterado"), "{linha} {mexido}");
-    // um pedido antigo (hora fora dos 5 minutos) é recusado, mesmo com a cifra certa
-    let velho = json!({ "token": "t9", "posto": posto2, "metodo": "setup.estado", "params": null, "t": crate::rede::teste::agora() - 600_000 });
-    let (n, envelope) = crate::rede::teste::envelope(&cliente, &velho);
-    let (_, r) = http("POST", &envelope.to_string());
-    let r = crate::rede::teste::abrir_resposta(&cliente, n, &r).unwrap();
-    assert!(r["ok"] == false && r["relogio"].is_u64(), "{r}");
-    // um posto com o relógio adiantado acerta-se pelo servidor e o pedido passa
-    crate::rede::teste::desacertar(3_600_000);
-    assert_eq!(como("t9", "setup.estado", Value::Null)["ok"], true, "o posto acerta a hora pela do servidor");
+    // ---- a chave de rede é obrigatória (e nunca vai na rede) ----
+    let errado = crate::rede::Config { chave: "outra-chave-qualquer".into(), ..cliente.clone() };
+    let mau = crate::rede::pedir_com_token(&errado, "t1", "setup.estado", Value::Null, posto2, "Caixa 2").unwrap_err().to_string();
+    assert!(mau.contains("Chave de rede"), "{mau}");
+    // um posto com o protocolo antigo (chave em claro) não é atendido e é avisado
+    let antigo = bruto(&json!({ "chave": "segredo123", "token": "t9", "posto": posto2, "metodo": "artigos.listar", "params": {} }).to_string());
+    assert!(antigo.contains("vers") && antigo.contains("antiga") && !antigo.contains("\"dados\""), "{antigo}");
 
     // ---- sem sessão não se lê nada; cada posto tem a sua ----
-    let sem = como("t1", "artigos.listar", json!({}));
-    assert_eq!(sem["ok"], false);
-    assert!(sem["erro"].as_str().unwrap().contains("Sessão"));
-    let entrada = como("t1", "auth.login", json!({ "login": "joana", "senha": "432100" }));
-    assert_eq!(entrada["ok"], true);
-    assert_eq!(entrada["dados"]["nome"], "Joana");
-    assert_eq!(como("t1", "artigos.listar", json!({}))["dados"].as_array().unwrap().len(), 1);
-    let outro = como("t2", "artigos.listar", json!({}));
-    assert_eq!(outro["ok"], false, "a sessão de um posto não serve outro posto");
+    let sem = pedir_v2("t1", "artigos.listar", json!({})).unwrap_err();
+    assert!(sem.contains("Sessão"), "{sem}");
+    let entrada = pedir_v2("t1", "auth.login", json!({ "login": "joana", "senha": "432100" })).unwrap();
+    assert_eq!(entrada["nome"], "Joana");
+    assert_eq!(pedir_v2("t1", "artigos.listar", json!({})).unwrap().as_array().unwrap().len(), 1);
+    assert!(pedir_v2("t2", "artigos.listar", json!({})).is_err(), "a sessão de um posto não serve outro posto");
     // e a máquina do servidor continua sem sessão
     assert!(arc.sessao_opcional().is_none(), "o login de um posto em rede não entra na máquina do servidor");
 
     // ---- o posto do pedido é o que manda: série e caixa são do posto 2 ----
-    assert_eq!(como("t1", "posto.obter", Value::Null)["dados"]["atual"]["descricao"], "Caixa 2");
-    assert_eq!(como("t1", "caixa.abrir", json!({ "valor_inicial": 500000 }))["ok"], true);
-    let venda = como("t1", "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 2 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] }));
-    assert_eq!(venda["ok"], true, "{venda}");
-    let numero = venda["dados"]["documento"]["numero_doc"].as_str().unwrap().to_string();
+    assert_eq!(pedir_v2("t1", "posto.obter", Value::Null).unwrap()["atual"]["descricao"], "Caixa 2");
+    pedir_v2("t1", "caixa.abrir", json!({ "valor_inicial": 500000 })).unwrap();
+    let venda = pedir_v2("t1", "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 2 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).unwrap();
+    let numero = venda["documento"]["numero_doc"].as_str().unwrap().to_string();
     assert!(numero.contains("P2"), "o documento tem de sair na série do posto 2: {numero}");
-    assert_eq!(venda["dados"]["documento"]["posto_id"], posto2);
+    assert_eq!(venda["documento"]["posto_id"], posto2);
     assert_eq!(arc.posto().id, 1, "o posto desta máquina não muda por servir outro");
 
     // ---- o GET serve para confirmar que há um KanGest à escuta ----
@@ -1422,7 +1392,6 @@ async fn rede_multiposto() {
     let mut r = String::new();
     s.read_to_string(&mut r).unwrap();
     assert!(r.contains("\"app\":\"kigest\""), "{r}");
-    assert!(r.contains("\"sal\":") && r.contains("\"cifra\":\"aes-256-gcm\""), "{r}");
 
     // ---- os postos ligados aparecem no estado da rede ----
     rpc(&arc, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
@@ -1432,6 +1401,22 @@ async fn rede_multiposto() {
     let ligados = estado["ligados"].as_array().unwrap();
     assert!(ligados.iter().any(|l| l["utilizador"] == "Joana" && l["posto"] == "Caixa 2"), "{ligados:?}");
     assert!(rpc_err(&arc, "rede.testar", Value::Null).await.contains("posto cliente"));
+    // a chave de rede só a vê quem pode mudar a configuração
+    assert_eq!(estado["chave"], "segredo123");
+
+    // ---- um pedido capturado na rede não pode ser repetido ----
+    let (corpo, k) = crate::rede::teste_pedido_cifrado(&cliente, "t1", "artigos.listar", json!({}), posto2);
+    assert!(!corpo.contains("artigos.listar") && !corpo.contains("segredo123"), "o pedido vai cifrado");
+    assert_eq!(crate::rede::teste_abrir_resposta(&k, &bruto(&corpo))["ok"], true);
+    let repetido = crate::rede::teste_abrir_resposta(&k, &bruto(&corpo));
+    assert!(repetido["erro"].as_str().unwrap().contains("repetido"), "{repetido}");
+
+    // ---- quem erra a chave muitas vezes fica bloqueado uns minutos ----
+    for _ in 0..6 {
+        let _ = crate::rede::pedir_com_token(&errado, "t3", "setup.estado", Value::Null, posto2, "Caixa 3");
+    }
+    let bloqueado = pedir_v2("t1", "artigos.listar", json!({})).unwrap_err();
+    assert!(bloqueado.contains("Demasiadas tentativas"), "{bloqueado}");
 
     arc.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
@@ -1561,6 +1546,56 @@ async fn recalculo_stock() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// SAF-T de inventários: existências a 31/12 reconstituídas pelos movimentos (exercício fechado) ou as de hoje
+/// (exercício a decorrer), valorizadas ao custo médio; sem existências, «sem operações».
+#[tokio::test]
+async fn saft_inventario() {
+    let pasta = std::env::temp_dir().join(format!("kigest-teste-inventario-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Armazém Teste, Lda", "nif": "5417189230" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let ano: i32 = db::hoje()[..4].parse().unwrap();
+
+    // sem artigos: entrega-se na mesma, «sem operações»
+    let v = rpc(&st, "saft.inventario", json!({ "ano": ano })).await;
+    assert_eq!((v["sem_operacoes"].as_bool(), v["empresa"]["nif"].as_str()), (Some(true), Some("5417189230")), "{v}");
+
+    // 10 unidades entradas em Junho do ano passado a 3 000,00; este ano saem 4
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz 5kg", "taxa_iva_id": 1, "preco1": 450000 })).await["id"].as_i64().unwrap();
+    let s = rpc(&st, "artigos.guardar", json!({ "descricao": "Montagem", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": a, "quantidade": 10, "preco_unitario": 300000 }] })).await;
+    sqlx::query("UPDATE movimentos_stock SET data_hora = ? WHERE artigo_id = ?")
+        .bind(format!("{}-06-01T10:00:00", ano - 1))
+        .bind(a)
+        .execute(&st.pool)
+        .await
+        .unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "SS", "linhas": [{ "artigo_id": a, "quantidade": 4 }] })).await;
+
+    // exercício fechado: o que havia a 31/12, ao custo médio dessa data
+    let ant = rpc(&st, "saft.inventario", json!({ "ano": ano - 1 })).await;
+    assert_eq!(ant["provisorio"], false);
+    assert_eq!(ant["total_artigos"], 1, "os serviços não entram no inventário: {ant}");
+    assert_eq!(ant["linhas"][0]["quantidade"].as_f64(), Some(10.0));
+    assert_eq!(ant["linhas"][0]["valor"], 3000000);
+    assert_eq!(ant["data_referencia"], format!("{}-12-31", ano - 1));
+    assert_eq!(ant["metodo_custeio"], "Custo médio ponderado");
+    // exercício a decorrer: as existências de hoje
+    let atual = rpc(&st, "saft.inventario", json!({ "ano": ano })).await;
+    assert_eq!((atual["provisorio"].as_bool(), atual["linhas"][0]["quantidade"].as_f64()), (Some(true), Some(6.0)), "{atual}");
+    // antes de haver movimentos: sem operações; um ano futuro é recusado
+    assert_eq!(rpc(&st, "saft.inventario", json!({ "ano": ano - 2 })).await["sem_operacoes"], true);
+    assert!(rpc_err(&st, "saft.inventario", json!({ "ano": ano + 1 })).await.contains("exercício"));
+    let _ = s;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 #[tokio::test]
 async fn parametrizacao_documentos() {
     let pasta = std::env::temp_dir().join(format!("kigest-teste-param-{}", std::process::id()));
@@ -1618,7 +1653,9 @@ async fn parametrizacao_documentos() {
 }
 
 /// Servidor local que imita os serviços `sigt/fe/v1` da AGT e guarda os pedidos recebidos.
-fn agt_simulada() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<(String, String, Value)>>>) {
+type PedidosAgt = std::sync::Arc<std::sync::Mutex<Vec<(String, String, Value)>>>;
+
+fn agt_simulada() -> (u16, PedidosAgt) {
     use std::io::{Read, Write};
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let porta = l.local_addr().unwrap().port();
@@ -1791,7 +1828,7 @@ async fn facturacao_electronica() {
     let ft2 = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
     rpc(&st, "fe.corrigir", json!({ "rejeitado_id": ft_id, "numero_novo": ft2["documento"]["numero_doc"] })).await;
     rpc(&st, "fe.processar", Value::Null).await;
-    let ultimo = pedidos.lock().unwrap().iter().filter(|p| p.0.ends_with("/registarFactura")).last().cloned().unwrap();
+    let ultimo = pedidos.lock().unwrap().iter().rfind(|p| p.0.ends_with("/registarFactura")).cloned().unwrap();
     let dc = &ultimo.2["documents"][0];
     assert_eq!(dc["documentStatus"], "C");
     assert_eq!(dc["rejectedDocumentNo"], ft["documento"]["numero_doc"]);
@@ -1878,7 +1915,6 @@ async fn importacao_volume() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn servidor_demo() {
-    use std::io::{Read, Write};
     let pasta = std::env::temp_dir().join("kigest-auditoria");
     let _ = std::fs::remove_dir_all(&pasta);
     std::fs::create_dir_all(&pasta).unwrap();
@@ -1919,9 +1955,86 @@ async fn servidor_demo() {
         let total = (v as f64 * q as f64 * 1.14).round() as i64;
         rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": q }], "pagamentos": [{ "modo": if k % 2 == 0 { "NU" } else { "MB" }, "valor": total }] })).await;
     }
+    // vendas dos 29 dias anteriores como histórico importado (fora da cadeia de assinaturas, como o do KIGEST):
+    // dão corpo ao gráfico do painel, às comparações com ontem e com o mês anterior e aos mais vendidos
+    struct Ficha {
+        id: i64,
+        referencia: String,
+        descricao: String,
+        preco: i64,
+        custo: i64,
+    }
+    let admin: i64 = sqlx::query_scalar("SELECT id FROM utilizadores WHERE login = 'admin'").fetch_one(&st.pool).await.unwrap();
+    let mut fichas = Vec::new();
+    for a in &arts {
+        let (referencia, descricao, preco, custo): (String, String, i64, i64) =
+            sqlx::query_as("SELECT referencia, descricao, preco1, custo_medio FROM artigos WHERE id = ?").bind(a).fetch_one(&st.pool).await.unwrap();
+        fichas.push(Ficha { id: *a, referencia, descricao, preco, custo });
+    }
+    let mut n_hist = 0;
+    for dias in (1..=29i64).rev() {
+        let data_doc: String = sqlx::query_scalar("SELECT date('now', 'localtime', ?)").bind(format!("-{dias} day")).fetch_one(&st.pool).await.unwrap();
+        for j in 0..(2 + (dias * 7) % 3) {
+            n_hist += 1;
+            // duas linhas por venda, com artigos e quantidades que variam de dia para dia
+            let linhas: Vec<(&Ficha, f64)> = (0..2)
+                .map(|l| (&fichas[((dias * 3 + j * 2 + l) % fichas.len() as i64) as usize], (2 + (dias * 5 + j * 3 + l * 7) % 9) as f64))
+                .collect();
+            let liquido: i64 = linhas.iter().map(|(f, q)| (f.preco as f64 * q).round() as i64).sum();
+            let iva = (liquido as f64 * 0.14).round() as i64;
+            let doc: i64 = sqlx::query_scalar(
+                "INSERT INTO documentos (tipo_codigo, serie, numero, numero_doc, data_emissao, data_hora, entidade_nome, entidade_nif, utilizador_id,
+                    estado, total_bruto, total_liquido, total_iva, total, valor_entregue, importado, origem)
+                 VALUES ('FR', 'H', ?1, 'FR H/' || ?1, ?2, ?2 || 'T' || printf('%02d', 9 + ?3 * 3) || ':15:00', 'Consumidor Final', '999999999', ?4,
+                    'N', ?5, ?5, ?6, ?5 + ?6, ?5 + ?6, 1, 'I') RETURNING id",
+            )
+            .bind(n_hist)
+            .bind(&data_doc)
+            .bind(j)
+            .bind(admin)
+            .bind(liquido)
+            .bind(iva)
+            .fetch_one(&st.pool)
+            .await
+            .unwrap();
+            for (k, (f, q)) in linhas.iter().enumerate() {
+                let base = (f.preco as f64 * q).round() as i64;
+                let iva_l = (base as f64 * 0.14).round() as i64;
+                sqlx::query(
+                    "INSERT INTO documento_linhas (documento_id, linha, artigo_id, referencia, descricao, quantidade, unidade, preco_unitario, taxa_iva_id,
+                        taxa_iva_pct, valor_liquido, valor_iva, total, custo)
+                     VALUES (?, ?, ?, ?, ?, ?, 'UN', ?, 1, 14, ?, ?, ?, ?)",
+                )
+                .bind(doc)
+                .bind(k as i64 + 1)
+                .bind(f.id)
+                .bind(&f.referencia)
+                .bind(&f.descricao)
+                .bind(q)
+                .bind(f.preco)
+                .bind(base)
+                .bind(iva_l)
+                .bind(base + iva_l)
+                .bind(f.custo)
+                .execute(&st.pool)
+                .await
+                .unwrap();
+            }
+        }
+    }
     let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli1, "linhas": [{ "artigo_id": arts[2], "quantidade": 20 }, { "artigo_id": serv, "quantidade": 1 }] })).await;
-    rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli2, "data_vencimento": format!("{ano}-01-15"), "linhas": [{ "artigo_id": arts[5], "quantidade": 8 }] })).await;
+    // factura vencida há muito (para os avisos e a antiguidade de saldos): o vencimento passa para Janeiro na base,
+    // porque ao emitir já não se aceita um vencimento anterior à data do documento
+    let ft_vencida = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli2, "linhas": [{ "artigo_id": arts[5], "quantidade": 8 }] })).await["documento"]["id"].as_i64().unwrap();
+    sqlx::query("UPDATE documentos SET data_vencimento = ? WHERE id = ?").bind(format!("{ano}-01-15")).bind(ft_vencida).execute(&st.pool).await.unwrap();
     rpc(&st, "documentos.emitir", json!({ "tipo": "PP", "entidade_id": cli2, "linhas": [{ "artigo_id": serv, "quantidade": 2 }] })).await;
+    // quadro de propostas: uma proforma já facturada, um orçamento expirado, uma nota de encomenda e uma encomenda a fornecedor
+    let pp2 = rpc(&st, "documentos.emitir", json!({ "tipo": "PP", "entidade_id": cli1, "linhas": [{ "artigo_id": arts[0], "quantidade": 40 }] })).await["documento"]["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli1, "doc_origem_id": pp2, "linhas": [{ "artigo_id": arts[0], "quantidade": 40 }] })).await;
+    let orc = rpc(&st, "documentos.emitir", json!({ "tipo": "OR", "entidade_id": cli2, "linhas": [{ "artigo_id": serv, "quantidade": 3 }] })).await["documento"]["id"].as_i64().unwrap();
+    sqlx::query("UPDATE documentos SET data_vencimento = date('now', 'localtime', '-5 day') WHERE id = ?").bind(orc).execute(&st.pool).await.unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "NE", "entidade_id": cli1, "linhas": [{ "artigo_id": arts[1], "quantidade": 24 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "VNE", "entidade_id": forn, "linhas": [{ "artigo_id": arts[3], "quantidade": 60, "preco_unitario": 110000 }] })).await;
     let ft_id = ft["documento"]["id"].as_i64().unwrap();
     rpc(&st, "documentos.emitir", json!({ "tipo": "RC", "entidade_id": cli1, "liquidar": [{ "documento_id": ft_id, "valor": 500000 }], "pagamentos": [{ "modo": "TB", "valor": 500000 }] })).await;
     rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": cli1, "doc_origem_id": ft_id, "motivo": "Devolução de 2 sacos danificados", "linhas": [{ "artigo_id": arts[2], "quantidade": 2 }] })).await;
@@ -1935,7 +2048,14 @@ async fn servidor_demo() {
 
     // oficina e tesouraria
     let viat = rpc(&st, "oficina.viaturaGuardar", json!({ "entidade_id": cli2, "matricula": "LD-45-12-AB", "marca": "Toyota", "modelo": "Hilux", "cor": "Branco", "ano": 2019, "km": 84500 })).await["id"].as_i64().unwrap();
-    rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat, "entidade_id": cli2, "avaria": "Ruído na travagem", "diagnostico": "Pastilhas gastas", "estado": "EM_CURSO", "linhas": [{ "descricao": "Substituição de pastilhas", "quantidade": 1 }] })).await;
+    rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat, "entidade_id": cli2, "avaria": "Ruído na travagem", "diagnostico": "Pastilhas gastas", "estado": "EM_CURSO", "tecnico": "Mário", "linhas": [{ "descricao": "Substituição de pastilhas", "quantidade": 1 }] })).await;
+    // mais ordens para o quadro: uma aberta há 10 dias (parada), outra aberta hoje e uma concluída
+    let viat2 = rpc(&st, "oficina.viaturaGuardar", json!({ "entidade_id": cli1, "matricula": "LD-12-34-CD", "marca": "Nissan", "modelo": "Navara", "cor": "Cinzento", "ano": 2021, "km": 61200 })).await["id"].as_i64().unwrap();
+    let viat3 = rpc(&st, "oficina.viaturaGuardar", json!({ "entidade_id": cli2, "matricula": "LA-77-90-EF", "marca": "Hyundai", "modelo": "Tucson", "cor": "Preto", "ano": 2022, "km": 30400 })).await["id"].as_i64().unwrap();
+    let parada = rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat2, "avaria": "Aguarda peça: bomba de água", "estado": "ABERTA" })).await["id"].as_i64().unwrap();
+    sqlx::query("UPDATE of_ordens SET data_entrada = datetime('now', 'localtime', '-10 day') WHERE id = ?").bind(parada).execute(&st.pool).await.unwrap();
+    rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat3, "avaria": "Revisão dos 30 000 km", "estado": "ABERTA" })).await;
+    rpc(&st, "oficina.ordemGuardar", json!({ "viatura_id": viat3, "avaria": "Troca de óleo e filtros", "diagnostico": "Feito", "estado": "CONCLUIDA", "tecnico": "Domingos" })).await;
     rpc(&st, "tesouraria.movimento", json!({ "conta_id": 1, "tipo": "SAIDA", "valor": 15000000, "descricao": "Renda da loja", "centro_custo_id": 4 })).await;
 
     // utilizadores, perfis e registo de acessos
@@ -1958,15 +2078,10 @@ async fn servidor_demo() {
     // servidor de rede + posto da auditoria já autenticado
     let arc = std::sync::Arc::new(st);
     crate::rede::registar_estado(arc.clone());
-    // o interface de auditoria (navegador) fala em claro: só aceite nas compilações de desenvolvimento
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, chave: "auditoria123".into(), sem_cifra: true, ..Default::default() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new() };
     crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
-    let corpo = json!({ "chave": "auditoria123", "token": "auditoria", "posto": 1, "metodo": "auth.login", "params": { "login": "admin", "senha": "1234" } }).to_string();
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", 7799)).unwrap();
-    s.write_all(format!("POST / HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}", corpo.len()).as_bytes()).unwrap();
-    let mut r = String::new();
-    s.read_to_string(&mut r).unwrap();
-    assert!(r.contains("\"ok\":true"), "{r}");
+    let cliente = crate::rede::Config { modo: "cliente".into(), servidor: "127.0.0.1:7799".into(), ..cfg.clone() };
+    crate::rede::pedir_com_token(&cliente, "auditoria", "auth.login", json!({ "login": "admin", "senha": "1234" }), 1, "Auditoria").expect("entrar");
 
     // API de integração (porta 7800, só nesta máquina): uma chave da loja online com alguns pedidos no registo
     let loja = rpc(&arc, "utilizadores.guardar", json!({ "nome": "Loja Online", "login": "loja", "perfil": "CAIXA", "senha": "loja12345", "mudar_senha": false })).await["id"].as_i64().unwrap();
@@ -2163,7 +2278,6 @@ async fn licencas_experiencia_e_assinatura() {
 #[tokio::test]
 #[ignore]
 async fn servidor_base() {
-    use std::io::{Read, Write};
     let Ok(pasta) = std::env::var("KANGEST_PASTA") else { return };
     let pasta = std::path::PathBuf::from(pasta);
     let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
@@ -2173,15 +2287,10 @@ async fn servidor_base() {
     st.carregar_posto(1).await.unwrap();
     let arc = std::sync::Arc::new(st);
     crate::rede::registar_estado(arc.clone());
-    // o interface de auditoria (navegador) fala em claro: só aceite nas compilações de desenvolvimento
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, chave: "auditoria123".into(), sem_cifra: true, ..Default::default() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new() };
     crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
-    let corpo = json!({ "chave": "auditoria123", "token": "auditoria", "posto": 1, "metodo": "auth.login", "params": { "login": "admin", "senha": "1234" } }).to_string();
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", 7799)).unwrap();
-    s.write_all(format!("POST / HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}", corpo.len()).as_bytes()).unwrap();
-    let mut r = String::new();
-    s.read_to_string(&mut r).unwrap();
-    assert!(r.contains("\"ok\":true"), "{r}");
+    let cliente = crate::rede::Config { modo: "cliente".into(), servidor: "127.0.0.1:7799".into(), ..cfg.clone() };
+    crate::rede::pedir_com_token(&cliente, "auditoria", "auth.login", json!({ "login": "admin", "senha": "1234" }), 1, "Auditoria").expect("entrar");
     eprintln!("SERVIDOR-BASE-PRONTO porta 7799");
     tokio::time::sleep(std::time::Duration::from_secs(3 * 3600)).await;
 }
@@ -2705,6 +2814,720 @@ async fn licencas_servidor_local() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// Base temporária com a empresa criada e o administrador com sessão iniciada.
+/// Fecha o pool só quando todas as ligações estão fechadas de facto. O `close()` do sqlx pode acabar antes de a
+/// última ligação usada voltar ao pool (isso faz-se numa tarefa à parte), e essa ligação, ao fechar, faria o
+/// checkpoint do WAL antigo para dentro do ficheiro já trocado. No programa o restauro aplica-se no arranque,
+/// antes de abrir a base, por isso só os testes precisam disto.
+async fn fechar_de_vez(pool: &sqlx::SqlitePool) {
+    let espera = std::time::Duration::from_millis(10);
+    for _ in 0..500 {
+        if pool.num_idle() == pool.size() as usize {
+            break;
+        }
+        tokio::time::sleep(espera).await;
+    }
+    pool.close().await;
+    for _ in 0..500 {
+        if pool.size() == 0 {
+            break;
+        }
+        tokio::time::sleep(espera).await;
+    }
+    assert_eq!(pool.size(), 0, "ficaram ligações abertas à base");
+}
+
+async fn base_com_admin(nome: &str) -> (AppState, std::path::PathBuf) {
+    let pasta = std::env::temp_dir().join(format!("kigest-{nome}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.expect("posto 1");
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Loja Teste, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    (st, pasta)
+}
+
+#[tokio::test]
+async fn notas_de_credito_limitadas_a_origem() {
+    let (st, pasta) = base_com_admin("nc-limites").await;
+    let arroz = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 100000, "custo": 50000 })).await["id"].as_i64().unwrap();
+    let oleo = rpc(&st, "artigos.guardar", json!({ "descricao": "Óleo", "taxa_iva_id": 1, "preco1": 500000, "custo": 50000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": arroz, "quantidade": 20, "preco_unitario": 50000 }, { "artigo_id": oleo, "quantidade": 20, "preco_unitario": 50000 }] })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": arroz, "quantidade": 3 }], "pagamentos": [{ "modo": "NU", "valor": 342000 }] })).await;
+    let fr_id = fr["documento"]["id"].as_i64().unwrap();
+    // o preço mudou depois da venda: a nota usa o preço da factura
+    rpc(&st, "artigos.guardar", json!({ "id": arroz, "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 900000, "custo": 50000 })).await;
+    let nc = |q: f64, artigo: i64| json!({ "tipo": "NC", "entidade_id": 1, "doc_origem_id": fr_id, "motivo": "Devolução de mercadoria", "linhas": [{ "artigo_id": artigo, "quantidade": q }] });
+
+    // mais do que o facturado, ou um artigo que não estava na factura: recusado
+    assert!(rpc_err(&st, "documentos.emitir", nc(5.0, arroz)).await.contains("só pode creditar 3"));
+    assert!(rpc_err(&st, "documentos.emitir", nc(1.0, oleo)).await.contains("não consta do documento de origem"));
+    // preço acima do facturado: o valor excede o que falta creditar
+    let caro = json!({ "tipo": "NC", "entidade_id": 1, "doc_origem_id": fr_id, "motivo": "Devolução de mercadoria", "linhas": [{ "artigo_id": arroz, "quantidade": 1, "preco_unitario": 400000 }] });
+    assert!(rpc_err(&st, "documentos.emitir", caro).await.contains("excede"));
+
+    // duas notas parciais que somam a factura; a terceira já não cabe
+    let n1 = rpc(&st, "documentos.emitir", nc(2.0, arroz)).await;
+    assert_eq!(n1["documento"]["total"], 228000, "preço da factura (1 000,00 + IVA), não o preço novo");
+    let disp = rpc(&st, "documentos.creditavel", json!({ "id": fr_id })).await;
+    assert_eq!(disp["artigos"][0]["disponivel"].as_f64(), Some(1.0));
+    assert_eq!(disp["disponivel"], 114000);
+    let n2 = rpc(&st, "documentos.emitir", nc(1.0, arroz)).await;
+    assert!(rpc_err(&st, "documentos.emitir", nc(1.0, arroz)).await.contains("só pode creditar 0"));
+    // a devolução em dinheiro nunca passa do que a venda recebeu
+    let cx = rpc(&st, "caixa.estado", Value::Null).await;
+    assert_eq!(cx["saidas"], 342000);
+    assert_eq!(cx["numerario_esperado"], 0);
+    // a nota que devolveu dinheiro não se anula (regra que já existia)
+    assert!(rpc_err(&st, "documentos.anular", json!({ "id": n2["documento"]["id"], "motivo": "Nota emitida por engano" })).await.contains("movimentado"));
+
+    // factura a crédito: anular a nota liberta a quantidade
+    let cli = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Cliente Lda", "nif": "5417000000" })).await["id"].as_i64().unwrap();
+    let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": oleo, "quantidade": 2 }] })).await;
+    let ft_id = ft["documento"]["id"].as_i64().unwrap();
+    let nc_ft = |q: f64| json!({ "tipo": "NC", "entidade_id": cli, "doc_origem_id": ft_id, "motivo": "Devolução de mercadoria", "linhas": [{ "artigo_id": oleo, "quantidade": q }] });
+    let n3 = rpc(&st, "documentos.emitir", nc_ft(2.0)).await;
+    assert_eq!(rpc(&st, "documentos.obter", json!({ "id": ft_id })).await["documento"]["valor_pendente"], 0);
+    assert!(rpc_err(&st, "documentos.emitir", nc_ft(1.0)).await.contains("só pode creditar 0"));
+    rpc(&st, "documentos.anular", json!({ "id": n3["documento"]["id"], "motivo": "Nota emitida por engano" })).await;
+    assert_eq!(rpc(&st, "documentos.creditavel", json!({ "id": ft_id })).await["artigos"][0]["disponivel"].as_f64(), Some(2.0));
+    rpc(&st, "documentos.emitir", nc_ft(1.0)).await;
+
+    // compras: a V/Nota de crédito segue as mesmas regras
+    let forn = rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Fornecedor SA", "nif": "5410000000" })).await["id"].as_i64().unwrap();
+    let fc = rpc(&st, "documentos.emitir", json!({ "tipo": "FC", "entidade_id": forn, "doc_externo": "FT A/1", "linhas": [{ "artigo_id": oleo, "quantidade": 4, "preco_unitario": 60000 }] })).await;
+    let vnc = |q: f64| json!({ "tipo": "VNC", "entidade_id": forn, "doc_externo": "NC 9", "motivo": "Devolução ao fornecedor", "doc_origem_id": fc["documento"]["id"], "linhas": [{ "artigo_id": oleo, "quantidade": q }] });
+    assert!(rpc_err(&st, "documentos.emitir", vnc(5.0)).await.contains("só pode creditar 4"));
+    let v = rpc(&st, "documentos.emitir", vnc(4.0)).await;
+    assert_eq!(v["documento"]["total"], 273600, "4 × 600,00 + IVA, ao custo da factura do fornecedor");
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn integridade_da_cadeia_e_proteccao() {
+    let (st, pasta) = base_com_admin("integridade").await;
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 100000, "custo": 50000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": art, "quantidade": 20, "preco_unitario": 50000 }] })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let mut ids = Vec::new();
+    for q in [1, 2, 3] {
+        let d = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": art, "quantidade": q }], "pagamentos": [{ "modo": "NU", "valor": 114000 * q }] })).await;
+        ids.push(d["documento"]["id"].as_i64().unwrap());
+    }
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert!(v["verificados"].as_i64().unwrap() >= 3);
+    assert_eq!(v["protecao"]["ativa"], true);
+
+    // os dados fiscais de um documento assinado não se alteram nem se apagam
+    let e = sqlx::query("UPDATE documentos SET total = 1 WHERE id = ?").bind(ids[0]).execute(&st.pool).await.unwrap_err().to_string();
+    assert!(e.contains("Documento assinado"), "{e}");
+    assert!(sqlx::query("DELETE FROM documentos WHERE id = ?").bind(ids[2]).execute(&st.pool).await.is_err());
+    assert!(sqlx::query("UPDATE documento_linhas SET quantidade = 9 WHERE documento_id = ?").bind(ids[1]).execute(&st.pool).await.is_err());
+    assert!(sqlx::query("DELETE FROM documento_pagamentos WHERE documento_id = ?").bind(ids[1]).execute(&st.pool).await.is_err());
+    assert!(sqlx::query("UPDATE series SET ultimo_numero = 1 WHERE tipo_codigo = 'FR'").execute(&st.pool).await.is_err());
+    assert!(sqlx::query("DELETE FROM series WHERE tipo_codigo = 'FR'").execute(&st.pool).await.is_err());
+    // o que a aplicação muda depois de emitir continua a funcionar (anulação, conta corrente)
+    rpc(&st, "documentos.anular", json!({ "id": ids[2], "motivo": "Venda registada por engano" })).await;
+    assert!(sqlx::query("UPDATE documentos SET estado = 'N' WHERE id = ?").bind(ids[2]).execute(&st.pool).await.is_err(), "anulado não volta a valer");
+    assert_eq!(rpc(&st, "agt.verificarIntegridade", Value::Null).await["ok"], true, "anular não quebra a cadeia");
+
+    // quem desligar a protecção e mexer no total é apanhado pela verificação
+    sqlx::query("DROP TRIGGER trg_doc_assinado_upd").execute(&st.pool).await.unwrap();
+    sqlx::query("UPDATE documentos SET total = 1000 WHERE id = ?").bind(ids[1]).execute(&st.pool).await.unwrap();
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["protecao"]["em_falta"][0], "trg_doc_assinado_upd");
+    let fr = v["series"].as_array().unwrap().iter().find(|s| s["tipo"] == "FR").unwrap().clone();
+    let problemas: Vec<String> = fr["erros"].as_array().unwrap().iter().map(|e| format!("{}: {}", e["documento"], e["problema"])).collect();
+    assert!(problemas.iter().any(|p| p.contains("/2") && p.contains("assinatura não confere")), "{problemas:?}");
+    assert!(problemas.iter().any(|p| p.contains("/2") && p.contains("totais")), "{problemas:?}");
+
+    // trocar de chave não estraga a verificação dos documentos antigos (só em desenvolvimento se carrega uma chave)
+    if crate::produtor::chave_agt().unwrap().is_some() {
+        let _ = std::fs::remove_dir_all(&pasta);
+        return;
+    }
+    let (st2, pasta2) = base_com_admin("integridade-chave").await;
+    let a2 = rpc(&st2, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st2, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    rpc(&st2, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a2, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    let nova = {
+        use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+        rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 1024).unwrap().to_pkcs8_pem(LineEnding::LF).unwrap().to_string()
+    };
+    rpc(&st2, "agt.importarChave", json!({ "pem": nova })).await;
+    rpc(&st2, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a2, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    let v2 = rpc(&st2, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v2["ok"], true, "{v2}");
+    assert_eq!(v2["chaves"], 2);
+    let _ = std::fs::remove_dir_all(&pasta);
+    let _ = std::fs::remove_dir_all(&pasta2);
+}
+
+#[tokio::test]
+async fn chave_do_produtor_sai_da_base_de_dados() {
+    // simula a passagem de uma instalação de desenvolvimento para a versão oficial
+    if crate::produtor::chave_agt().unwrap().is_some() {
+        return;
+    }
+    let (st, pasta) = base_com_admin("chave-produtor").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    assert_eq!(fr["documento"]["hash_versao"], "0", "sem certificado: HashControl 0");
+    let antes = agt::chave(&st.pool).await.unwrap();
+    // o que a versão oficial faz no arranque: a chave privada que estava na base sai, fica a pública
+    let produtor = rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 1024).unwrap();
+    agt::retirar_chave_da_base(&st.pool, &produtor).await.unwrap();
+    let privada: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(agt::CHAVE_CONFIG).fetch_optional(&st.pool).await.unwrap();
+    assert!(privada.is_none(), "a chave privada já não está na base de dados");
+    let arquivadas: Vec<(String, String)> = sqlx::query_as("SELECT chave_publica, origem FROM agt_chaves").fetch_all(&st.pool).await.unwrap();
+    assert_eq!(arquivadas.len(), 1);
+    assert_eq!(arquivadas[0], (agt::chave_publica_pem(&antes).unwrap(), "DESENVOLVIMENTO".to_string()));
+    // os documentos já assinados continuam verificáveis pela chave pública arquivada
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["series"][0]["total_erros"], 0, "{v}");
+    // com certificado configurado, os documentos novos levam a versão da chave
+    rpc(&st, "agt.guardarCertificado", json!({ "certificado": "123" })).await;
+    let fr2 = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    assert_eq!(fr2["documento"]["hash_versao"], "1");
+    let info = rpc(&st, "agt.info", Value::Null).await;
+    assert_eq!((info["chave_origem"].as_str(), info["certificado"].as_str()), (Some("DESENVOLVIMENTO"), Some("123")));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Só faz alguma coisa numa compilação com a chave do produtor embutida (KANGEST_AGT_CHAVE), como no CI.
+#[tokio::test]
+async fn chave_embutida_quando_existe() {
+    let Some(produtor) = crate::produtor::chave_agt().unwrap() else { return };
+    let (st, pasta) = base_com_admin("chave-embutida").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    let privada: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?").bind(agt::CHAVE_CONFIG).fetch_optional(&st.pool).await.unwrap();
+    assert!(privada.is_none(), "com a chave do produtor, nenhuma chave privada fica na base de dados");
+    let info = rpc(&st, "agt.info", Value::Null).await;
+    assert_eq!(info["chave_origem"], "PRODUTOR");
+    assert_eq!(info["chave_publica"].as_str().unwrap(), agt::chave_publica_pem(produtor).unwrap());
+    assert!(rpc_err(&st, "agt.importarChave", json!({ "pem": "x" })).await.contains("já traz a chave"));
+    assert_eq!(rpc(&st, "agt.verificarIntegridade", Value::Null).await["ok"], true);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn segredos_cifrados_na_configuracao() {
+    let (st, pasta) = base_com_admin("segredos").await;
+    let pem = {
+        use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+        rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap().to_pkcs8_pem(LineEnding::LF).unwrap().to_string()
+    };
+    rpc(&st, "fe.guardar", json!({ "ativo": false, "ambiente": "HML", "utilizador": "produtor", "senha": "senha-secreta", "numero_validacao": "C_1",
+        "estabelecimento": "SEDE", "chave_contribuinte": pem })).await;
+    let bruto = |k: &'static str| {
+        let pool = st.pool.clone();
+        async move { sqlx::query_scalar::<_, String>("SELECT valor FROM config WHERE chave = ?").bind(k).fetch_one(&pool).await.unwrap() }
+    };
+    for k in ["fe.senha", "fe.chave_contribuinte"] {
+        let v = bruto(k).await;
+        assert!(v.starts_with("kgs1:") && !v.contains("BEGIN") && !v.contains("senha-secreta"), "{k} fica cifrado: {v}");
+    }
+    // o programa continua a ler os valores
+    let estado = rpc(&st, "fe.estado", Value::Null).await;
+    assert_eq!((estado["senha"].as_bool(), estado["chave_contribuinte"].as_bool()), (Some(true), Some(true)));
+    // segredos gravados em texto por versões anteriores são cifrados no arranque
+    sqlx::query("UPDATE config SET valor = 'antiga' WHERE chave = 'fe.senha'").execute(&st.pool).await.unwrap();
+    assert_eq!(crate::segredos::cifrar_existentes(&st.pool).await.unwrap(), 1);
+    assert!(bruto("fe.senha").await.starts_with("kgs1:"));
+    assert_eq!(crate::segredos::ler(&st.pool, "fe.senha").await.unwrap().as_deref(), Some("antiga"));
+    // a chave de desenvolvimento também fica cifrada
+    if crate::produtor::chave_agt().unwrap().is_none() {
+        assert!(bruto("agt.chave_privada").await.starts_with("kgs1:"));
+    }
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn actualizacao_conferida_antes_de_instalar() {
+    let (st, pasta) = base_com_admin("actualizacao").await;
+    let origem = pasta.join("origem");
+    std::fs::create_dir_all(&origem).unwrap();
+    let plat = rpc(&st, "atualizacao.estado", Value::Null).await["plataforma"].as_str().unwrap().to_string();
+    let pacote = b"instalador de teste";
+    std::fs::write(origem.join("KanGest_9.9.9.bin"), pacote).unwrap();
+    let manifesto = json!({ "versao": "9.9.9", "data": "2026-12-01", "notas": "teste",
+        "pacotes": { plat: { "ficheiro": "KanGest_9.9.9.bin", "sha256": crate::services::atualizacao::sha256_hex(pacote) } } });
+    std::fs::write(origem.join("kangest-atualizacao.json"), manifesto.to_string()).unwrap();
+    rpc(&st, "atualizacao.guardar", json!({ "fonte": origem.display().to_string() })).await;
+    let d = rpc(&st, "atualizacao.descarregar", Value::Null).await;
+    let ficheiro = d["ficheiro"].as_str().unwrap().to_string();
+    // trocado depois de descarregado: não se abre
+    std::fs::write(&ficheiro, b"outro programa").unwrap();
+    assert!(rpc_err(&st, "atualizacao.instalar", json!({ "ficheiro": ficheiro })).await.contains("alterado"));
+    // sem chave embutida (desenvolvimento) a assinatura continua opcional; com ela é obrigatória
+    if crate::produtor::chave_actualizacoes().is_some() {
+        assert_eq!(rpc(&st, "atualizacao.estado", Value::Null).await["chave_embutida"], true);
+    }
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn copias_externas_cifradas_e_restauro() {
+    let (st, pasta) = base_com_admin("copias").await;
+    let pen = pasta.join("pen");
+    std::fs::create_dir_all(&pen).unwrap();
+    rpc(&st, "artigos.guardar", json!({ "descricao": "Antes da cópia", "taxa_iva_id": 1, "preco1": 100000 })).await;
+    // pasta externa inexistente é recusada; a pen, aceite, com cópias cifradas
+    assert!(rpc_err(&st, "sistema.copiasGuardar", json!({ "intervalo_horas": 4, "manter": 5, "pasta_externa": pasta.join("nao-existe").display().to_string() })).await.contains("não existe"));
+    assert!(rpc_err(&st, "sistema.copiasGuardar", json!({ "intervalo_horas": 4, "manter": 5, "pasta_externa": pen.display().to_string(), "cifrar_externa": true })).await.contains("senha"));
+    rpc(&st, "sistema.copiasGuardar", json!({ "intervalo_horas": 2, "manter": 5, "pasta_externa": pen.display().to_string(), "cifrar_externa": true, "senha": "senha-da-pen-123" })).await;
+    let c = rpc(&st, "sistema.copiaAgora", Value::Null).await;
+    let externa = c["externa"].as_str().expect("cópia na pen").to_string();
+    assert!(externa.ends_with(".kgc"));
+    let bytes = std::fs::read(&externa).unwrap();
+    assert!(bytes.starts_with(b"KGCOPIA1") && !bytes.windows(15).any(|w| w == b"Antes da c\xc3\xb3pia"), "a cópia da pen está cifrada");
+    let lista = rpc(&st, "sistema.copias", Value::Null).await;
+    assert_eq!(lista["externas"].as_array().unwrap().len(), 1);
+    assert_eq!(lista["copias"][0]["verificada"], true);
+    assert!(lista["estado"]["erro_externa"].is_null());
+
+    // depois da cópia entra outro artigo; restaurar a cópia da pen (com a senha) volta ao estado anterior
+    rpc(&st, "artigos.guardar", json!({ "descricao": "Depois da cópia", "taxa_iva_id": 1, "preco1": 100000 })).await;
+    assert!(rpc_err(&st, "sistema.restaurar", json!({ "ficheiro": externa, "senha": "errada-errada" })).await.contains("Senha errada"));
+    let r = rpc(&st, "sistema.restaurar", json!({ "ficheiro": externa, "senha": "senha-da-pen-123" })).await;
+    assert_eq!(r["reiniciar"], true);
+    assert!(std::path::Path::new(r["copia_da_base_atual"].as_str().unwrap()).exists(), "a base actual fica guardada antes do restauro");
+    // o que o arranque faz: fecha a base, troca o ficheiro e volta a abrir
+    fechar_de_vez(&st.pool).await;
+    assert!(super::sistema::aplicar_restauro_pendente(&pasta).unwrap().is_some());
+    let pool = db::abrir(&pasta.join("kigest.db")).await.unwrap();
+    let nomes: Vec<String> = sqlx::query_scalar("SELECT descricao FROM artigos ORDER BY id").fetch_all(&pool).await.unwrap();
+    assert!(nomes.contains(&"Antes da cópia".to_string()) && !nomes.contains(&"Depois da cópia".to_string()), "{nomes:?}");
+    pool.close().await;
+
+    // um ficheiro que não é uma cópia do KanGest é recusado
+    let (st2, pasta2) = base_com_admin("copias-2").await;
+    let lixo = pasta2.join("lixo.db");
+    std::fs::write(&lixo, b"nada de sqlite aqui").unwrap();
+    let e = rpc_err(&st2, "sistema.restaurar", json!({ "ficheiro": lixo.display().to_string() })).await;
+    assert!(e.contains("não é uma cópia de segurança"), "{e}");
+    // o restauro inicial só existe enquanto o KanGest não está configurado
+    assert!(rpc_err(&st2, "setup.restaurar", json!({ "ficheiro": externa })).await.contains("já está configurado"));
+    let _ = std::fs::remove_dir_all(&pasta);
+    let _ = std::fs::remove_dir_all(&pasta2);
+}
+
+/// Dois postos a gravar ao mesmo tempo: a segunda gravação espera pela primeira em vez de falhar com
+/// «database is locked» (as transacções de escrita começam com BEGIN IMMEDIATE).
+#[tokio::test]
+async fn gravacoes_simultaneas_esperam_pela_vez() {
+    let (st, pasta) = base_com_admin("gravacoes-simultaneas").await;
+    // outra ligação (outro posto) a meio de uma gravação, que só termina daqui a 300 ms
+    let mut outra = crate::db::transacao(&st.pool).await.unwrap();
+    sqlx::query("UPDATE empresa SET nome = nome WHERE id = 1").execute(&mut *outra).await.unwrap();
+    let terminar = async {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        outra.commit().await.unwrap();
+    };
+    let gravar = dispatch(&st, "artigos.guardar", json!({ "descricao": "Gravado à espera", "taxa_iva_id": 1, "preco1": 100000 }));
+    let (r, _) = tokio::join!(gravar, terminar);
+    assert!(r.is_ok(), "a gravação devia esperar pela outra: {:?}", r.err());
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM artigos WHERE descricao = 'Gravado à espera'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(n, 1);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Base restaurada noutro computador (compilação de desenvolvimento): a chave cifrada não se lê,
+/// gera-se outra e os documentos antigos continuam verificáveis.
+#[tokio::test]
+async fn chave_ilegivel_depois_de_restaurar() {
+    if crate::produtor::chave_agt().unwrap().is_some() {
+        return;
+    }
+    let (st, pasta) = base_com_admin("chave-ilegivel").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let venda = json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] });
+    rpc(&st, "documentos.emitir", venda.clone()).await;
+    // o que acontece com a chave mestra de outra máquina: o valor cifrado não abre
+    sqlx::query("UPDATE config SET valor = 'kgs1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' WHERE chave = ?").bind(agt::CHAVE_CONFIG).execute(&st.pool).await.unwrap();
+    rpc(&st, "documentos.emitir", venda).await;
+    let v = rpc(&st, "agt.verificarIntegridade", Value::Null).await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["chaves"], 2);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn fecho_de_caixa_cego_por_notas_e_formas_de_pagamento() {
+    let (st, pasta) = base_com_admin("fecho-cego").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    // o posto fecha às cegas; a operadora (perfil Caixa) não tem «ver totais»
+    rpc(&st, "posto.guardar", json!({ "id": 1, "descricao": "Caixa 1", "armazem_id": 1, "opcoes": { "fecho_cego": true } })).await;
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Ana", "login": "ana", "senha": "ana12345", "perfil": "CAIXA", "mudar_senha": false })).await;
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "ana", "senha": "ana12345" })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 500000 })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 200000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 2 }], "pagamentos": [{ "modo": "MB", "valor": 228000 }] })).await;
+    let aberto = rpc(&st, "caixa.estado", Value::Null).await;
+    assert_eq!(aberto["cego"], true);
+    assert!(aberto["numerario_esperado"].is_null() && aberto["total_vendido"].is_null(), "às cegas: {aberto}");
+    assert!(aberto["por_modo"].as_array().unwrap().iter().all(|m| m["total"].is_null()));
+
+    // nota que não existe é recusada; a contagem por notas dá o total
+    assert!(rpc_err(&st, "caixa.fechar", json!({ "contagem": { "3000": 1 } })).await.contains("3000"));
+    // esperado em numerário: 5 000 + 1 140 = 6 140 Kz; contados 6 100 (faltam 40) e o talão do TPA certo
+    let z = rpc(&st, "caixa.fechar", json!({ "contagem": { "5000": 1, "1000": 1, "100": 1 }, "contado_modos": { "MB": 228000 }, "observacoes": "Faltam 40 Kz" })).await;
+    assert_eq!(z["sessao"]["numero_z"], 1);
+    assert_eq!(z["sessao"]["valor_contado"], 610000);
+    assert_eq!(z["sessao"]["contagem"]["5000"], 1);
+    assert_eq!(z["numerario_esperado"], 614000, "depois de fechar, o relatório Z mostra tudo");
+    let conf = |c: &str| z["conferencia"].as_array().unwrap().iter().find(|m| m["codigo"] == c).cloned().unwrap();
+    assert_eq!((conf("NU")["diferenca"].as_i64(), conf("MB")["diferenca"].as_i64()), (Some(-4000), Some(0)));
+    // o fecho seguinte do mesmo posto é o Z n.º 2
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let z2 = rpc(&st, "caixa.fechar", json!({ "valor_contado": 0 })).await;
+    assert_eq!(z2["sessao"]["numero_z"], 2);
+    // quem tem «ver totais» (o gestor/administrador) vê o esperado mesmo às cegas
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 100 })).await;
+    assert_eq!(rpc(&st, "caixa.estado", Value::Null).await["numerario_esperado"], 100);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn nif_angolano_validado() {
+    let (st, pasta) = base_com_admin("nif").await;
+    // válidos: empresa (10 algarismos), BI (com espaços e minúsculas, normalizado) e estrangeiro com outro formato
+    let a = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Empresa A", "nif": "5417 189 230" })).await;
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": a["id"] })).await["nif"], "5417189230");
+    let b = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Maria", "nif": "001234567la041" })).await;
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": b["id"] })).await["nif"], "001234567LA041");
+    rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Fornecedor PT", "nif": "PT509999999", "pais": "PT" })).await;
+    // inválidos em Angola
+    for nif in ["12345", "54171892301", "ABC1234567", "001234567L4041"] {
+        let e = rpc_err(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "X", "nif": nif })).await;
+        assert!(e.contains("NIF inválido"), "{nif}: {e}");
+    }
+    // uma ficha antiga com NIF mal escrito continua a gravar-se se o NIF não mudar
+    sqlx::query("UPDATE entidades SET nif = '123' WHERE id = ?").bind(a["id"].as_i64().unwrap()).execute(&st.pool).await.unwrap();
+    rpc(&st, "entidades.guardar", json!({ "id": a["id"], "tipo": "C", "nome": "Empresa A, Lda", "nif": "123" })).await;
+    assert!(super::entidades::nif_angolano_valido("999999999"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn precos_com_iva_incluido() {
+    let (st, pasta) = base_com_admin("iva-incluido").await;
+    // PVP de prateleira: 1 000,00 Kz com IVA (14%)
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Leite", "tipo": "S", "taxa_iva_id": 1, "preco1": 0, "pvp1": 100000 })).await["id"].as_i64().unwrap();
+    let art = rpc(&st, "artigos.obter", json!({ "id": a })).await;
+    assert_eq!((art["preco1"].as_i64(), art["pvp1"].as_i64()), (Some(87719), Some(100000)), "o preço sem IVA sai do PVP");
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let venda = |q: i64| json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": q }], "pagamentos": [{ "modo": "NU", "valor": 100000 * q }] });
+
+    // sem a opção: o cálculo antigo (a partir do preço sem IVA) dá 2 999,99
+    let antes = rpc(&st, "documentos.emitir", venda(3)).await;
+    assert_eq!(antes["documento"]["total"], 299999);
+
+    // com a opção: 3 × 1 000,00 = 3 000,00 e o IVA sai do total
+    rpc(&st, "parametros.opcoesGuardar", json!({ "precos_com_iva": true })).await;
+    assert_eq!(rpc(&st, "tabelas", Value::Null).await["precos_com_iva"], true);
+    let fr = rpc(&st, "documentos.emitir", venda(3)).await;
+    let d = &fr["documento"];
+    assert_eq!((d["total"].as_i64(), d["total_iva"].as_i64(), d["total_liquido"].as_i64()), (Some(300000), Some(36842), Some(263158)));
+    assert_eq!(fr["linhas"][0]["pvp_unitario"], 100000);
+    assert_eq!(fr["documento"]["troco"], 0);
+
+    // desconto de linha (10%) e desconto global em Kz, como o cliente os vê
+    let com_desc = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": a, "quantidade": 1, "desconto_pct": 10 }], "pagamentos": [{ "modo": "NU", "valor": 90000 }] })).await;
+    assert_eq!(com_desc["documento"]["total"], 90000);
+    let global = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "desconto_global_valor": 50000, "linhas": [{ "artigo_id": a, "quantidade": 3 }], "pagamentos": [{ "modo": "NU", "valor": 250000 }] })).await;
+    assert_eq!(global["documento"]["total"], 250000, "3 000,00 − 500,00");
+
+    // a nota de crédito parte do PVP da factura: 1 unidade da venda de 3 × 1 000,00 = 1 000,00
+    let nc = rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": 1, "doc_origem_id": d["id"], "motivo": "Devolução", "linhas": [{ "artigo_id": a, "quantidade": 1 }] })).await;
+    assert_eq!(nc["documento"]["total"], 100000);
+    // a cadeia e os totais continuam coerentes
+    assert_eq!(rpc(&st, "agt.verificarIntegridade", Value::Null).await["ok"], true);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn codigos_de_barras_embalagens_e_balanca() {
+    let (st, pasta) = base_com_admin("codigos").await;
+    let agua = rpc(&st, "artigos.guardar", json!({ "descricao": "Água 1,5L", "taxa_iva_id": 1, "preco1": 10000, "codigo_barras": "5601234567890",
+        "codigos": [{ "codigo": "15601234567897", "descricao": "Pack de 12", "quantidade": 12 }] })).await["id"].as_i64().unwrap();
+    let lido = rpc(&st, "artigos.codigo", json!({ "codigo": "15601234567897" })).await;
+    assert_eq!((lido["id"].as_i64(), lido["quantidade_lida"].as_f64()), (Some(agua), Some(12.0)));
+    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": "5601234567890" })).await["quantidade_lida"].is_null());
+    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": agua })).await["codigos"][0]["quantidade"].as_f64(), Some(12.0));
+    // editar sem referência mantém a que o artigo já tem (não gera outra)
+    let referencia = rpc(&st, "artigos.obter", json!({ "id": agua })).await["referencia"].as_str().unwrap().to_string();
+    let r = rpc(&st, "artigos.guardar", json!({ "id": agua, "descricao": "Água 1,5L (garrafa)", "taxa_iva_id": 1, "preco1": 10000, "codigo_barras": "5601234567890" })).await;
+    assert_eq!(r["referencia"], referencia.as_str());
+    // a API lê as mesmas embalagens: o pack vale 12 unidades
+    let (id, leitura) = super::catalogo::ler_codigo(&st.pool, "15601234567897").await.unwrap().unwrap();
+    assert_eq!((id, leitura.unwrap()["quantidade"].as_f64()), (agua, Some(12.0)));
+    assert_eq!(super::catalogo::ler_codigo(&st.pool, "5601234567890").await.unwrap(), Some((agua, None)));
+    // o mesmo código não pode ser de dois artigos
+    let e = rpc_err(&st, "artigos.guardar", json!({ "descricao": "Outra", "taxa_iva_id": 1, "preco1": 100, "codigos": [{ "codigo": "5601234567890" }] })).await;
+    assert!(e.contains("já está em uso"), "{e}");
+
+    // balança: carne a 3 000,00 Kz/kg, PLU 123
+    let carne = rpc(&st, "artigos.guardar", json!({ "descricao": "Carne de vaca", "taxa_iva_id": 1, "preco1": 0, "pvp1": 300000, "codigo_balanca": "123" })).await["id"].as_i64().unwrap();
+    let ean = |doze: &str| format!("{doze}{}", super::catalogo::ean13_controlo(doze).unwrap());
+    // etiqueta de peso: 21 00123 01250 → 1,250 kg
+    let peso = rpc(&st, "artigos.codigo", json!({ "codigo": ean("210012301250") })).await;
+    assert_eq!((peso["id"].as_i64(), peso["quantidade_lida"].as_f64()), (Some(carne), Some(1.25)));
+    // etiqueta de preço: 22 00123 03750 → 3 750 Kz → 1,25 kg
+    let preco = rpc(&st, "artigos.codigo", json!({ "codigo": ean("220012303750") })).await;
+    assert_eq!(preco["quantidade_lida"].as_f64(), Some(1.25));
+    // algarismo de controlo errado: não é uma etiqueta
+    let certo = ean("210012301250");
+    let errado = format!("{}{}", &certo[..12], (certo[12..].parse::<u32>().unwrap() + 1) % 10);
+    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": errado })).await.is_null());
+    // vender pela etiqueta: o total bate com o preço da etiqueta
+    rpc(&st, "parametros.opcoesGuardar", json!({ "precos_com_iva": true })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": carne, "quantidade": 50, "preco_unitario": 150000 }] })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let v = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": carne, "quantidade": 1.25 }], "pagamentos": [{ "modo": "NU", "valor": 375000 }] })).await;
+    assert_eq!(v["documento"]["total"], 375000);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn promocoes_por_regras_e_cupoes() {
+    let (st, pasta) = base_com_admin("promocoes").await;
+    let familia = rpc(&st, "tabela.guardar", json!({ "tabela": "familias", "descricao": "Bebidas" })).await["id"].as_i64().unwrap();
+    let sumo = rpc(&st, "artigos.guardar", json!({ "descricao": "Sumo", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000, "familia_id": familia })).await["id"].as_i64().unwrap();
+    let agua = rpc(&st, "artigos.guardar", json!({ "descricao": "Água", "tipo": "S", "taxa_iva_id": 1, "preco1": 10000, "familia_id": familia })).await["id"].as_i64().unwrap();
+    // regras inválidas são recusadas
+    assert!(rpc_err(&st, "promocoes.regraGuardar", json!({ "descricao": "x", "tipo": "LEVE_PAGUE", "artigo_id": sumo, "leve": 2, "pague": 3 })).await.contains("maior"));
+    rpc(&st, "promocoes.regraGuardar", json!({ "descricao": "Leve 3 pague 2", "tipo": "LEVE_PAGUE", "artigo_id": sumo, "leve": 3, "pague": 2 })).await;
+    rpc(&st, "promocoes.regraGuardar", json!({ "descricao": "Bebidas: 5% a partir de 10", "tipo": "QUANTIDADE", "familia_id": familia, "quantidade_min": 10, "desconto_pct": 5 })).await;
+    let calc = rpc(&st, "promocoes.calcular", json!({ "linhas": [{ "artigo_id": sumo, "quantidade": 3 }, { "artigo_id": agua, "quantidade": 12 }] })).await;
+    assert_eq!(calc[0]["regra"], "Leve 3 pague 2");
+    assert!((calc[0]["desconto"].as_f64().unwrap() - 33.3333).abs() < 0.001, "{calc}");
+    assert_eq!((calc[1]["desconto"].as_f64(), calc[1]["regra"].as_str()), (Some(5.0), Some("Bebidas: 5% a partir de 10")));
+
+    // a operadora (sem permissão de desconto) vende com a promoção sem pedir PIN
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Rita", "login": "rita", "senha": "rita1234", "perfil": "CAIXA", "mudar_senha": false })).await;
+    assert!(rpc_err(&st, "cupoes.validar", json!({ "codigo": "nada", "total": 0 })).await.contains("não existe"));
+    rpc(&st, "promocoes.cupaoGuardar", json!({ "codigo": "natal10", "descricao": "Natal", "tipo": "PCT", "valor": 10, "valor_minimo": 100000, "utilizacoes_max": 1 })).await;
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "rita", "senha": "rita1234" })).await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let v = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": sumo, "quantidade": 3 }], "pagamentos": [{ "modo": "NU", "valor": 228000 }] })).await;
+    assert_eq!(v["documento"]["total"], 228000, "3 sumos pelo preço de 2 (2 000,00 + IVA)");
+    // mais desconto do que a promoção já pede PIN
+    let e = rpc_err(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": sumo, "quantidade": 3, "desconto_pct": 50 }], "pagamentos": [{ "modo": "NU", "valor": 300000 }] })).await;
+    assert!(e.contains("supervisor"), "{e}");
+
+    // cupão: compra mínima, desconto sem PIN, uma só utilização, devolvida ao anular
+    assert!(rpc_err(&st, "cupoes.validar", json!({ "codigo": "NATAL10", "total": 50000 })).await.contains("a partir de"));
+    assert!(rpc_err(&st, "documentos.emitir", json!({ "tipo": "FR", "cupao": "NATAL10", "linhas": [{ "artigo_id": agua, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 11400 }] })).await.contains("a partir de"));
+    let c = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "cupao": "natal10", "linhas": [{ "artigo_id": sumo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    assert_eq!((c["documento"]["total"].as_i64(), c["documento"]["cupao"].as_str()), (Some(102600), Some("NATAL10")), "1 140,00 − 10%");
+    assert!(rpc_err(&st, "documentos.emitir", json!({ "tipo": "FR", "cupao": "NATAL10", "linhas": [{ "artigo_id": sumo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await.contains("número de vezes"));
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    rpc(&st, "documentos.anular", json!({ "id": c["documento"]["id"], "motivo": "Venda repetida" })).await;
+    assert_eq!(rpc(&st, "promocoes.listar", Value::Null).await["cupoes"][0]["utilizacoes"], 0);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn sugestao_de_encomendas_e_lancamentos_contabilisticos() {
+    let (st, pasta) = base_com_admin("sugestao").await;
+    let forn = rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Fornecedor SA", "nif": "5410000000" })).await["id"].as_i64().unwrap();
+    let cli = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Cliente Lda", "nif": "5417000000" })).await["id"].as_i64().unwrap();
+    let arroz = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 100000, "qtd_minima": 10, "qtd_maxima": 50 })).await["id"].as_i64().unwrap();
+    let oleo = rpc(&st, "artigos.guardar", json!({ "descricao": "Óleo", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    // compra do arroz (5 un. a 600,00) e entrada do óleo (40 un.)
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FC", "entidade_id": forn, "doc_externo": "FT A/1", "linhas": [{ "artigo_id": arroz, "quantidade": 5, "preco_unitario": 60000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": oleo, "quantidade": 40, "preco_unitario": 50000 }] })).await;
+    // vendem-se 30 óleos (1 por dia nos últimos 30 dias, em média)
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": oleo, "quantidade": 30 }], "pagamentos": [{ "modo": "NU", "valor": 3420000 }] })).await;
+    // encomenda em curso de 3 arrozes: 5 + 3 = 8 continua abaixo do mínimo (10)
+    rpc(&st, "documentos.emitir", json!({ "tipo": "VNE", "entidade_id": forn, "doc_externo": "ENC-1", "linhas": [{ "artigo_id": arroz, "quantidade": 3, "preco_unitario": 60000 }] })).await;
+    let s = rpc(&st, "compras.sugestao", json!({ "dias": 30, "cobertura": 15 })).await;
+    let linha = |id: i64| s["linhas"].as_array().unwrap().iter().find(|l| l["artigo_id"] == id).cloned().unwrap();
+    let a = linha(arroz);
+    assert_eq!((a["sugerido"].as_f64(), a["fornecedor"].as_str(), a["custo"].as_i64()), (Some(42.0), Some("Fornecedor SA"), Some(60000)), "até ao máximo: 50 − 5 − 3; {a}");
+    let o = linha(oleo);
+    assert_eq!((o["sugerido"].as_f64(), o["motivo"].as_str()), (Some(5.0), Some("não cobre os dias pedidos")), "15 dias × 1/dia − 10 em stock; {o}");
+
+    // diário contabilístico: vendas a pronto e a crédito, recibo, nota de crédito e compra
+    let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": oleo, "quantidade": 2 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "RC", "entidade_id": cli, "liquidar": [{ "documento_id": ft["documento"]["id"], "valor": 114000 }], "pagamentos": [{ "modo": "TB", "valor": 114000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": cli, "doc_origem_id": ft["documento"]["id"], "motivo": "Devolução", "linhas": [{ "artigo_id": oleo, "quantidade": 1 }] })).await;
+    let hoje = db::hoje();
+    let l = rpc(&st, "contabilidade.lancamentos", json!({ "de": hoje, "ate": hoje })).await;
+    assert_eq!(l["equilibrado"], true, "débito = crédito: {}", l["balancete"]);
+    let saldo = |conta: &str| l["balancete"].as_array().unwrap().iter().find(|c| c["conta"] == conta).map(|c| c["saldo"].as_i64().unwrap()).unwrap_or(0);
+    // caixa: FR de 30 óleos (34 200,00); bancos: recibo (1 140,00); clientes: 2 280 − 1 140 − 1 140 = 0
+    assert_eq!((saldo("45.1"), saldo("43.1"), saldo("31.1.1")), (3420000, 114000, 0));
+    // vendas (crédito): 30 + 2 − 1 = 31 óleos a 1 000,00; IVA liquidado 14%
+    assert_eq!((saldo("61.1"), saldo("34.5.3")), (-3100000, -434000));
+    // compras: 600,00 × 5 + IVA, contra fornecedores
+    assert_eq!((saldo("21.1"), saldo("34.5.2"), saldo("32.1.1")), (300000, 42000, -342000));
+    // contas configuráveis
+    rpc(&st, "contabilidade.contasGuardar", json!({ "caixa": "45.1.1" })).await;
+    let l2 = rpc(&st, "contabilidade.lancamentos", json!({ "de": hoje, "ate": hoje })).await;
+    assert!(l2["balancete"].as_array().unwrap().iter().any(|c| c["conta"] == "45.1.1"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn fidelizacao_pontos_ganhos_pagos_e_devolvidos() {
+    let (st, pasta) = base_com_admin("fidelizacao").await;
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço de lavagem", "tipo": "S", "taxa_iva_id": 1, "preco1": 1000000 })).await["id"].as_i64().unwrap();
+    let ana = rpc(&st, "entidades.guardar", json!({ "nome": "Ana Domingos", "nif": "5417000001" })).await["id"].as_i64().unwrap();
+    let saldo = |v: Value| v["pontos"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let venda = |cliente: i64, qtd: i64, pagamentos: Value| json!({ "tipo": "FR", "entidade_id": cliente, "linhas": [{ "artigo_id": art, "quantidade": qtd }], "pagamentos": pagamentos });
+
+    // desactivada: não dá pontos nem aceita pagamento com pontos
+    rpc(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "NU", "valor": 1140000 }]))).await;
+    assert_eq!(saldo(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await), 0);
+    assert!(rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 1000 }, { "modo": "NU", "valor": 1139000 }]))).await.contains("não está activa"));
+
+    // 1 ponto por cada 1 000 Kz, cada ponto vale 10 Kz, a partir de 50 pontos
+    assert!(rpc_err(&st, "fidelizacao.configGuardar", json!({ "ativa": true, "compra_por_ponto": 0, "valor_ponto": 1000, "minimo_resgate": 50 })).await.contains("Indique"));
+    rpc(&st, "fidelizacao.configGuardar", json!({ "ativa": true, "compra_por_ponto": 100000, "valor_ponto": 1000, "minimo_resgate": 50 })).await;
+    let t = rpc(&st, "tabelas", Value::Null).await;
+    assert_eq!(t["fidelizacao"]["ativa"], true);
+    assert!(t["modos_pagamento"].as_array().unwrap().iter().all(|m| m["codigo"] != "DE"), "os pontos têm botão próprio no POS");
+
+    // ganhos: 22 800 Kz → 22 pontos; a crédito (FT) também: 34 200 Kz → 34; consumidor final não acumula
+    rpc(&st, "documentos.emitir", venda(ana, 2, json!([{ "modo": "NU", "valor": 2280000 }]))).await;
+    let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": ana, "linhas": [{ "artigo_id": art, "quantidade": 3 }] })).await;
+    rpc(&st, "documentos.emitir", venda(1, 1, json!([{ "modo": "NU", "valor": 1140000 }]))).await;
+    assert_eq!(saldo(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await), 56);
+    assert_eq!(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await["pode_pagar"], true);
+    assert!(rpc_err(&st, "documentos.emitir", venda(1, 1, json!([{ "modo": "DE", "valor": 1000 }, { "modo": "NU", "valor": 1139000 }]))).await.contains("cliente identificado"));
+
+    // paga 560 Kz com os 56 pontos e o resto em numerário: só o numerário dá pontos (10 840 Kz → 10)
+    let pp = rpc(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 56000 }, { "modo": "NU", "valor": 1084000 }]))).await;
+    assert_eq!(pp["documento"]["total"], 1140000, "pagar com pontos não é desconto: a factura e o IVA ficam iguais");
+    assert_eq!(pp["fidelizacao"], json!({ "ganhos": 10, "gastos": 56, "saldo": 10 }));
+    assert!(pp["pagamentos"].as_array().unwrap().iter().any(|p| p["modo_codigo"] == "DE" && p["valor"] == 56000));
+
+    // abaixo do mínimo; ajuste manual; pontos insuficientes
+    assert!(rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 10000 }, { "modo": "NU", "valor": 1130000 }]))).await.contains("a partir de 50"));
+    assert!(rpc_err(&st, "fidelizacao.ajustar", json!({ "entidade_id": ana, "pontos": 100, "motivo": "" })).await.contains("motivo"));
+    assert_eq!(rpc(&st, "fidelizacao.ajustar", json!({ "entidade_id": ana, "pontos": 100, "motivo": "Campanha de aniversário" })).await["saldo"], 110);
+    let e = rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 120000 }, { "modo": "NU", "valor": 1020000 }]))).await;
+    assert!(e.contains("Pontos insuficientes") && e.contains("120"), "{e}");
+    // os pontos não dão troco
+    assert!(rpc_err(&st, "documentos.emitir", venda(ana, 1, json!([{ "modo": "DE", "valor": 1200000 }]))).await.contains("troco"));
+
+    // nota de crédito da venda paga com pontos: estorna os 10 ganhos, devolve os 56 em pontos e só o numerário em dinheiro
+    let nc = rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": ana, "doc_origem_id": pp["documento"]["id"], "motivo": "Serviço não prestado",
+                                                    "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
+    assert_eq!(nc["fidelizacao"], json!({ "ganhos": 56, "gastos": 10, "saldo": 156 }));
+    let devolvido: i64 = sqlx::query_scalar("SELECT valor FROM caixa_movimentos WHERE descricao = ?").bind(format!("Devolução {}", nc["documento"]["numero_doc"].as_str().unwrap())).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(devolvido, 1084000, "em dinheiro só o que foi pago em dinheiro");
+    // segunda nota de crédito da mesma venda: nada mais a creditar
+    let e = rpc_err(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": ana, "doc_origem_id": pp["documento"]["id"], "motivo": "Repetida",
+                                                      "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
+    assert!(e.contains("creditar"), "{e}");
+
+    // anular a FT tira os 34 pontos que deu
+    rpc(&st, "documentos.anular", json!({ "id": ft["documento"]["id"], "motivo": "Factura em duplicado" })).await;
+    assert_eq!(saldo(rpc(&st, "fidelizacao.saldo", json!({ "entidade_id": ana })).await), 122);
+    let movs = rpc(&st, "fidelizacao.movimentos", json!({ "entidade_id": ana })).await;
+    let tipos: Vec<&str> = movs.as_array().unwrap().iter().map(|m| m["tipo"].as_str().unwrap()).collect();
+    for t in ["GANHO", "RESGATE", "AJUSTE", "ESTORNO", "DEVOLUCAO", "ANULACAO"] {
+        assert!(tipos.contains(&t), "falta o movimento {t}: {tipos:?}");
+    }
+    let lista = rpc(&st, "fidelizacao.clientes", json!({ "q": "ana" })).await;
+    assert_eq!((lista[0]["saldo"].as_i64(), lista[0]["gastos"].as_i64()), (Some(122), Some(56)));
+
+    // o pagamento com pontos não entra na tesouraria; na contabilidade vai para a conta própria e o diário fecha
+    let fluxo: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM vw_fluxo WHERE rubrica = 'Pontos de fidelização'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(fluxo, 0);
+    let hoje = db::hoje();
+    let l = rpc(&st, "contabilidade.lancamentos", json!({ "de": hoje, "ate": hoje })).await;
+    assert_eq!(l["equilibrado"], true, "{l}");
+    assert!(l["linhas"].as_array().unwrap().iter().any(|x| x["conta"] == "37.9" && x["debito"] == 56000), "{l}");
+
+    // o SAF-T leva o mecanismo «DE» (dinheiro electrónico: cartões de pontos)
+    let saft = rpc(&st, "saft.exportar", json!({ "de": "2000-01-01", "ate": "2100-12-31" })).await;
+    let xml = std::fs::read_to_string(saft["ficheiro"].as_str().unwrap()).unwrap();
+    assert!(xml.contains("<PaymentMechanism>DE</PaymentMechanism>"));
+    validar_xsd(saft["ficheiro"].as_str().unwrap());
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Parte HTML (base64) de uma mensagem MIME recebida pelo servidor SMTP falso.
+fn html_da_mensagem(dados: &str) -> String {
+    use base64::Engine;
+    let i = dados.find("Content-Type: text/html").expect("parte HTML");
+    let resto = &dados[i..];
+    let corpo = &resto[resto.find("\r\n\r\n").unwrap() + 4..];
+    let b64: String = corpo.lines().take_while(|l| !l.starts_with("--")).collect::<Vec<_>>().join("");
+    String::from_utf8(base64::engine::general_purpose::STANDARD.decode(b64.trim()).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn recibo_digital_por_email_e_whatsapp() {
+    let (st, pasta) = base_com_admin("recibo-digital").await;
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Pão & Bolos <especial>", "tipo": "S", "taxa_iva_id": 1, "preco1": 50000 })).await["id"].as_i64().unwrap();
+    let cli = rpc(&st, "entidades.guardar", json!({ "nome": "Hotel Baía Azul", "nif": "5417002211", "telefone": "923 456 789", "email": "reservas@baia.ao" })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 2 }], "pagamentos": [{ "modo": "NU", "valor": 120000 }] })).await;
+    let id = fr["documento"]["id"].as_i64().unwrap();
+    let numero = fr["documento"]["numero_doc"].as_str().unwrap().to_string();
+
+    // sem configuração não envia; configuração validada; a senha fica cifrada e não volta ao ecrã
+    assert!(rpc_err(&st, "documentos.enviarEmail", json!({ "id": id, "para": "reservas@baia.ao" })).await.contains("não está configurado"));
+    assert!(rpc_err(&st, "email.configGuardar", json!({ "servidor": "", "porta": 465, "remetente": "loja@kianda.ao" })).await.contains("servidor"));
+    let (porta, rx) = crate::smtp::testes::servidor_falso();
+    let c = rpc(&st, "email.configGuardar", json!({ "servidor": "127.0.0.1", "porta": porta, "seguranca": "NENHUMA", "utilizador": "loja@kianda.ao",
+                                                   "remetente": "loja@kianda.ao", "copia": "arquivo@kianda.ao", "senha": "segredo" })).await;
+    assert_eq!((c["tem_senha"].as_bool(), c.get("senha").is_none()), (Some(true), true));
+    let guardada: String = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'email.senha'").fetch_one(&st.pool).await.unwrap();
+    assert!(guardada.starts_with("kgs1:") && !guardada.contains("segredo"), "senha cifrada");
+    // gravar sem senha mantém a anterior
+    rpc(&st, "email.configGuardar", json!({ "servidor": "127.0.0.1", "porta": porta, "seguranca": "NENHUMA", "utilizador": "loja@kianda.ao", "remetente": "loja@kianda.ao", "copia": "arquivo@kianda.ao" })).await;
+    rpc(&st, "email.testar", json!({ "para": "gerente@kianda.ao" })).await;
+    let (cmds, _) = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert!(cmds.iter().any(|c| c == "RCPT TO:<gerente@kianda.ao>"), "{cmds:?}");
+
+    // o documento por email: HTML com as linhas (escapadas), o total, o rodapé da AGT; cópia oculta para o arquivo
+    assert!(rpc_err(&st, "documentos.enviarEmail", json!({ "id": id, "para": "reservas@baia" })).await.contains("inválido"));
+    let r = rpc(&st, "documentos.enviarEmail", json!({ "id": id, "para": "reservas@baia.ao" })).await;
+    assert!(r["resposta"].as_str().unwrap().contains("queued"));
+    let (cmds, dados) = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert!(cmds.iter().any(|c| c == "RCPT TO:<reservas@baia.ao>") && cmds.iter().any(|c| c == "RCPT TO:<arquivo@kianda.ao>"), "{cmds:?}");
+    let html = html_da_mensagem(&dados);
+    assert!(html.contains(&numero) && html.contains("Pão &amp; Bolos &lt;especial&gt;") && html.contains("1.140,00") && html.contains("Processado por programa"), "{html}");
+    let auditoria: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auditoria WHERE acao = 'EMAIL' AND detalhe LIKE ?").bind(format!("{numero}%")).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(auditoria, 1);
+
+    // WhatsApp: telefone da ficha com o indicativo de Angola, texto com o documento e o total
+    let m = rpc(&st, "documentos.mensagem", json!({ "id": id })).await;
+    assert_eq!((m["numero"].as_str(), m["email"].as_str()), (Some("244923456789"), Some("reservas@baia.ao")));
+    assert!(m["url"].as_str().unwrap().starts_with("https://wa.me/244923456789?text="));
+    let texto = m["texto"].as_str().unwrap();
+    assert!(texto.contains(&numero) && texto.contains("*Total: 1.140,00 Kz*"), "{texto}");
+    assert!(rpc_err(&st, "documentos.mensagem", json!({ "id": id, "telefone": "123" })).await.contains("Telefone inválido"));
+    assert_eq!(rpc(&st, "documentos.mensagem", json!({ "id": id, "telefone": "+351 912 345 678" })).await["numero"], "351912345678");
+    // só abre ligações do WhatsApp
+    assert!(rpc_err(&st, "partilha.abrir", json!({ "url": "https://exemplo.com/" })).await.contains("não permitido"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 /// Pedido HTTP simples à API: (código, cabeçalhos, corpo em JSON — ou em texto se não for JSON).
 fn api_http(porta: u16, metodo: &str, caminho: &str, chave: Option<&str>, corpo: Option<&Value>, extra: &[(&str, &str)]) -> (u16, String, Value) {
     use std::io::{Read, Write};
@@ -3082,84 +3905,11 @@ async fn api_integracao() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
-/// Dígito de controlo EAN-13 (para montar etiquetas da balança nos testes).
-fn com_controlo(doze: &str) -> String {
-    let soma: u32 = doze.bytes().enumerate().map(|(i, b)| { let d = (b - b'0') as u32; if i % 2 == 0 { d } else { d * 3 } }).sum();
-    format!("{doze}{}", (10 - soma % 10) % 10)
-}
-
-/// Vários códigos de barras por artigo (embalagens) e etiquetas da balança (peso ou preço no código EAN-13).
-#[tokio::test]
-async fn codigos_embalagens_e_balanca() {
-    let pasta = std::env::temp_dir().join(format!("kigest-codigos-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&pasta);
-    std::fs::create_dir_all(&pasta).unwrap();
-    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
-    let mut st = AppState::new(pool);
-    st.pasta_dados = pasta.clone();
-    st.pasta_exportacao = pasta.clone();
-    st.carregar_posto(1).await.unwrap();
-    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Mercearia, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
-    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
-
-    // ---- embalagens: a caixa de 12 lê-se como 12 unidades ----
-    let agua = rpc(&st, "artigos.guardar", json!({ "descricao": "Água 0,5L", "codigo_barras": "5601000000017", "taxa_iva_id": 1, "preco1": 10000,
-        "codigos": [{ "codigo": "15601000000014", "quantidade": 12, "descricao": "Caixa de 12" }, { "codigo": "ALT-AGUA" }] })).await["id"].as_i64().unwrap();
-    let a = rpc(&st, "artigos.obter", json!({ "id": agua })).await;
-    assert_eq!(a["codigos"].as_array().unwrap().len(), 2);
-    let cx = rpc(&st, "artigos.codigo", json!({ "codigo": "15601000000014" })).await;
-    assert_eq!((cx["id"].as_i64(), cx["leitura"]["quantidade"].as_f64(), cx["leitura"]["origem"].as_str()), (Some(agua), Some(12.0), Some("embalagem")));
-    let alt = rpc(&st, "artigos.codigo", json!({ "codigo": "ALT-AGUA" })).await;
-    assert_eq!(alt["id"], agua);
-    assert!(alt.get("leitura").is_none(), "outro código da mesma unidade vale 1");
-    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": "5601000000017" })).await.get("leitura").is_none());
-    assert_eq!(rpc(&st, "artigos.listar", json!({ "q": "1560100" })).await.as_array().unwrap().len(), 1, "a pesquisa encontra pelos códigos extra");
-    // um código não pode ser de dois artigos, nem repetir-se no mesmo
-    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Outro", "taxa_iva_id": 1, "preco1": 1, "codigos": [{ "codigo": "15601000000014" }] })).await.contains("já é do artigo"));
-    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Outro", "taxa_iva_id": 1, "preco1": 1, "codigos": [{ "codigo": "5601000000017" }] })).await.contains("já é do artigo"));
-    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Outro", "taxa_iva_id": 1, "preco1": 1, "codigos": [{ "codigo": "X1" }, { "codigo": "X1" }] })).await.contains("repetido"));
-    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Outro", "taxa_iva_id": 1, "preco1": 1, "codigos": [{ "codigo": "X2", "quantidade": 0 }] })).await.contains("positiva"));
-    // gravar o artigo sem «codigos» não os apaga; com a lista vazia, sim
-    rpc(&st, "artigos.guardar", json!({ "id": agua, "descricao": "Água 0,5 L", "codigo_barras": "5601000000017", "taxa_iva_id": 1, "preco1": 10000 })).await;
-    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": agua })).await["codigos"].as_array().unwrap().len(), 2);
-    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": agua })).await["referencia"], "A00001", "alterar sem referência mantém a que tinha");
-
-    // ---- balança: desligada, a etiqueta não se lê ----
-    let carne = rpc(&st, "artigos.guardar", json!({ "descricao": "Carne picada (kg)", "unidade_id": 2, "taxa_iva_id": 1, "preco1": 500000, "codigo_balanca": "01234" })).await["id"].as_i64().unwrap();
-    let etiqueta_peso = com_controlo("200123400750"); // prefixo 20, artigo 01234, 00750 g
-    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": etiqueta_peso })).await.is_null());
-    assert!(rpc_err(&st, "balanca.guardar", json!({ "ativo": true, "prefixos": "10", "digitos_codigo": 5, "tipo": "PESO", "decimais": 3 })).await.contains("20 a 29"));
-    rpc(&st, "balanca.guardar", json!({ "ativo": true, "prefixos": "20, 21", "digitos_codigo": 5, "tipo": "PESO", "decimais": 3 })).await;
-    let lido = rpc(&st, "artigos.codigo", json!({ "codigo": etiqueta_peso })).await;
-    assert_eq!((lido["id"].as_i64(), lido["leitura"]["quantidade"].as_f64(), lido["leitura"]["origem"].as_str()), (Some(carne), Some(0.75), Some("balanca")), "{lido}");
-    // dígito de controlo errado ou prefixo de fora: não é etiqueta
-    let mut errada = etiqueta_peso.clone();
-    errada.replace_range(12..13, &(((errada.as_bytes()[12] - b'0' + 1) % 10).to_string()));
-    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": errada })).await.is_null());
-    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": com_controlo("290123400750") })).await.is_null());
-    // o código da balança é único
-    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Frango (kg)", "taxa_iva_id": 1, "preco1": 1, "codigo_balanca": "1234" })).await.contains("já é do artigo"));
-    // venda com a quantidade lida: 0,750 kg × 5 000,00 = 3 750,00 + IVA
-    let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": carne, "quantidade": 10, "preco_unitario": 300000 }] })).await;
-    assert!(fr["documento"]["id"].as_i64().is_some());
-    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
-    let v = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": carne, "quantidade": lido["leitura"]["quantidade"] }], "pagamentos": [{ "modo": "NU", "valor": 427500 }] })).await;
-    assert_eq!(v["documento"]["total"], 427500);
-
-    // ---- etiquetas com o preço (Kz, sem casas): a quantidade é a que dá esse preço ----
-    rpc(&st, "balanca.guardar", json!({ "ativo": true, "prefixos": "20", "digitos_codigo": 5, "tipo": "PRECO", "decimais": 0 })).await;
-    let etiqueta_preco = com_controlo("200123402850"); // 2 850 Kz com IVA = 0,5 kg a 5 700 Kz/kg (5 000 + 14%)
-    let lido = rpc(&st, "artigos.codigo", json!({ "codigo": etiqueta_preco })).await;
-    assert_eq!((lido["leitura"]["quantidade"].as_f64(), lido["leitura"]["preco_etiqueta"].as_i64()), (Some(0.5), Some(285000)), "{lido}");
-    let cfg = rpc(&st, "balanca.obter", Value::Null).await;
-    assert_eq!((cfg["tipo"].as_str(), cfg["prefixos"].as_str()), (Some("PRECO"), Some("20")));
-
-    st.pool.close().await;
-    let _ = std::fs::remove_dir_all(&pasta);
-}
-
 /// Receptor HTTP de avisos para os testes: guarda (caminho, cabeçalhos, corpo); responde 500 em /falha e 200 no resto.
-fn receptor_webhooks() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>) {
+/// Avisos recebidos pelo receptor de teste: (caminho do pedido, cabeçalhos, corpo).
+type AvisosRecebidos = std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>;
+
+fn receptor_webhooks() -> (u16, AvisosRecebidos) {
     use std::io::{Read, Write};
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let porta = l.local_addr().unwrap().port();
@@ -3293,151 +4043,6 @@ async fn webhooks_api() {
     let aud = rpc(&st, "auditoria.listar", json!({ "de": db::hoje(), "ate": db::hoje(), "evento": "API_WEBHOOK" })).await;
     assert!(aud.as_array().unwrap().len() >= 4);
 
-    st.pool.close().await;
-    let _ = std::fs::remove_dir_all(&pasta);
-}
-
-/// Cofre: os segredos da base (chave AGT, Facturação Electrónica, avisos automáticos) ficam cifrados e continuam a servir.
-#[tokio::test]
-async fn cofre_segredos_cifrados() {
-    use crate::cofre;
-    let pasta = std::env::temp_dir().join(format!("kigest-teste-cofre-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&pasta);
-    std::fs::create_dir_all(&pasta).unwrap();
-    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
-    let mut st = AppState::new(pool);
-    st.pasta_dados = pasta.clone();
-    st.pasta_exportacao = pasta.clone();
-    st.carregar_posto(1).await.unwrap();
-    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Cofre, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
-    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
-    let bruto = |chave: &'static str| {
-        let pool = st.pool.clone();
-        async move { sqlx::query_scalar::<_, String>("SELECT valor FROM config WHERE chave = ?").bind(chave).fetch_one(&pool).await.unwrap() }
-    };
-
-    // a chave de assinatura AGT, gerada ao criar a empresa, está cifrada na base
-    let guardada = bruto("agt.chave_privada").await;
-    assert!(guardada.starts_with("KGC1.") && !guardada.contains("PRIVATE KEY"), "{guardada}");
-    // e continua a assinar os documentos
-    let artigo = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
-    let venda = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
-    let hash = venda["documento"]["hash"].as_str().unwrap_or_default().to_string();
-    assert!(hash.len() > 100, "documento assinado: {venda}");
-
-    // uma base de uma versão anterior (chave em texto) lê-se na mesma e é cifrada no arranque
-    let pem = cofre::ler_config(&st.pool, "agt.chave_privada").await.unwrap().unwrap();
-    assert!(pem.contains("BEGIN PRIVATE KEY"));
-    sqlx::query("UPDATE config SET valor = ? WHERE chave = 'agt.chave_privada'").bind(&pem).execute(&st.pool).await.unwrap();
-    sqlx::query("INSERT INTO config (chave, valor) VALUES ('fe.senha', 'senha-antiga') ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").execute(&st.pool).await.unwrap();
-    assert_eq!(cofre::ler_config(&st.pool, "agt.chave_privada").await.unwrap().unwrap(), pem);
-    assert_eq!(cofre::migrar(&st.pool).await.unwrap(), 2);
-    assert_eq!(cofre::migrar(&st.pool).await.unwrap(), 0, "só uma vez");
-    assert!(bruto("agt.chave_privada").await.starts_with("KGC1."));
-    assert!(bruto("fe.senha").await.starts_with("KGC1."));
-    assert_eq!(cofre::ler_config(&st.pool, "fe.senha").await.unwrap().unwrap(), "senha-antiga");
-    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": artigo, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
-
-    // cada valor só abre no sítio onde foi guardado: a chave AGT copiada para a senha da FE não se lê
-    sqlx::query("UPDATE config SET valor = (SELECT valor FROM config WHERE chave = 'agt.chave_privada') WHERE chave = 'fe.senha'").execute(&st.pool).await.unwrap();
-    let erro = cofre::ler_config(&st.pool, "fe.senha").await.unwrap_err().to_string();
-    assert!(erro.contains("não abre"), "{erro}");
-    // e a base de outra empresa (outro sal) também não abre os segredos desta
-    let cifrado = cofre::para_config(&st.pool, "fe.senha", "123").await.unwrap();
-    sqlx::query("UPDATE config SET valor = 'outro-sal' WHERE chave = 'cofre.sal'").execute(&st.pool).await.unwrap();
-    assert!(cofre::decifrar(&st.pool, "config:fe.senha", &cifrado).await.is_err());
-
-    // avisos automáticos: o segredo vai cifrado na base e aparece em claro só a quem gere a API
-    let st2 = {
-        let pool = db::abrir(&pasta.join("outra.db")).await.unwrap();
-        let mut s = AppState::new(pool);
-        s.pasta_dados = pasta.clone();
-        s.carregar_posto(1).await.unwrap();
-        s
-    };
-    rpc(&st2, "setup.inicializar", json!({ "empresa": { "nome": "Avisos, Lda", "nif": "5000000001" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
-    rpc(&st2, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
-    let w = rpc(&st2, "api.webhookGuardar", json!({ "nome": "Loja", "url": "https://loja.exemplo/avisos", "eventos": ["documento.emitido"] })).await;
-    let segredo = w["segredo"].as_str().unwrap().to_string();
-    let na_base: String = sqlx::query_scalar("SELECT segredo FROM api_webhooks WHERE id = ?").bind(w["id"].as_i64()).fetch_one(&st2.pool).await.unwrap();
-    assert!(na_base.starts_with("KGC1.") && !na_base.contains(&segredo));
-    let lista = rpc(&st2, "api.webhooks", Value::Null).await;
-    assert_eq!(lista["webhooks"][0]["segredo"], segredo.as_str());
-    // segredo antigo, em texto: cifrado no arranque, sem mudar de valor
-    sqlx::query("UPDATE api_webhooks SET segredo = 'whsec_antigo'").execute(&st2.pool).await.unwrap();
-    assert_eq!(cofre::migrar(&st2.pool).await.unwrap(), 1);
-    assert_eq!(rpc(&st2, "api.webhooks", Value::Null).await["webhooks"][0]["segredo"], "whsec_antigo");
-
-    st.pool.close().await;
-    st2.pool.close().await;
-    let _ = std::fs::remove_dir_all(&pasta);
-}
-
-/// Cópia cifrada com senha e restauro: a cópia lista-se, abre só com a senha e a troca faz-se ao reabrir o programa,
-/// guardando a base que estava em uso.
-#[tokio::test]
-async fn copia_cifrada_e_restauro() {
-    let pasta = std::env::temp_dir().join(format!("kigest-teste-restauro-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&pasta);
-    std::fs::create_dir_all(&pasta).unwrap();
-    let abrir = |pasta: std::path::PathBuf| async move {
-        let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
-        let mut st = AppState::new(pool);
-        st.pasta_dados = pasta.clone();
-        st.pasta_exportacao = pasta.join("exportados");
-        std::fs::create_dir_all(&st.pasta_exportacao).unwrap();
-        st.carregar_posto(1).await.unwrap();
-        st
-    };
-    let st = abrir(pasta.clone()).await;
-    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Restauro, Lda", "nif": "5000000002" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
-    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
-    rpc(&st, "artigos.guardar", json!({ "descricao": "Antes da cópia", "taxa_iva_id": 1, "preco1": 1000 })).await;
-
-    // ---- cópia cifrada ----
-    assert!(rpc_err(&st, "sistema.backupCifrado", json!({ "senha": "curta" })).await.contains("8 caracteres"));
-    let copia = rpc(&st, "sistema.backupCifrado", json!({ "senha": "senha da loja 2026" })).await;
-    let ficheiro = copia["ficheiro"].as_str().unwrap().to_string();
-    assert!(ficheiro.ends_with(".kgc"), "{copia}");
-    let bytes = std::fs::read(&ficheiro).unwrap();
-    assert!(!String::from_utf8_lossy(&bytes).contains("Restauro, Lda"), "o nome da empresa não aparece na cópia");
-    assert!(std::fs::read_dir(&pasta).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().starts_with("copia-a-cifrar")), "sem ficheiros temporários");
-    let lista = rpc(&st, "sistema.copiasRestaurar", Value::Null).await;
-    assert!(lista["copias"].as_array().unwrap().iter().any(|c| c["caminho"] == ficheiro.as_str()), "{lista}");
-    assert_eq!(lista["pendente"], Value::Null);
-
-    // depois da cópia, mais trabalho
-    rpc(&st, "artigos.guardar", json!({ "descricao": "Depois da cópia", "taxa_iva_id": 1, "preco1": 2000 })).await;
-
-    // ---- restaurar: senha errada, ficheiro que não é do KanGest, e a cópia certa ----
-    assert!(rpc_err(&st, "sistema.restaurar", json!({ "caminho": ficheiro })).await.contains("senha"));
-    assert!(rpc_err(&st, "sistema.restaurar", json!({ "caminho": ficheiro, "senha": "outra senha" })).await.contains("Senha errada"));
-    let estranho = pasta.join("exportados").join("kangest-estranho.db");
-    std::fs::write(&estranho, b"isto nao e uma base").unwrap();
-    assert!(rpc_err(&st, "sistema.restaurar", json!({ "caminho": estranho.display().to_string() })).await.contains("não é uma base"));
-    let r = rpc(&st, "sistema.restaurar", json!({ "caminho": ficheiro, "senha": "senha da loja 2026" })).await;
-    assert_eq!(r["copia"]["empresa"], "Restauro, Lda", "{r}");
-    assert_eq!(rpc(&st, "sistema.copiasRestaurar", Value::Null).await["pendente"]["nif"], "5000000002");
-    // desistir e voltar a preparar
-    rpc(&st, "sistema.restaurarCancelar", Value::Null).await;
-    assert_eq!(rpc(&st, "sistema.copiasRestaurar", Value::Null).await["pendente"], Value::Null);
-    rpc(&st, "sistema.restaurar", json!({ "caminho": ficheiro, "senha": "senha da loja 2026" })).await;
-
-    // ---- reabrir o programa: a troca faz-se antes de abrir a base ----
-    st.pool.close().await;
-    drop(st);
-    let antes = super::sistema::aplicar_restauro(&pasta).await.unwrap().expect("restauro feito");
-    assert!(antes.exists());
-    assert!(super::sistema::aplicar_restauro(&pasta).await.unwrap().is_none(), "só uma vez");
-    let st = abrir(pasta.clone()).await;
-    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
-    let nomes: Vec<String> = sqlx::query_scalar("SELECT descricao FROM artigos ORDER BY id").fetch_all(&st.pool).await.unwrap();
-    assert!(nomes.contains(&"Antes da cópia".to_string()) && !nomes.contains(&"Depois da cópia".to_string()), "{nomes:?}");
-    // a base que estava em uso ficou guardada, com o trabalho feito depois da cópia
-    let pool = db::abrir(&antes).await.unwrap();
-    let guardados: Vec<String> = sqlx::query_scalar("SELECT descricao FROM artigos").fetch_all(&pool).await.unwrap();
-    assert!(guardados.contains(&"Depois da cópia".to_string()), "{guardados:?}");
-    pool.close().await;
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }

@@ -477,12 +477,11 @@ pub async fn executar_ficheiro(st: &AppState, e: ExecutarFicheiroIn) -> AppResul
 pub async fn ficheiros(st: &AppState) -> AppResult<Value> {
     st.exigir_perm("sistema.importar")?;
     let pasta_exp = st.pasta_exportacao.clone();
-    let lista = tokio::task::spawn_blocking(move || procurar_ficheiros(&pasta_exp, &["kigest"])).await.map_err(|e| AppError::msg(e.to_string()))?;
+    let lista = tokio::task::spawn_blocking(move || procurar_ficheiros(&pasta_exp)).await.map_err(|e| AppError::msg(e.to_string()))?;
     Ok(json!(lista))
 }
 
-/// Ficheiros com uma destas extensões na pasta de exportação, Transferências, Ambiente de Trabalho, Documentos e pens.
-pub(crate) fn procurar_ficheiros(pasta_exportacao: &std::path::Path, extensoes: &[&str]) -> Vec<Value> {
+fn procurar_ficheiros(pasta_exportacao: &std::path::Path) -> Vec<Value> {
     use std::path::PathBuf;
     let mut pastas: Vec<(PathBuf, usize)> = vec![(pasta_exportacao.to_path_buf(), 1)];
     let casa = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from);
@@ -502,7 +501,7 @@ pub(crate) fn procurar_ficheiros(pasta_exportacao: &std::path::Path, extensoes: 
     }
     let mut vistos = HashSet::new();
     let mut achados = Vec::new();
-    fn visitar(p: &std::path::Path, nivel: usize, extensoes: &[&str], achados: &mut Vec<Value>, vistos: &mut HashSet<std::path::PathBuf>) {
+    fn visitar(p: &std::path::Path, nivel: usize, achados: &mut Vec<Value>, vistos: &mut HashSet<std::path::PathBuf>) {
         let Ok(it) = std::fs::read_dir(p) else { return };
         for e in it.flatten().take(500) {
             let caminho = e.path();
@@ -510,9 +509,9 @@ pub(crate) fn procurar_ficheiros(pasta_exportacao: &std::path::Path, extensoes: 
             if tipo.is_dir() {
                 let oculto = e.file_name().to_string_lossy().starts_with('.');
                 if nivel > 0 && !oculto {
-                    visitar(&caminho, nivel - 1, extensoes, achados, vistos);
+                    visitar(&caminho, nivel - 1, achados, vistos);
                 }
-            } else if caminho.extension().is_some_and(|x| extensoes.iter().any(|e| x.eq_ignore_ascii_case(e))) && vistos.insert(caminho.clone()) {
+            } else if caminho.extension().is_some_and(|x| x.eq_ignore_ascii_case("kigest")) && vistos.insert(caminho.clone()) {
                 let meta = e.metadata().ok();
                 let modificado = meta
                     .as_ref()
@@ -530,7 +529,7 @@ pub(crate) fn procurar_ficheiros(pasta_exportacao: &std::path::Path, extensoes: 
     }
     for (p, nivel) in pastas {
         if p.is_dir() {
-            visitar(&p, nivel, extensoes, &mut achados, &mut vistos);
+            visitar(&p, nivel, &mut achados, &mut vistos);
         }
     }
     achados.sort_by(|a, b| b["modificado"].as_str().cmp(&a["modificado"].as_str()));
@@ -920,7 +919,7 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
         utilizadores: HashMap::new(),
     };
     let _guard = st.emissao.lock().await;
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
 
     // 2) empresa (+ certificado do sistema anterior, só como referência)
     if let Some(e) = empresa.first() {
@@ -1158,7 +1157,8 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
         let agora = db::agora();
         let mut n_stk = 0;
         // (artigo, armazém, quantidade, custo médio, última entrada, última saída) — as datas são as do KIGEST
-        let mut itens: Vec<(i64, i64, f64, Option<i64>, Option<String>, Option<String>)> = Vec::new();
+        type Item = (i64, i64, f64, Option<i64>, Option<String>, Option<String>);
+        let mut itens: Vec<Item> = Vec::new();
         if !stock.is_empty() {
             for r in &stock {
                 let artigo = i(r, &["IdArtigo"])
@@ -2209,7 +2209,7 @@ async fn n_recibos(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, mapas:
         )
         .bind(tipo)
         .bind(&serie)
-        .bind(numero.unwrap_or(n_r as i64 + 1))
+        .bind(numero.unwrap_or(n_r + 1))
         .bind(&rf)
         .bind(&data_r)
         .bind(&dh)
@@ -2381,10 +2381,7 @@ async fn n_proformas(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, mapa
         if sqlx::query_scalar::<_, i64>("SELECT id FROM documentos WHERE numero_doc = ?").bind(&rf).fetch_optional(&mut **tx).await?.is_some() {
             continue;
         }
-        let tipo = match tipo_documento(rf.split_whitespace().next(), None, None) {
-            Some(c @ ("PP" | "OR" | "NE")) => c,
-            _ => "PP",
-        };
+        let tipo = tipo_documento(rf.split_whitespace().next(), None, None).filter(|c| matches!(*c, "PP" | "OR" | "NE")).unwrap_or("PP");
         let ls = linhas.get(&rf).map(|v| v.as_slice()).unwrap_or(&[]);
         let soma = |nomes: &[&str]| ls.iter().map(|l| kz(l, nomes)).sum::<i64>();
         let total = Some(kz(r, &["ValTotal", "Total", "ValorTotal"])).filter(|v| *v != 0).unwrap_or_else(|| soma(&["ValorTotal"]));
@@ -2400,7 +2397,7 @@ async fn n_proformas(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, mapa
         )
         .bind(tipo)
         .bind(&serie)
-        .bind(numero.unwrap_or(n_p as i64 + 1))
+        .bind(numero.unwrap_or(n_p + 1))
         .bind(&rf)
         .bind(&data_p)
         .bind(data_hora(r, &["DataHoraEmissao"]).unwrap_or_else(|| format!("{data_p}T00:00:00")))
@@ -2424,6 +2421,7 @@ async fn n_proformas(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, mapa
 }
 
 // ------------------------------------------------------------------ tesouraria, caixa, moedas, prazos
+#[allow(clippy::too_many_arguments)]
 async fn conta_origem(tx: &mut Transaction<'_, Sqlite>, origem: &str, descricao: &str, tipo: &str, banco: Option<String>, agencia: Option<String>, numero: Option<String>, iban: Option<String>) -> AppResult<i64> {
     if let Some(id) = sqlx::query_scalar::<_, i64>("SELECT id FROM contas WHERE id_origem = ?").bind(origem).fetch_optional(&mut **tx).await? {
         return Ok(id);

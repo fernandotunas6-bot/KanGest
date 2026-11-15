@@ -8,7 +8,8 @@ import { data, hojeISO, inicioMesISO, kz } from "@/lib/format";
 import { MENU } from "@/lib/menu";
 import type { DocResumo, Grupo } from "@/lib/types";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Empty, Input, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Input, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 import DocumentoModal from "@/components/DocumentoModal";
 
 const GRUPOS: { id: "" | Grupo; label: string; menu?: string }[] = [
@@ -36,6 +37,9 @@ export default function Documentos() {
     queryKey: ["documentos", grupo, f.tipo, f.de, f.ate, dq],
     queryFn: () => call<DocResumo[]>("documentos.listar", { ...f, q: dq, grupo: grupo || null }),
   });
+  const { ordenados, cab } = useOrdenacao(lista.data, (d, k: "doc" | "data" | "entidade" | "operador" | "estado" | "total") =>
+    k === "doc" ? d.numero_doc : k === "data" ? d.data_hora : k === "entidade" ? d.entidade_nome : k === "operador" ? d.utilizador : k === "estado" ? (d.estado === "A" ? 3 : d.valor_pendente > 0 ? 1 : 2) : (["NC", "VNC"].includes(d.tipo_codigo) ? -d.total : d.total),
+  );
   // O total só soma o que se pode somar: com um tipo escolhido, esse tipo; senão as vendas (ou as compras),
   // sem proformas, guias nem movimentos de stock. As notas de crédito subtraem.
   const classeTotal = f.tipo ? null : grupo === "COMPRAS" ? "COMPRA" : grupo === "STOCK" ? "STOCK" : "VENDA";
@@ -105,25 +109,27 @@ export default function Documentos() {
               </option>
             ))}
           </Select>
-          <Input type="date" className="w-40" value={f.de} onChange={(e) => setF({ ...f, de: e.target.value })} />
-          <Input type="date" className="w-40" value={f.ate} onChange={(e) => setF({ ...f, ate: e.target.value })} />
+          <InputData className="w-40" value={f.de} onChange={(e) => setF({ ...f, de: e.target.value })} />
+          <InputData className="w-40" value={f.ate} onChange={(e) => setF({ ...f, ate: e.target.value })} />
         </div>
         {lista.data?.length === 0 ? (
           <Empty icon={<FileText className="size-6" />} title="Sem documentos no período" />
         ) : (
-          <Table className="max-h-[calc(100vh-330px)]">
+          <Table className="max-h-[calc(100vh-374px)]">
             <thead>
               <tr>
-                <Th>Documento</Th>
-                <Th>Data</Th>
-                <Th>Entidade</Th>
-                <Th>Operador</Th>
-                <Th>Estado</Th>
-                <Th className="text-right">Total</Th>
+                <Th {...cab("doc")}>Documento</Th>
+                <Th {...cab("data")}>Data</Th>
+                <Th {...cab("entidade")}>Entidade</Th>
+                <Th {...cab("operador")}>Operador</Th>
+                <Th {...cab("estado")}>Estado</Th>
+                <Th className="text-right" {...cab("total")}>
+                  Total
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {lista.data?.map((d) => (
+              {ordenados?.map((d) => (
                 <tr key={d.id} className="cursor-pointer hover:bg-sunken/60" onClick={() => setAberto(d.id)}>
                   <Td>
                     <div className="font-medium">

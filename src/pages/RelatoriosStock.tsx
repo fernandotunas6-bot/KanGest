@@ -5,12 +5,12 @@ import { AlertTriangle, Boxes, CalendarClock, Coins, FileSpreadsheet, PackageX, 
 import { call } from "@/lib/api";
 import { useTabelas } from "@/lib/hooks";
 import { data, kz, numero, qtd } from "@/lib/format";
-import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
+import { dataXL, exportarExcel, kzXL } from "@/lib/csv";
 import { imprimir } from "@/components/DocumentoModal";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Empty, Input, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Input, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 
 interface LinhaStock {
   referencia: string;
@@ -86,68 +86,109 @@ export default function RelatoriosStock() {
   const lucro = linhas.reduce((s, l) => s + (l.lucro ?? 0), 0);
 
   async function exportar() {
+    const titulo = `${actual.label} — ${t?.armazens.find((a) => a.id === armazem)?.nome ?? ""}`;
     if (precos) {
-      const linhasCsv = [
-        ["Referência", "Artigo", "Família", "Subfamília", "Custo", "PVP 1", "PVP 2", "PVP 3", "PVP 4", "Margem PVP 1 (%)", "Promoção (%)"],
-        ...linhas.map((l) => [
-          l.referencia,
-          l.descricao,
-          l.familia ?? "",
-          l.subfamilia ?? "",
-          csvKz(l.custo),
-          csvKz(l.pvp1),
-          csvKz(l.pvp2),
-          csvKz(l.pvp3),
-          csvKz(l.pvp4),
-          margemCusto(l)?.toFixed(2).replace(".", ",") ?? "",
-          l.promo_atual ? String(l.promo_atual).replace(".", ",") : "",
-        ]),
-      ];
-      return exportarFicheiro("lista-de-precos.csv", csv(linhasCsv));
+      return exportarExcel(
+        "lista-de-precos.xlsx",
+        [
+          ["Referência", "Artigo", "Família", "Subfamília", "Custo", "PVP 1", "PVP 2", "PVP 3", "PVP 4", "Margem PVP 1 (%)", "Promoção (%)"],
+          ...linhas.map((l) => [
+            l.referencia,
+            l.descricao,
+            l.familia ?? "",
+            l.subfamilia ?? "",
+            kzXL(l.custo),
+            kzXL(l.pvp1),
+            kzXL(l.pvp2),
+            kzXL(l.pvp3),
+            kzXL(l.pvp4),
+            margemCusto(l) === null ? "" : Math.round(margemCusto(l)! * 100) / 100,
+            l.promo_atual || "",
+          ]),
+        ],
+        { titulo },
+      );
     }
     if (existencias) {
-      const linhasCsv = [
-        ["Referência", "Artigo", "Família", "Unidade", "Existência", "Custo médio", "Valor ao custo"],
-        ...linhas.map((l) => [l.referencia, l.descricao, l.familia ?? "", l.unidade ?? "", qtd(l.quantidade), csvKz(l.custo_medio), csvKz(l.valor_custo)]),
-      ];
-      return exportarFicheiro("lista-de-stock.csv", csv(linhasCsv));
+      return exportarExcel(
+        "lista-de-stock.xlsx",
+        [
+          ["Referência", "Artigo", "Família", "Unidade", "Existência", "Custo médio", "Valor ao custo"],
+          ...linhas.map((l) => [l.referencia, l.descricao, l.familia ?? "", l.unidade ?? "", l.quantidade, kzXL(l.custo_medio), kzXL(l.valor_custo)]),
+        ],
+        { titulo },
+      );
     }
     if (previsao) {
-      const linhasCsv = [
-        ["Referência", "Artigo", "Família", "Quantidade", "Custo médio", "PVP 1 s/ IVA", "Valor ao custo", "Valor de venda", "Lucro previsto"],
-        ...linhas.map((l) => [l.referencia, l.descricao, l.familia ?? "", qtd(l.quantidade), csvKz(l.custo_medio), csvKz(l.preco1), csvKz(l.valor_custo), csvKz(l.valor_venda), csvKz(l.lucro)]),
-      ];
-      return exportarFicheiro("previsao-de-venda.csv", csv(linhasCsv));
+      return exportarExcel(
+        "previsao-de-venda.xlsx",
+        [
+          ["Referência", "Artigo", "Família", "Quantidade", "Custo médio", "PVP 1 s/ IVA", "Valor ao custo", "Valor de venda", "Lucro previsto"],
+          ...linhas.map((l) => [l.referencia, l.descricao, l.familia ?? "", l.quantidade, kzXL(l.custo_medio), kzXL(l.preco1), kzXL(l.valor_custo), kzXL(l.valor_venda), kzXL(l.lucro)]),
+        ],
+        { titulo },
+      );
     }
     const cab = ["Referência", "Artigo", "Armazém"];
-    const linhasCsv = [
-      situacao === "validade" ? [...cab, "Lote", "Validade", "Dias", "Quantidade", "Valor ao custo"] : [...cab, "Quantidade", "Mínimo", "Máximo", "Dias sem saída", "Valor ao custo"],
-      ...linhas.map((l) =>
-        situacao === "validade"
-          ? [l.referencia, l.descricao, l.armazem ?? "", l.lote ?? "", l.validade ?? "", l.dias_validade ?? "", qtd(l.quantidade), csvKz(l.valor_custo)]
-          : [l.referencia, l.descricao, l.armazem ?? "", qtd(l.quantidade), qtd(l.qtd_minima), qtd(l.qtd_maxima), l.dias_sem_saida ?? "", csvKz(l.valor_custo)],
-      ),
-    ];
-    await exportarFicheiro(`stock-${situacao}.csv`, csv(linhasCsv));
+    await exportarExcel(
+      `stock-${situacao}.xlsx`,
+      [
+        situacao === "validade" ? [...cab, "Lote", "Validade", "Dias", "Quantidade", "Valor ao custo"] : [...cab, "Quantidade", "Mínimo", "Máximo", "Dias sem saída", "Valor ao custo"],
+        ...linhas.map((l) =>
+          situacao === "validade"
+            ? [l.referencia, l.descricao, l.armazem ?? "", l.lote ?? "", dataXL(l.validade), l.dias_validade ?? "", l.quantidade, kzXL(l.valor_custo)]
+            : [l.referencia, l.descricao, l.armazem ?? "", l.quantidade, l.qtd_minima ?? "", l.qtd_maxima ?? "", l.dias_sem_saida ?? "", kzXL(l.valor_custo)],
+        ),
+      ],
+      { titulo },
+    );
   }
+
+  type Chave = "ref" | "artigo" | "familia" | "custo" | "pvp1" | "pvp2" | "pvp3" | "pvp4" | "margem" | "qtd" | "custo_medio" | "preco1" | "valor" | "venda" | "lucro" | "lote" | "validade" | "minimo" | "maximo" | "dias" | "saida";
+  const { ordenados, cab } = useOrdenacao(linhas, (l, k: Chave) =>
+    ({
+      ref: l.referencia,
+      artigo: l.descricao,
+      familia: l.familia,
+      custo: l.custo,
+      pvp1: l.pvp1,
+      pvp2: l.pvp2,
+      pvp3: l.pvp3,
+      pvp4: l.pvp4,
+      margem: margemCusto(l),
+      qtd: l.quantidade,
+      custo_medio: l.custo_medio,
+      preco1: l.preco1,
+      valor: l.valor_custo,
+      venda: l.valor_venda,
+      lucro: l.lucro,
+      lote: l.lote,
+      validade: l.validade,
+      minimo: l.qtd_minima,
+      maximo: l.qtd_maxima,
+      dias: l.dias_sem_saida,
+      saida: l.ultima_saida,
+    })[k],
+  );
+  const ord = ordenados ?? [];
 
   const tabelaPrecos = (
     <>
       <thead>
         <tr>
-          <Th>Referência</Th>
-          <Th>Artigo</Th>
-          <Th>Família</Th>
-          <Th className="text-right">Custo</Th>
-          <Th className="text-right">PVP 1</Th>
-          <Th className="text-right">PVP 2</Th>
-          <Th className="text-right">PVP 3</Th>
-          <Th className="text-right">PVP 4</Th>
-          <Th className="text-right">Margem</Th>
+          <Th {...cab("ref")}>Referência</Th>
+          <Th {...cab("artigo")}>Artigo</Th>
+          <Th {...cab("familia")}>Família</Th>
+          <Th className="text-right" {...cab("custo")}>Custo</Th>
+          <Th className="text-right" {...cab("pvp1")}>PVP 1</Th>
+          <Th className="text-right" {...cab("pvp2")}>PVP 2</Th>
+          <Th className="text-right" {...cab("pvp3")}>PVP 3</Th>
+          <Th className="text-right" {...cab("pvp4")}>PVP 4</Th>
+          <Th className="text-right" {...cab("margem")}>Margem</Th>
         </tr>
       </thead>
       <tbody>
-        {linhas.map((l) => {
+        {ord.map((l) => {
           const m = margemCusto(l);
           return (
             <tr key={l.referencia}>
@@ -178,19 +219,19 @@ export default function RelatoriosStock() {
     <>
       <thead>
         <tr>
-          <Th>Referência</Th>
-          <Th>Artigo</Th>
-          <Th>Família</Th>
-          <Th className="text-right">Existência</Th>
-          <Th className="text-right">Custo médio</Th>
-          <Th className="text-right">PVP 1 s/ IVA</Th>
-          <Th className="text-right">Valor ao custo</Th>
-          <Th className="text-right">Valor de venda</Th>
-          <Th className="text-right">Lucro previsto</Th>
+          <Th {...cab("ref")}>Referência</Th>
+          <Th {...cab("artigo")}>Artigo</Th>
+          <Th {...cab("familia")}>Família</Th>
+          <Th className="text-right" {...cab("qtd")}>Existência</Th>
+          <Th className="text-right" {...cab("custo_medio")}>Custo médio</Th>
+          <Th className="text-right" {...cab("preco1")}>PVP 1 s/ IVA</Th>
+          <Th className="text-right" {...cab("valor")}>Valor ao custo</Th>
+          <Th className="text-right" {...cab("venda")}>Valor de venda</Th>
+          <Th className="text-right" {...cab("lucro")}>Lucro previsto</Th>
         </tr>
       </thead>
       <tbody>
-        {linhas.map((l) => (
+        {ord.map((l) => (
           <tr key={l.referencia}>
             <Td className="font-mono text-[12.5px]">{l.referencia}</Td>
             <Td className="font-medium">{l.descricao}</Td>
@@ -221,20 +262,20 @@ export default function RelatoriosStock() {
     <>
       <thead>
         <tr>
-          <Th>Referência</Th>
-          <Th>Artigo</Th>
-          {situacao === "validade" && <Th>Lote</Th>}
-          {situacao === "validade" && <Th>Validade</Th>}
-          <Th className="text-right">Existência</Th>
-          {!comDias && <Th className="text-right">Mínimo</Th>}
-          {situacao === "excesso" && <Th className="text-right">Máximo</Th>}
-          {situacao === "parado" && <Th className="text-right">Dias sem saída</Th>}
-          {situacao === "parado" && <Th>Última saída</Th>}
-          <Th className="text-right">Valor ao custo</Th>
+          <Th {...cab("ref")}>Referência</Th>
+          <Th {...cab("artigo")}>Artigo</Th>
+          {situacao === "validade" && <Th {...cab("lote")}>Lote</Th>}
+          {situacao === "validade" && <Th {...cab("validade")}>Validade</Th>}
+          <Th className="text-right" {...cab("qtd")}>Existência</Th>
+          {!comDias && <Th className="text-right" {...cab("minimo")}>Mínimo</Th>}
+          {situacao === "excesso" && <Th className="text-right" {...cab("maximo")}>Máximo</Th>}
+          {situacao === "parado" && <Th className="text-right" {...cab("dias")}>Dias sem saída</Th>}
+          {situacao === "parado" && <Th {...cab("saida")}>Última saída</Th>}
+          <Th className="text-right" {...cab("valor")}>Valor ao custo</Th>
         </tr>
       </thead>
       <tbody>
-        {linhas.map((l, i) => (
+        {ord.map((l, i) => (
           <tr key={`${l.referencia}-${l.lote ?? i}`}>
             <Td className="font-mono text-[12.5px]">{l.referencia}</Td>
             <Td className="font-medium">{l.descricao}</Td>
@@ -264,21 +305,21 @@ export default function RelatoriosStock() {
     <>
       <thead>
         <tr>
-          <Th>Referência</Th>
-          <Th>Artigo</Th>
-          <Th>Família</Th>
-          <Th className="text-right">Existência</Th>
-          <Th className="text-right">Custo médio</Th>
-          <Th className="text-right">Valor ao custo</Th>
+          <Th {...cab("ref")}>Referência</Th>
+          <Th {...cab("artigo")}>Artigo</Th>
+          <Th {...cab("familia")}>Família</Th>
+          <Th className="text-right" {...cab("qtd")}>Existência</Th>
+          <Th className="text-right" {...cab("custo_medio")}>Custo médio</Th>
+          <Th className="text-right" {...cab("valor")}>Valor ao custo</Th>
         </tr>
       </thead>
       <tbody>
-        {linhas.map((l) => (
+        {ord.map((l) => (
           <tr key={l.referencia}>
             <Td className="font-mono text-[12.5px]">{l.referencia}</Td>
             <Td className="font-medium">{l.descricao}</Td>
             <Td className="text-ink-2">{l.familia ?? "—"}</Td>
-            <Td className={cn("num text-right", l.quantidade <= 0 ? "text-danger" : l.quantidade <= (l.qtd_minima ?? 0) && "text-[#9a6514]")}>
+            <Td className={cn("num text-right", l.quantidade <= 0 ? "text-danger" : l.quantidade <= (l.qtd_minima ?? 0) && "text-accent-ink")}>
               {qtd(l.quantidade)} {l.unidade ?? ""}
             </Td>
             <Td className="num text-right text-ink-2">{kz(l.custo_medio)}</Td>
@@ -304,7 +345,7 @@ export default function RelatoriosStock() {
         actions={
           <>
             <Button variant="secondary" onClick={exportar} disabled={!linhas.length}>
-              <FileSpreadsheet className="size-4" /> CSV
+              <FileSpreadsheet className="size-4" /> Excel
             </Button>
             <Button variant="secondary" onClick={imprimir} disabled={!linhas.length}>
               <Printer className="size-4" /> Imprimir
@@ -359,7 +400,7 @@ export default function RelatoriosStock() {
       </div>
       <Card className={cn("transition-opacity", isFetching && "opacity-60")}>
         {linhas.length ? (
-          <Table className="max-h-[calc(100vh-250px)]">{tabela}</Table>
+          <Table className="max-h-[calc(100vh-294px)]">{tabela}</Table>
         ) : (
           <Empty icon={<actual.icon className="size-5" />} title="Nada a assinalar" text={actual.texto} />
         )}

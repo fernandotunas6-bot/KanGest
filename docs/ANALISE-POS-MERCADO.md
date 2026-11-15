@@ -32,7 +32,7 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · **Esforço:** P pequeno (dia
 | Ligação pronta a lojas online (WooCommerce, Shopify) | Comum | ❌ (agora possível através da API) | Média | M |
 | Enviar a factura ao cliente por email ou WhatsApp (PDF) | Padrão | ❌ só impressão; o PDF faz-se pelo diálogo de impressão do sistema | Alta | M |
 | Painel ou app do dono no telemóvel (vendas em tempo real, fora da loja) | Padrão | ❌ (a API é a base para isto) | Média | G |
-| Cópia de segurança na nuvem | Padrão nos POS em nuvem | 🟡 **cópias cifradas com senha** (AES-256, prontas a guardar na nuvem) e restauro no programa; falta o envio automático (Cloudflare R2) | Alta | P |
+| Cópia de segurança na nuvem | Padrão nos POS em nuvem | ❌ só cópias locais (14 dias na pasta de dados) | Alta | M |
 | Importar extractos bancários e reconciliar | Comum nos ERP | ❌ | Baixa | M |
 
 ### B. Venda e pagamentos
@@ -113,8 +113,7 @@ limite de pedidos, registo de pedidos, idempotência na emissão e exportação 
 4. ~~Webhooks para a API (venda emitida, documento anulado, stock alterado), assinados com HMAC~~ — feito.
 5. Envio da factura por email/WhatsApp em PDF.
 6. Fotografias dos artigos (úteis no POS táctil e na loja online ligada pela API).
-7. Cópia de segurança na nuvem (cifrada) — a cópia cifrada com senha e o restauro estão feitos; falta o envio
-   automático para a nuvem.
+7. Cópia de segurança na nuvem (cifrada).
 
 **Depois:** promoções avançadas, fidelização e vales, números de série/IMEI, comissões, sugestão de encomendas,
 receber em moeda estrangeira no POS, integração com TPA/Multicaixa Express.

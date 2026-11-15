@@ -7,7 +7,7 @@ import { data, hojeISO, kz, qtd } from "@/lib/format";
 import type { Lote } from "@/lib/types";
 import { imprimir } from "@/lib/print";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Empty, Input, PageHeader, Select, Stat, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Input, PageHeader, Select, Stat, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 import { PrintPortal } from "@/components/DocumentoPrint";
 
 const FILTROS = [
@@ -48,23 +48,30 @@ export default function Lotes() {
   const expirados = todos.filter((l) => estado(l) === "expirado" && l.quantidade > 0);
   const aviso = todos.filter((l) => estado(l) === "aviso" && l.quantidade > 0);
   const valor = todos.reduce((s, l) => s + Math.round(l.quantidade * l.custo), 0);
+  const { ordenados, cab } = useOrdenacao(linhas, (l, k: "artigo" | "lote" | "armazem" | "validade" | "qtd" | "custo" | "entrada" | "saida") =>
+    ({ artigo: l.descricao, lote: l.lote, armazem: l.armazem, validade: l.validade, qtd: l.quantidade, custo: l.custo, entrada: l.ultima_entrada, saida: l.ultima_saida })[k],
+  );
 
   const corpo = (
     <>
       <thead>
         <tr>
-          <Th>Artigo</Th>
-          <Th>Lote</Th>
-          <Th>Armazém</Th>
-          <Th>Validade</Th>
-          <Th className="text-right">Quantidade</Th>
-          <Th className="text-right">Custo</Th>
-          <Th>Última entrada</Th>
-          <Th>Última saída</Th>
+          <Th {...cab("artigo")}>Artigo</Th>
+          <Th {...cab("lote")}>Lote</Th>
+          <Th {...cab("armazem")}>Armazém</Th>
+          <Th {...cab("validade")}>Validade</Th>
+          <Th className="text-right" {...cab("qtd")}>
+            Quantidade
+          </Th>
+          <Th className="text-right" {...cab("custo")}>
+            Custo
+          </Th>
+          <Th {...cab("entrada")}>Última entrada</Th>
+          <Th {...cab("saida")}>Última saída</Th>
         </tr>
       </thead>
       <tbody>
-        {linhas.map((l) => {
+        {(ordenados ?? []).map((l) => {
           const e = estado(l);
           return (
             <tr key={l.id} className={cn(l.quantidade <= 0 && "opacity-55")}>
@@ -149,7 +156,7 @@ export default function Lotes() {
             text="Os lotes são criados nas entradas de artigos com controlo de lotes (compras, documentos de stock e inventário)."
           />
         ) : (
-          <Table className="max-h-[calc(100vh-330px)]">{corpo}</Table>
+          <Table className="max-h-[calc(100vh-374px)]">{corpo}</Table>
         )}
       </Card>
       <PrintPortal>

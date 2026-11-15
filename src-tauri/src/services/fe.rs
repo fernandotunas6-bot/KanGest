@@ -61,17 +61,32 @@ async fn valor(p: &SqlitePool, k: &str) -> AppResult<Option<String>> {
 pub async fn cfg(p: &SqlitePool) -> AppResult<Cfg> {
     let g = |k: &'static str| async move { valor(p, k).await.map(|v| v.unwrap_or_default()) };
     let nif: Option<String> = sqlx::query_scalar("SELECT nif FROM empresa WHERE id = 1").fetch_optional(p).await?;
+    // Credenciais, n.º de validação e chave de software são do produtor: na compilação oficial vêm com
+    // o programa (produtor.rs) e não da base de dados do cliente.
+    use crate::produtor as pr;
     Ok(Cfg {
         ativo: g("fe.ativo").await? == "1",
         ambiente: Some(g("fe.ambiente").await?).filter(|a| a == "PROD").unwrap_or_else(|| "HML".into()),
         desde: g("fe.desde").await?,
-        utilizador: g("fe.utilizador").await?,
-        senha: crate::cofre::ler_config(p, "fe.senha").await?.unwrap_or_default(),
-        numero_validacao: g("fe.numero_validacao").await?,
+        utilizador: match pr::fe_utilizador() {
+            Some(u) => u,
+            None => g("fe.utilizador").await?,
+        },
+        senha: match pr::fe_senha() {
+            Some(x) => x,
+            None => crate::segredos::ler(p, "fe.senha").await?.unwrap_or_default(),
+        },
+        numero_validacao: match pr::fe_numero_validacao() {
+            Some(x) => x,
+            None => g("fe.numero_validacao").await?,
+        },
         produto: Some(g("fe.produto").await?).filter(|x| !x.is_empty()).unwrap_or_else(|| "KanGest".into()),
         estabelecimento: Some(g("fe.estabelecimento").await?).filter(|x| !x.is_empty()).unwrap_or_else(|| "SEDE".into()),
-        chave_software: crate::cofre::ler_config(p, "fe.chave_software").await?.filter(|x| !x.is_empty()),
-        chave_contribuinte: crate::cofre::ler_config(p, "fe.chave_contribuinte").await?.filter(|x| !x.is_empty()),
+        chave_software: match pr::fe_chave_software() {
+            Some(x) => Some(x),
+            None => crate::segredos::ler(p, "fe.chave_software").await?.filter(|x| !x.is_empty()),
+        },
+        chave_contribuinte: crate::segredos::ler(p, "fe.chave_contribuinte").await?.filter(|x| !x.is_empty()),
         nif: nif.unwrap_or_default(),
         endereco: g("fe.endereco").await?,
     })
@@ -174,6 +189,7 @@ fn software_info(c: &Cfg, a: &Assinador) -> Value {
 }
 
 /// Campos assinados do documento, pela ordem da especificação.
+#[allow(clippy::too_many_arguments)]
 pub fn payload_documento(doc_no: &str, nif: &str, tipo: &str, data: &str, cliente_nif: &str, pais: &str, nome: &str, iva: i64, liquido: i64, total: i64) -> String {
     format!(
         "{{\"documentNo\":{},\"taxRegistrationNumber\":{},\"documentType\":{},\"documentDate\":{},\"customerTaxID\":{},\"customerCountry\":{},\"companyName\":{},\"documentTotals\":{{\"taxPayable\":{},\"netTotal\":{},\"grossTotal\":{}}}}}",
@@ -566,7 +582,8 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
         "ativo": c.ativo,
         "ambiente": c.ambiente,
         "desde": c.desde,
-        "utilizador": c.utilizador,
+        // o utilizador do produtor que vem com o programa não se mostra
+        "utilizador": if crate::produtor::fe_utilizador().is_some() { String::new() } else { c.utilizador.clone() },
         "senha": !c.senha.is_empty(),
         "numero_validacao": c.numero_validacao,
         "produto": c.produto,
@@ -575,6 +592,13 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
         "chave_software": c.chave_software.is_some(),
         "chave_contribuinte": c.chave_contribuinte.is_some(),
         "nif": c.nif,
+        // o que veio com o programa (o ecrã não o pede nem o mostra)
+        "do_produtor": {
+            "utilizador": crate::produtor::fe_utilizador().is_some(),
+            "senha": crate::produtor::fe_senha().is_some(),
+            "numero_validacao": crate::produtor::fe_numero_validacao().is_some(),
+            "chave_software": crate::produtor::fe_chave_software().is_some(),
+        },
         "endereco": base_url(&c.ambiente),
         "contagem": db::query_json(&st.pool, "SELECT estado, COUNT(*) AS n FROM fe_envios GROUP BY estado").await?,
         "series_agt": db::query_json(&st.pool, "SELECT tipo_codigo, serie, ativa, padrao FROM series WHERE fe_agt = 1 ORDER BY tipo_codigo, serie").await?,
@@ -585,9 +609,11 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
 pub struct GuardarIn {
     ativo: bool,
     ambiente: String,
+    #[serde(default)]
     utilizador: String,
     #[serde(default)]
     senha: Option<String>,
+    #[serde(default)]
     numero_validacao: String,
     #[serde(default)]
     produto: Option<String>,
@@ -608,34 +634,39 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
             chave_pem(k)?;
         }
     }
+    use crate::produtor as pr;
     let mut pares: Vec<(&str, String)> = vec![
         ("fe.ambiente", g.ambiente.clone()),
-        ("fe.utilizador", g.utilizador.trim().to_string()),
-        ("fe.numero_validacao", g.numero_validacao.trim().to_string()),
         ("fe.estabelecimento", Some(g.estabelecimento.trim().to_string()).filter(|x| !x.is_empty()).unwrap_or_else(|| "SEDE".into())),
     ];
+    // os dados do produtor que vieram com o programa não se gravam na base de dados
+    if pr::fe_utilizador().is_none() {
+        pares.push(("fe.utilizador", g.utilizador.trim().to_string()));
+    }
+    if pr::fe_numero_validacao().is_none() {
+        pares.push(("fe.numero_validacao", g.numero_validacao.trim().to_string()));
+    }
     if let Some(p) = g.produto.as_deref().map(str::trim).filter(|x| !x.is_empty()) {
         pares.push(("fe.produto", p.to_string()));
     }
-    // senha e chaves privadas: cifradas no cofre
-    let cofre = |k: &'static str, v: String| async move { crate::cofre::para_config(&st.pool, k, &v).await.map(|c| (k, c)) };
-    if let Some(x) = g.senha.filter(|x| !x.is_empty()) {
-        pares.push(cofre("fe.senha", x).await?);
+    if let Some(x) = g.senha.filter(|x| !x.is_empty() && pr::fe_senha().is_none()) {
+        pares.push(("fe.senha", x));
     }
-    if let Some(x) = g.chave_software.map(|x| x.trim().to_string()).filter(|x| !x.is_empty()) {
-        pares.push(cofre("fe.chave_software", x).await?);
+    if let Some(x) = g.chave_software.map(|x| x.trim().to_string()).filter(|x| !x.is_empty() && pr::fe_chave_software().is_none()) {
+        pares.push(("fe.chave_software", x));
     }
     if let Some(x) = g.chave_contribuinte.map(|x| x.trim().to_string()).filter(|x| !x.is_empty()) {
-        pares.push(cofre("fe.chave_contribuinte", x).await?);
+        pares.push(("fe.chave_contribuinte", x));
     }
     let atual = cfg(&st.pool).await?;
     if g.ativo {
         // activar exige tudo o que a AGT pede
         let tem = |k: &str, atual: bool| atual || pares.iter().any(|(c, v)| *c == k && !v.is_empty());
-        if g.utilizador.trim().is_empty() || !tem("fe.senha", !atual.senha.is_empty()) {
+        let utilizador = pr::fe_utilizador().unwrap_or_else(|| g.utilizador.trim().to_string());
+        if utilizador.is_empty() || !tem("fe.senha", !atual.senha.is_empty()) {
             return Err(AppError::msg("Indique o utilizador e a senha dados pela AGT ao produtor do software."));
         }
-        if g.numero_validacao.trim().is_empty() {
+        if pr::fe_numero_validacao().is_none() && g.numero_validacao.trim().is_empty() {
             return Err(AppError::msg("Indique o número de validação (certificação) do software para a Facturação Electrónica."));
         }
         if !tem("fe.chave_software", atual.chave_software.is_some()) || !tem("fe.chave_contribuinte", atual.chave_contribuinte.is_some()) {
@@ -646,9 +677,13 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
         }
     }
     pares.push(("fe.ativo", if g.ativo { "1".into() } else { "0".into() }));
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     for (k, v) in &pares {
-        sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").bind(k).bind(v).execute(&mut *tx).await?;
+        if crate::segredos::CHAVES.contains(k) {
+            crate::segredos::gravar(&mut *tx, k, v).await?;
+        } else {
+            sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").bind(k).bind(v).execute(&mut *tx).await?;
+        }
     }
     sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'FE_CONFIG', ?)")
         .bind(s.id)
@@ -782,7 +817,7 @@ pub async fn solicitar_serie(st: &AppState, s: SerieIn) -> AppResult<Value> {
         let e = erros_de(&v).into_iter().map(|x| x.1).collect::<Vec<_>>().join("; ");
         return Err(AppError::msg(format!("A AGT não criou a série (HTTP {estado}){}", if e.is_empty() { String::new() } else { format!(": {e}") })));
     };
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     sqlx::query("UPDATE series SET padrao = 0 WHERE tipo_codigo = ?").bind(&s.tipo).execute(&mut *tx).await?;
     sqlx::query(
         "INSERT INTO series (tipo_codigo, serie, descricao, data_inicio, data_fim, padrao, fe_agt) VALUES (?1, ?2, ?3, ?4, ?5, 1, 1)

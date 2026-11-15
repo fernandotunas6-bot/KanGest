@@ -404,7 +404,7 @@ export default function Importar() {
                     Exportado de <b>{analise.ficheiro.origem || analise.ficheiro.computador}</b> em {dataHora(analise.ficheiro.data.replace(" ", "T"))} ·{" "}
                     <span className="num">{numero(analise.ficheiro.registos)}</span> registos
                     {!analise.ficheiro.completo && " — o ficheiro está incompleto (a exportação não terminou): volte a correr o ExportarKIGEST."}
-                    {analise.ficheiro.erros.length > 0 && <span className="block text-[12px] text-[#9a6514]">Não exportadas pelo KIGEST: {analise.ficheiro.erros.join(" · ")}</span>}
+                    {analise.ficheiro.erros.length > 0 && <span className="block text-[12px] text-accent-ink">Não exportadas pelo KIGEST: {analise.ficheiro.erros.join(" · ")}</span>}
                   </span>
                 </div>
               )}
@@ -515,7 +515,7 @@ export default function Importar() {
                               {d === 0 ? (
                                 <Badge tone="ok">Igual</Badge>
                               ) : (
-                                <span className="num font-medium text-[#9a6514]">
+                                <span className="num font-medium text-accent-ink">
                                   {d > 0 ? "+" : ""}
                                   {valorConf(c, d)}
                                 </span>
@@ -536,7 +536,7 @@ export default function Importar() {
                 <ul className="mt-4 space-y-2">
                   {relatorio.avisos.map((a) => (
                     <li key={a} className="flex gap-2 rounded-lg bg-accent-50 px-3 py-2 text-[13px] text-ink-2">
-                      <Info className="mt-0.5 size-4 shrink-0 text-[#9a6514]" />
+                      <Info className="mt-0.5 size-4 shrink-0 text-accent-ink" />
                       {a}
                     </li>
                   ))}
@@ -630,7 +630,7 @@ export default function Importar() {
           </Card>
           <Card className="p-5">
             <div className="mb-2 flex items-center gap-2 font-semibold">
-              <ShieldAlert className="size-4 text-[#9a6514]" /> Certificado AGT
+              <ShieldAlert className="size-4 text-accent-ink" /> Certificado AGT
             </div>
             <p className="text-[13px] leading-relaxed text-ink-2">
               Os documentos do KIGEST entram como <b>histórico</b>, com as assinaturas originais, e não fazem parte do SAF-T do sistema novo. O n.º de certificado do KIGEST fica

@@ -6,9 +6,8 @@ KanGest ou os seus dados dê muito trabalho, deixe rasto e não funcione às ceg
 
 | O quê | Protecção | Onde |
 |---|---|---|
-| Ligação entre os postos e o servidor (rede local) | AES-256-GCM, chave derivada da chave de rede (Argon2id), contra repetições | [REDE.md](REDE.md#cifra-da-ligação) |
-| Segredos na base (chave de assinatura AGT, senha e chaves da Facturação Electrónica, segredos dos avisos) | AES-256-GCM (cofre) | abaixo, §4 |
-| Cópias de segurança para levar (pen, nuvem, email) | AES-256-GCM com chave da senha (Argon2id), por blocos autenticados | abaixo, §5 |
+| Ligação entre os postos e o servidor (rede local) | AES-256-GCM, chave derivada da chave de rede (PBKDF2-HMAC-SHA256), contra repetições | [REDE.md](REDE.md) |
+| Segredos na base (chave de assinatura AGT de desenvolvimento, senha e chaves da Facturação Electrónica, senha do email, segredos dos avisos) | AES-256-GCM, chave mestra fora da base (`kangest.chave`) | abaixo, §4 |
 | Datas da licença na base (início da experiência, última data vista) | Selo HMAC-SHA256 com chave fora da base | abaixo, §1 |
 | Executável do KanGest | Selo de integridade Ed25519 posto na compilação oficial | abaixo, §2 |
 | Depuradores (engenharia reversa com o programa a correr) | A emissão pára com um depurador ligado | abaixo, §3 |
@@ -74,53 +73,32 @@ Nas compilações oficiais, se houver um depurador ligado ao KanGest (x64dbg, Wi
 pára com a mensagem «Há uma ferramenta de depuração ligada ao KanGest» e volta quando a ferramenta é fechada. É a forma
 mais comum de estudar o programa a correr para descobrir onde está a verificação da licença.
 
-## 4. Segredos guardados na base (cofre)
+## 4. Segredos guardados na base
 
-A chave privada que assina os documentos (AGT), a senha e as duas chaves privadas da Facturação Electrónica e os
-segredos dos avisos automáticos estavam em texto na base. Agora vão cifrados com AES-256-GCM (`src-tauri/src/cofre.rs`):
-quem abre a base com um editor de SQLite, ou lê uma cópia de segurança, vê `KGC1.…` em vez da chave ou da senha.
+A chave privada que assina os documentos nas compilações de desenvolvimento (AGT), a senha e as chaves da Facturação
+Electrónica, a senha do email e os segredos dos avisos automáticos vão cifrados com AES-256-GCM
+(`src-tauri/src/segredos.rs`): quem abre a base com um editor de SQLite, ou lê uma cópia de segurança, vê `kgs1:…` em
+vez da chave ou da senha. Na compilação oficial, a chave do produtor e as credenciais da Facturação Electrónica nem
+sequer vão para a base: vêm dentro do programa ([CERTIFICACAO-AGT.md](CERTIFICACAO-AGT.md)).
 
-- A chave da cifra junta uma chave do programa (que não está inteira no executável) e o sal da própria base
-  (`cofre.sal`). Por isso a base continua a abrir noutro computador com o KanGest (cópia de segurança restaurada,
-  computador novo) e não precisa de nenhuma senha no dia-a-dia.
-- Cada valor só abre no campo onde foi guardado: copiar a chave AGT para o campo da senha não a revela.
-- As bases de versões anteriores são cifradas no primeiro arranque desta versão. **Não volte depois a uma versão
-  anterior**: ela não leria os segredos cifrados (a chave AGT e as da Facturação Electrónica).
+- A chave mestra está num ficheiro à parte, `kangest.chave`, na pasta de dados da aplicação, fora da base: uma cópia
+  da base, sozinha, não revela os segredos. Os valores antigos, em texto, são cifrados no arranque.
+- Restaurar a base noutro computador obriga a introduzir de novo esses segredos (o programa avisa) e a renovar o
+  segredo de cada aviso automático em **Sistema → API e Integrações**. Os documentos já assinados continuam
+  verificáveis: a chave pública de cada chave de assinatura fica registada.
 
-## 5. Cópias de segurança cifradas com senha
-
-Em **Configurações → Sistema → Cópia cifrada…**, o KanGest grava na pasta Transferências uma cópia
-`kangest-copia-AAAAMMDD-HHMMSS.kgc` cifrada com a senha escolhida (pelo menos 8 caracteres; uma frase serve melhor).
-É a cópia certa para levar numa pen, guardar na nuvem ou mandar por email: **sem a senha ninguém a abre — nem o
-KanGest nem o suporte**. Não há forma de recuperar uma senha esquecida.
-
-- A chave sai da senha por **Argon2id** (64 MiB de memória, 3 passagens), o que torna lento adivinhar senhas às cegas.
-- O conteúdo vai em **AES-256-GCM em blocos de 1 MiB**, cada um com um número único que inclui a sua posição e se é o
-  último. Uma cópia cortada, com blocos trocados, com um byte mexido ou com o cabeçalho alterado não abre.
-- A cópia fica completa e consistente mesmo com o programa em uso (`VACUUM INTO`); o ficheiro temporário em claro é
-  apagado logo a seguir.
-
-**Restaurar** (também em Configurações → Sistema, só para quem gere as configurações): o KanGest procura as cópias
-cifradas (`.kgc`), as manuais (`.db`) e as automáticas neste computador e nas pens. Escolhida a cópia (e a senha, se for
-cifrada), o KanGest abre-a, confirma que é uma base do KanGest inteira (verificação de integridade do SQLite) e de uma
-versão que sabe abrir, e mostra a empresa e o número de documentos. A troca faz-se ao **fechar e voltar a abrir o
-programa**, com a base ainda fechada; a base que estava em uso fica guardada em `copias/kangest-antes-do-restauro-….db`
-(com tudo o que estivesse no registo WAL). Até reabrir, pode desistir. Em rede, o restauro faz-se no servidor.
-
-As cópias automáticas diárias (`copias/`, 14 dias) continuam sem senha: ficam no mesmo computador que a base.
-
-## 6. Limites (o que estas protecções não fazem)
+## 5. Limites (o que estas protecções não fazem)
 
 - **Quem altera o executável também pode retirar as verificações.** O selo, o selo da licença e a detecção de
   depurador obrigam a perceber e alterar várias partes do programa compilado (Rust optimizado, sem símbolos), mas não
   o tornam impossível. O que realmente não se falsifica são as licenças (só o produtor tem a chave privada) e a cadeia
   de assinaturas dos documentos.
-- **O resto da base não está cifrado.** Os segredos vão no cofre, mas os documentos, os clientes e os artigos lêem-se
+- **O resto da base não está cifrado.** Os segredos vão cifrados, mas os documentos, os clientes e os artigos lêem-se
   com um editor de SQLite por quem tiver acesso ao computador. As cópias de segurança devem ser guardadas com o mesmo
   cuidado. Cifrar a base inteira (SQLCipher) obriga a uma senha ou a uma chave guardada no sistema (DPAPI no Windows,
   Porta-chaves no macOS) e a um cuidado especial ao restaurar noutro computador: fica como passo seguinte.
-- **O cofre não resiste a quem estuda o programa**: a chave do programa está no executável, embora partida. Contra
-  isso só uma senha que não está no computador — é o caso das cópias de segurança cifradas com senha (§5).
+- **Os segredos cifrados não resistem a quem tem o computador**: a chave mestra está no `kangest.chave`, ao lado da
+  base. Contra isso só uma senha que não está no computador — é o caso das cópias de segurança cifradas com senha.
 - **A chave de assinatura dos documentos (AGT)** é gerada na base até haver o certificado do produtor. Com o
   certificado, a chave do produtor passa a ir no programa e merece o mesmo cuidado que a chave do selo.
 - **Uma base nova recomeça a experiência** se não estiver registada no servidor de licenças: o registo online prende a

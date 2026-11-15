@@ -2,19 +2,20 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArchiveRestore, DatabaseBackup, ImagePlus, Inbox, LockKeyhole, Monitor, MonitorSmartphone, Network, Plus, Printer, RefreshCw, Server, Wifi } from "lucide-react";
+import { DatabaseBackup, ImagePlus, Inbox, Monitor, MonitorSmartphone, Network, Plus, Printer, Server, Wifi } from "lucide-react";
 import { abrirVisorEcra, logoParaRaster } from "@/lib/equipamento";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { PrintPortal } from "@/components/DocumentoPrint";
+import EmailConfig from "@/components/EmailConfig";
 import { imprimir } from "@/lib/print";
-import { call } from "@/lib/api";
+import { call, reiniciar } from "@/lib/api";
 import { useTabelas } from "@/lib/hooks";
 import { dataHora, parseKz, toInputKz } from "@/lib/format";
 import type { Empresa, EscPos, Posto, PostoOpcoes, VisorOpcoes } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 
-const ABAS = ["Empresa", "Postos e impressão", "Rede", "Tabelas", "Sistema", "Certificação AGT"] as const;
+const ABAS = ["Empresa", "Postos e impressão", "Rede", "Email", "Tabelas", "Sistema", "Certificação AGT"] as const;
 
 export default function Configuracoes() {
   const { tem } = useSession();
@@ -23,6 +24,7 @@ export default function Configuracoes() {
     Empresa: tem("sistema.configuracoes"),
     "Postos e impressão": true,
     Rede: tem("sistema.configuracoes"),
+    Email: tem("sistema.configuracoes"),
     Tabelas: tem("sistema.tabelas"),
     Sistema: tem("sistema.backup"),
     "Certificação AGT": tem("sistema.certificacao"),
@@ -31,7 +33,7 @@ export default function Configuracoes() {
   const [aba, setAba] = useState<(typeof ABAS)[number]>(visiveis[0] ?? "Postos e impressão");
   // ?aba=…: «Cadastro de Empresa», «Utilizadores», «Cópia de Segurança», «Armazém» abrem o separador certo
   const [sp] = useSearchParams();
-  const pedida = ({ empresa: "Empresa", postos: "Postos e impressão", rede: "Rede", tabelas: "Tabelas", sistema: "Sistema", agt: "Certificação AGT" } as const)[
+  const pedida = ({ empresa: "Empresa", postos: "Postos e impressão", rede: "Rede", email: "Email", tabelas: "Tabelas", sistema: "Sistema", agt: "Certificação AGT" } as const)[
     sp.get("aba") as "empresa"
   ];
   // os utilizadores passaram para o seu próprio módulo
@@ -44,7 +46,7 @@ export default function Configuracoes() {
   }, [pedida]);
   return (
     <>
-      <PageHeader title="Configurações" subtitle="Empresa, utilizadores, postos, tabelas auxiliares, cópias de segurança e certificação" />
+      <PageHeader title="Configurações" subtitle="Empresa, postos, rede, email, tabelas auxiliares, cópias de segurança e certificação" />
       <div className="mb-5 flex gap-1 overflow-x-auto border-b border-line">
         {visiveis.map((a) => (
           <button
@@ -59,6 +61,7 @@ export default function Configuracoes() {
       {aba === "Empresa" && <EmpresaForm />}
       {aba === "Postos e impressão" && <Postos />}
       {aba === "Rede" && <Rede />}
+      {aba === "Email" && <EmailConfig />}
       {aba === "Tabelas" && <Tabelas />}
       {aba === "Sistema" && <Sistema />}
       {aba === "Certificação AGT" && <Agt />}
@@ -424,6 +427,9 @@ function Postos() {
               <label className="flex items-center gap-2">
                 <input type="checkbox" checked={!!o.pos_ecra_inteiro} onChange={(e) => setO({ pos_ecra_inteiro: e.target.checked })} /> Abrir o POS em ecrã inteiro (terminais POS)
               </label>
+              <label className="flex items-center gap-2" title="Quem fecha o caixa conta o dinheiro sem ver o valor esperado (excepto quem tem a permissão «ver o valor esperado»)">
+                <input type="checkbox" checked={!!o.fecho_cego} onChange={(e) => setO({ fecho_cego: e.target.checked })} /> Fecho de caixa cego
+              </label>
             </div>
             <div className="space-y-3">
               <div className="text-[12px] font-medium uppercase tracking-wide text-ink-2">Impressão</div>
@@ -755,236 +761,238 @@ function Tabelas() {
   );
 }
 
-interface CopiaRestaurar {
-  caminho: string;
+interface Copia {
+  ficheiro: string;
   nome: string;
-  tamanho: number;
-  modificado: string;
+  bytes: number;
+  data: string;
+  verificada: boolean;
+  cifrada: boolean;
 }
-
-interface CopiaInfo {
-  empresa: string | null;
-  nif: string | null;
-  documentos: number;
-  ultimo_documento: string | null;
-}
-
-/** Cópia cifrada com senha: para levar numa pen ou guardar na nuvem. */
-function CopiaCifrada({ onClose }: { onClose: () => void }) {
-  const [senha, setSenha] = useState("");
-  const [repetir, setRepetir] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function criar() {
-    if (senha.length < 8) return toast.error("A senha tem de ter pelo menos 8 caracteres.");
-    if (senha !== repetir) return toast.error("As duas senhas não são iguais.");
-    setBusy(true);
-    try {
-      const r = await call<{ ficheiro: string }>("sistema.backupCifrado", { senha });
-      toast.success("Cópia cifrada criada.", { description: r.ficheiro, duration: 12000 });
-      onClose();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal open onClose={onClose} title="Cópia cifrada com senha" width="max-w-md" footer={<Button loading={busy} onClick={criar}><LockKeyhole className="size-4" /> Criar cópia</Button>}>
-      <div className="space-y-4">
-        <p className="text-[13.5px] text-ink-2">
-          A cópia fica na pasta Transferências, cifrada com AES-256. <b className="text-ink">Sem a senha ninguém a abre — nem o KanGest nem o suporte.</b> Guarde-a num sítio seguro.
-        </p>
-        <Field label="Senha da cópia" hint="Pelo menos 8 caracteres; uma frase é mais fácil de lembrar e mais segura">
-          <Input type="password" autoFocus value={senha} onChange={(e) => setSenha(e.target.value)} autoComplete="new-password" />
-        </Field>
-        <Field label="Repita a senha">
-          <Input type="password" value={repetir} onChange={(e) => setRepetir(e.target.value)} onKeyDown={(e) => e.key === "Enter" && criar()} autoComplete="new-password" />
-        </Field>
-      </div>
-    </Modal>
-  );
-}
-
-/** Restaurar uma cópia: prepara-a agora e a troca faz-se ao reabrir o programa. */
-function Restaurar() {
-  const qc = useQueryClient();
-  const { data, refetch, isFetching } = useQuery({
-    queryKey: ["copias-restaurar"],
-    queryFn: () => call<{ copias: CopiaRestaurar[]; pendente: CopiaInfo | null }>("sistema.copiasRestaurar"),
-  });
-  const [escolhida, setEscolhida] = useState<CopiaRestaurar | null>(null);
-  const [senha, setSenha] = useState("");
-  const [percebi, setPercebi] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const cifrada = escolhida?.nome.toLowerCase().endsWith(".kgc");
-  const fechar = () => {
-    setEscolhida(null);
-    setSenha("");
-    setPercebi(false);
-  };
-  async function preparar() {
-    if (!escolhida) return;
-    setBusy(true);
-    try {
-      await call("sistema.restaurar", { caminho: escolhida.caminho, senha: cifrada ? senha : null });
-      toast.success("Cópia pronta a restaurar. Feche e volte a abrir o KanGest para concluir.", { duration: 15000 });
-      fechar();
-      qc.invalidateQueries({ queryKey: ["copias-restaurar"] });
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function cancelar() {
-    await call("sistema.restaurarCancelar");
-    refetch();
-  }
-  const mb = (b: number) => `${(b / 1024 / 1024).toFixed(2)} MB`;
-  return (
-    <Card>
-      <div className="flex items-start justify-between gap-4 px-5 pt-4">
-        <div>
-          <div className="font-semibold">Restaurar uma cópia</div>
-          <p className="text-[13px] text-ink-2">Cópias cifradas (.kgc), manuais e automáticas encontradas neste computador e nas pens.</p>
-        </div>
-        <Button variant="ghost" size="sm" loading={isFetching} onClick={() => refetch()}>
-          <RefreshCw className="size-4" /> Procurar
-        </Button>
-      </div>
-      {data?.pendente && (
-        <div role="status" className="mx-5 mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-accent/40 bg-accent-50 px-4 py-2.5 text-[13px] text-[#7a4f0a]">
-          <ArchiveRestore className="size-4 shrink-0" />
-          <span className="min-w-0 flex-1">
-            Restauro preparado: <b>{data.pendente.empresa}</b> ({data.pendente.documentos} documentos{data.pendente.ultimo_documento ? `, o último de ${dataHora(data.pendente.ultimo_documento)}` : ""}). Feche e volte a abrir o KanGest para o concluir.
-          </span>
-          <Button size="sm" variant="ghost" onClick={cancelar}>Desistir</Button>
-        </div>
-      )}
-      <div className="max-h-72 overflow-auto pt-2">
-        <Table>
-          <tbody>
-            {data?.copias.map((c) => (
-              <tr key={c.caminho}>
-                <Td>
-                  <div className="flex items-center gap-2 font-mono text-[12px]">
-                    {c.nome.toLowerCase().endsWith(".kgc") && <LockKeyhole className="size-3.5 text-brand" aria-label="cifrada" />}
-                    {c.nome}
-                  </div>
-                  <div className="truncate text-[11.5px] text-ink-3" title={c.caminho}>{c.caminho}</div>
-                </Td>
-                <Td className="num whitespace-nowrap text-right text-ink-2">{dataHora(c.modificado)}</Td>
-                <Td className="num text-right text-ink-2">{mb(c.tamanho)}</Td>
-                <Td className="text-right">
-                  <Button size="sm" variant="secondary" onClick={() => setEscolhida(c)}>Restaurar…</Button>
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-        {data && !data.copias.length && <p className="py-6 text-center text-ink-3">Nenhuma cópia encontrada.</p>}
-      </div>
-      {escolhida && (
-        <Modal
-          open
-          onClose={fechar}
-          title="Restaurar esta cópia?"
-          width="max-w-md"
-          footer={
-            <Button variant="danger" loading={busy} disabled={!percebi || (cifrada && !senha)} onClick={preparar}>
-              <ArchiveRestore className="size-4" /> Preparar o restauro
-            </Button>
-          }
-        >
-          <div className="space-y-4 text-[13.5px]">
-            <p className="font-mono text-[12.5px]">{escolhida.nome}</p>
-            {cifrada && (
-              <Field label="Senha da cópia">
-                <Input type="password" autoFocus value={senha} onChange={(e) => setSenha(e.target.value)} autoComplete="off" />
-              </Field>
-            )}
-            <label className="flex items-start gap-2 text-ink-2">
-              <input type="checkbox" className="mt-1" checked={percebi} onChange={(e) => setPercebi(e.target.checked)} />
-              <span>
-                Percebo que <b className="text-ink">todos os dados actuais são substituídos</b> pelos da cópia ao reabrir o programa. A base actual fica guardada nas cópias automáticas («antes do restauro»).
-              </span>
-            </label>
-          </div>
-        </Modal>
-      )}
-    </Card>
-  );
+interface EstadoCopias {
+  pasta: string;
+  copias: Copia[];
+  externas: Copia[];
+  config: { intervalo_horas: number; manter: number; pasta_externa: string; cifrar_externa: boolean; tem_senha: boolean };
+  estado: { ultima: string | null; ultima_externa: string | null; erro_externa: string | null; pasta_externa_acessivel: boolean };
+  posto_cliente: boolean;
 }
 
 function Sistema() {
-  const { data, refetch } = useQuery({
-    queryKey: ["copias"],
-    queryFn: () => call<{ pasta: string; copias: { ficheiro: string; bytes: number }[] }>("sistema.copias"),
-  });
-  const [busy, setBusy] = useState(false);
-  const [cifrar, setCifrar] = useState(false);
-  const { tem } = useSession();
-  async function copiar() {
-    setBusy(true);
+  const { data, refetch } = useQuery({ queryKey: ["copias"], queryFn: () => call<EstadoCopias>("sistema.copias") });
+  const [busy, setBusy] = useState<"" | "agora" | "exportar" | "gravar">("");
+  const [f, setF] = useState<{ intervalo_horas: number; manter: number; pasta_externa: string; cifrar_externa: boolean; senha: string } | null>(null);
+  const [restaurar, setRestaurar] = useState<{ ficheiro: string; cifrada: boolean; descricao: string } | null>(null);
+  const [outro, setOutro] = useState("");
+  useEffect(() => {
+    if (data && !f) setF({ ...data.config, senha: "" });
+  }, [data, f]);
+
+  async function acao(tipo: "agora" | "exportar") {
+    setBusy(tipo);
     try {
-      const r = await call<{ ficheiro: string }>("sistema.backup");
-      toast.success("Cópia de segurança criada.", { description: r.ficheiro, duration: 10000 });
+      const r = await call<{ ficheiro: string; externa?: string | null }>(tipo === "agora" ? "sistema.copiaAgora" : "sistema.backup");
+      toast.success(tipo === "agora" ? "Cópia de segurança feita e verificada." : "Cópia exportada.", { description: r.externa ?? r.ficheiro, duration: 8000 });
       refetch();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
-      setBusy(false);
+      setBusy("");
+    }
+  }
+  async function gravar() {
+    if (!f) return;
+    setBusy("gravar");
+    try {
+      await call("sistema.copiasGuardar", { ...f, senha: f.senha || undefined });
+      toast.success("Configuração das cópias guardada.");
+      setF(null);
+      refetch();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy("");
     }
   }
   const mb = (b: number) => `${(b / 1024 / 1024).toFixed(2)} MB`;
+  const linha = (c: Copia, onde: string) => (
+    <tr key={c.ficheiro}>
+      <Td>
+        <div className="font-mono text-[12px]">{c.nome}</div>
+        <div className="text-[11.5px] text-ink-3">{onde}</div>
+      </Td>
+      <Td className="text-ink-2">{dataHora(c.data)}</Td>
+      <Td className="num text-right text-ink-2">{mb(c.bytes)}</Td>
+      <Td>
+        {c.verificada && <Badge tone="ok">verificada</Badge>} {c.cifrada && <Badge tone="brand">cifrada</Badge>}
+      </Td>
+      <Td className="text-right">
+        {!data?.posto_cliente && (
+          <Button size="sm" variant="secondary" onClick={() => setRestaurar({ ficheiro: c.ficheiro, cifrada: c.cifrada, descricao: `${c.nome} (${dataHora(c.data)})` })}>
+            Restaurar
+          </Button>
+        )}
+      </Td>
+    </tr>
+  );
+  if (data?.posto_cliente) {
+    return (
+      <Card className="max-w-4xl p-6">
+        <div className="mb-1 font-semibold">Cópias de segurança</div>
+        <p className="text-ink-2">Este posto trabalha sobre a base de dados do servidor: as cópias de segurança fazem-se e restauram-se na máquina do servidor.</p>
+      </Card>
+    );
+  }
   return (
     <div className="grid max-w-4xl gap-4">
       <Card className="p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="mb-1 font-semibold">Cópia de segurança</div>
+            <div className="mb-1 font-semibold">Cópias de segurança</div>
             <p className="text-ink-2">
-              Uma cópia automática é feita todos os dias ao abrir o programa (guardam-se as últimas 14). Pode também criar uma cópia manual na pasta Transferências e guardá-la
-              numa pen ou na nuvem — de preferência <b className="text-ink">cifrada com senha</b>: quem a encontrar não lê nada.
+              Automáticas ao abrir, de {data?.config.intervalo_horas || "—"} em {data?.config.intervalo_horas || "—"} horas e em cada fecho de caixa; cada cópia é verificada.
+              Guarde-as também fora deste computador (pen, disco de rede ou pasta do OneDrive / Google Drive).
             </p>
+            <p className="mt-2 text-[13px] text-ink-3">
+              Última cópia: {data?.estado.ultima ? dataHora(data.estado.ultima) : "—"} · Última na pasta externa:{" "}
+              {data?.estado.ultima_externa ? dataHora(data.estado.ultima_externa) : "—"}
+            </p>
+            {data?.estado.erro_externa && <p className="mt-1 text-[13px] text-danger">Pasta externa: {data.estado.erro_externa}</p>}
           </div>
           <div className="flex shrink-0 flex-col gap-2">
-            <Button loading={busy} onClick={copiar}>
-              <DatabaseBackup className="size-4" /> Copiar agora
+            <Button loading={busy === "agora"} onClick={() => acao("agora")}>
+              <DatabaseBackup className="size-4" /> Fazer cópia agora
             </Button>
-            <Button variant="secondary" onClick={() => setCifrar(true)}>
-              <LockKeyhole className="size-4" /> Cópia cifrada…
+            <Button variant="secondary" loading={busy === "exportar"} onClick={() => acao("exportar")}>
+              Exportar para Transferências
             </Button>
           </div>
         </div>
       </Card>
-      {cifrar && <CopiaCifrada onClose={() => setCifrar(false)} />}
-      {tem("sistema.configuracoes") && <Restaurar />}
+      {f && (
+        <Card className="p-6">
+          <div className="mb-3 font-semibold">Automáticas e pasta externa</div>
+          <div className="grid grid-cols-3 gap-4">
+            <Field label="Frequência">
+              <Select value={f.intervalo_horas} onChange={(e) => setF({ ...f, intervalo_horas: Number(e.target.value) })}>
+                <option value={0}>Só ao abrir o programa</option>
+                {[1, 2, 4, 8, 12, 24].map((h) => (
+                  <option key={h} value={h}>
+                    De {h} em {h} horas
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Cópias a guardar">
+              <Input className="num" type="number" min={3} max={365} value={f.manter} onChange={(e) => setF({ ...f, manter: Number(e.target.value) || 30 })} />
+            </Field>
+            <div />
+            <Field label="Pasta externa (opcional)" className="col-span-3" hint="Ex.: E:\Copias KanGest (pen) ou C:\Users\…\OneDrive\KanGest. Se a pen não estiver ligada, a cópia local faz-se na mesma.">
+              <Input className="font-mono" value={f.pasta_externa} onChange={(e) => setF({ ...f, pasta_externa: e.target.value })} placeholder="E:\Copias KanGest" />
+            </Field>
+            <label className="col-span-3 flex items-center gap-2 text-[13.5px]">
+              <input type="checkbox" checked={f.cifrar_externa} onChange={(e) => setF({ ...f, cifrar_externa: e.target.checked })} />
+              Cifrar as cópias da pasta externa com uma senha (protege os dados se a pen se perder)
+            </label>
+            {f.cifrar_externa && (
+              <Field label="Senha das cópias" className="col-span-2" hint="Mínimo 8 caracteres. Guarde-a num sítio seguro: sem ela a cópia não se restaura noutro computador.">
+                <Input type="password" value={f.senha} onChange={(e) => setF({ ...f, senha: e.target.value })} placeholder={data?.config.tem_senha ? "•••••• (manter)" : ""} />
+              </Field>
+            )}
+          </div>
+          <Button className="mt-4" loading={busy === "gravar"} onClick={gravar}>
+            Guardar
+          </Button>
+        </Card>
+      )}
       <Card>
-        <div className="px-5 pt-4 font-semibold">Cópias automáticas</div>
+        <div className="px-5 pt-4 font-semibold">Cópias guardadas</div>
         <div className="px-5 pb-2 text-[12px] text-ink-3" data-selectable>
           {data?.pasta}
         </div>
         <Table>
           <tbody>
-            {data?.copias.map((c) => (
-              <tr key={c.ficheiro}>
-                <Td className="font-mono text-[12px]" >{c.ficheiro.split(/[\\/]/).pop()}</Td>
-                <Td className="num text-right text-ink-2">{mb(c.bytes)}</Td>
-              </tr>
-            ))}
+            {data?.copias.map((c) => linha(c, "Neste computador"))}
+            {data?.externas.map((c) => linha(c, "Pasta externa"))}
           </tbody>
         </Table>
-        {!data?.copias.length && <p className="py-6 text-center text-ink-3">Ainda não há cópias automáticas.</p>}
+        {!data?.copias.length && !data?.externas.length && <p className="py-6 text-center text-ink-3">Ainda não há cópias.</p>}
+        <div className="flex items-end gap-2 border-t border-line px-5 py-4">
+          <Field label="Restaurar outro ficheiro" className="flex-1" hint="Caminho completo de uma cópia .db ou .kgc (ex.: numa pen).">
+            <Input className="font-mono" value={outro} onChange={(e) => setOutro(e.target.value)} placeholder="E:\Copias KanGest\kangest-….kgc" />
+          </Field>
+          <Button variant="secondary" disabled={!outro.trim()} onClick={() => setRestaurar({ ficheiro: outro.trim(), cifrada: outro.trim().endsWith(".kgc"), descricao: outro.trim() })}>
+            Restaurar
+          </Button>
+        </div>
       </Card>
+      {restaurar && <RestaurarCopia alvo={restaurar} temSenha={!!data?.config.tem_senha} onClose={() => setRestaurar(null)} metodo="sistema.restaurar" />}
     </div>
+  );
+}
+
+/** Confirmação do restauro: guarda a base actual, marca a troca e reinicia. */
+export function RestaurarCopia({
+  alvo,
+  temSenha,
+  onClose,
+  metodo,
+}: {
+  alvo: { ficheiro: string; cifrada: boolean; descricao: string };
+  temSenha: boolean;
+  onClose: () => void;
+  metodo: "sistema.restaurar" | "setup.restaurar";
+}) {
+  const [senha, setSenha] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function confirmar() {
+    setBusy(true);
+    try {
+      await call(metodo, { ficheiro: alvo.ficheiro, senha: senha || undefined });
+      toast.success("Cópia verificada. O KanGest vai reiniciar para a restaurar.");
+      setTimeout(() => reiniciar(), 1200);
+    } catch (e) {
+      toast.error((e as Error).message);
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal open onClose={onClose} title="Restaurar cópia de segurança" width="max-w-lg">
+      <p className="text-ink-2">
+        A base de dados passa a ser a da cópia <b className="break-all">{alvo.descricao}</b>. O que foi registado depois dessa cópia deixa de aparecer.
+        {metodo === "sistema.restaurar" && " Antes, o KanGest guarda uma cópia da base actual (em «copias»)."} O programa reinicia no fim.
+      </p>
+      {alvo.cifrada && (
+        <Field label="Senha da cópia" className="mt-4" hint={temSenha ? "Deixe vazio para usar a senha guardada neste computador." : undefined}>
+          <Input type="password" autoFocus value={senha} onChange={(e) => setSenha(e.target.value)} />
+        </Field>
+      )}
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose}>
+          Cancelar
+        </Button>
+        <Button loading={busy} onClick={confirmar}>
+          Restaurar e reiniciar
+        </Button>
+      </div>
+    </Modal>
   );
 }
 
 function Agt() {
   const { data, refetch } = useQuery({
     queryKey: ["agt"],
-    queryFn: () => call<{ chave_publica: string; certificado: string; certificado_anterior: string | null; chave_importada: string | null }>("agt.info"),
+    queryFn: () =>
+      call<{
+        chave_publica: string;
+        certificado: string;
+        certificado_anterior: string | null;
+        chave_importada: string | null;
+        chave_origem: "PRODUTOR" | "IMPORTADA" | "DESENVOLVIMENTO";
+        certificado_embutido: boolean;
+        exigir_certificacao: boolean;
+        versao_chave: string;
+      }>("agt.info"),
   });
   const [cert, setCert] = useState("");
   useEffect(() => data && setCert(data.certificado), [data]);
@@ -1017,13 +1025,29 @@ function Agt() {
           Cada factura, recibo e nota de crédito é assinada com RSA-SHA1 sobre <code className="rounded bg-sunken px-1">Data;DataHora;Número;Total;HashAnterior</code>, formando uma
           cadeia por série. Os 4 caracteres de controlo (posições 1, 11, 21 e 31 do hash) são impressos no documento.
         </p>
-        <Field label="N.º do certificado AGT" hint="Ex.: 123 — aparece como “Processado por programa válido n.º 123/AGT”.">
+        <Field
+          label="N.º do certificado AGT"
+          hint={
+            data?.certificado_embutido
+              ? "Vem com esta versão do KanGest (certificado do produtor)."
+              : "Ex.: 123 — aparece como “Processado por programa válido n.º 123/AGT”."
+          }
+        >
           <div className="flex gap-2">
-            <Input value={cert} onChange={(e) => setCert(e.target.value)} />
-            <Button onClick={guardar}>Guardar</Button>
+            <Input value={cert} onChange={(e) => setCert(e.target.value)} disabled={data?.certificado_embutido} />
+            {!data?.certificado_embutido && <Button onClick={guardar}>Guardar</Button>}
           </div>
         </Field>
+        {data && (
+          <div className="mt-3 text-[13px] text-ink-3">Versão da chave nos documentos novos (HashControl do SAF-T): {data.versao_chave}</div>
+        )}
       </Card>
+      {data?.chave_origem === "DESENVOLVIMENTO" && (
+        <div className="rounded-xl bg-accent-50 px-4 py-3 text-accent-ink">
+          <b>Chave de desenvolvimento.</b> Os documentos estão a ser assinados com uma chave gerada nesta instalação, que a AGT não conhece. Use a versão oficial do
+          KanGest, que traz a chave e o certificado do produtor.
+        </div>
+      )}
       {data?.certificado_anterior && (
         <Card className="p-6">
           <div className="mb-1 font-semibold">Certificado do sistema anterior (KIGEST)</div>
@@ -1037,21 +1061,100 @@ function Agt() {
       <Card className="p-6">
         <div className="mb-1 flex items-center justify-between">
           <span className="font-semibold">Chave de assinatura</span>
-          <label className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-line-strong bg-surface px-3 text-[13px] hover:bg-sunken">
-            Carregar chave do produtor (PEM)
-            <input type="file" accept=".pem,.key,text/plain" className="hidden" onChange={(e) => e.target.files?.[0] && carregarChave(e.target.files[0])} />
-          </label>
+          {data && data.chave_origem !== "PRODUTOR" && (
+            <label className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-line-strong bg-surface px-3 text-[13px] hover:bg-sunken">
+              Carregar chave do produtor (PEM)
+              <input type="file" accept=".pem,.key,text/plain" className="hidden" onChange={(e) => e.target.files?.[0] && carregarChave(e.target.files[0])} />
+            </label>
+          )}
         </div>
-        <p className="mb-3 text-ink-2">
-          Se é o titular do certificado AGT deste programa, carregue a sua chave privada RSA. Caso contrário, use a chave gerada e entregue a chave pública abaixo à AGT no
-          pedido de certificação.
-          {data?.chave_importada && <span className="ml-1 text-ink-3">Chave do produtor carregada em {data.chave_importada.replace("T", " ")}.</span>}
-        </p>
-        <pre data-selectable className="overflow-x-auto rounded-xl bg-ink p-4 font-mono text-[12px] leading-relaxed text-white/90">
+        {data?.chave_origem === "PRODUTOR" ? (
+          <p className="mb-3 text-ink-2">
+            <Badge tone="ok" className="mr-2">Chave do produtor</Badge>
+            A chave privada vem dentro do programa e não fica na base de dados nem nas cópias de segurança. Abaixo está a chave pública correspondente.
+          </p>
+        ) : (
+          <p className="mb-3 text-ink-2">
+            Só para testes e desenvolvimento: a versão oficial do KanGest já traz a chave do produtor. Uma chave carregada aqui fica guardada nesta instalação.
+            {data?.chave_importada && <span className="ml-1 text-ink-3">Chave carregada em {data.chave_importada.replace("T", " ")}.</span>}
+          </p>
+        )}
+        <pre data-selectable className="overflow-x-auto rounded-xl bg-[#1d2422] p-4 font-mono text-[12px] leading-relaxed text-white/90">
           {data?.chave_publica ?? "…"}
         </pre>
       </Card>
+      <Integridade />
     </div>
+  );
+}
+
+interface ResultadoIntegridade {
+  ok: boolean;
+  resumo: string;
+  verificados: number;
+  chaves: number;
+  data: string;
+  protecao: { ativa: boolean; em_falta: string[] };
+  series: { tipo: string; serie: string; documentos: number; primeiro: string | null; ultimo: string | null; total_erros: number; erros: { documento: string; problema: string }[] }[];
+}
+
+/** Refaz a cadeia de assinaturas de todas as séries, como faria um auditor da AGT. */
+function Integridade() {
+  const [r, setR] = useState<ResultadoIntegridade | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function verificar() {
+    setBusy(true);
+    try {
+      setR(await call<ResultadoIntegridade>("agt.verificarIntegridade"));
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const comErro = r?.series.filter((s) => s.total_erros > 0) ?? [];
+  return (
+    <Card className="p-6">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="font-semibold">Integridade da cadeia de assinaturas</span>
+        <Button variant="secondary" loading={busy} onClick={verificar}>
+          Verificar agora
+        </Button>
+      </div>
+      <p className="mb-3 text-ink-2">
+        Refaz a assinatura de cada documento, série a série, e confirma a numeração sem saltos, os caracteres de controlo e os totais. Os documentos assinados estão
+        protegidos na base de dados: não se alteram nem se apagam (corrigem-se com nota de crédito ou anulação com motivo).
+      </p>
+      {r && (
+        <div className="grid gap-3">
+          <div className={cn("rounded-xl px-4 py-3 font-medium", r.ok ? "bg-ok-50 text-ok" : "bg-danger-50 text-danger")}>
+            {r.resumo} <span className="font-normal text-ink-3">({dataHora(r.data)}, {r.chaves} chave(s) pública(s))</span>
+          </div>
+          {!r.protecao.ativa && (
+            <div className="rounded-xl bg-danger-50 px-4 py-3 text-danger">
+              A protecção dos documentos assinados foi removida da base de dados ({r.protecao.em_falta.join(", ")}). Contacte o suporte: a base pode ter sido mexida fora do KanGest.
+            </div>
+          )}
+          {comErro.map((s) => (
+            <div key={s.tipo + s.serie} className="rounded-xl border border-line p-3">
+              <div className="mb-2 font-medium">
+                {s.tipo} {s.serie}: {s.total_erros} problema(s) em {s.documentos} documento(s)
+              </div>
+              <ul className="grid gap-1 text-[13px]">
+                {s.erros.map((e, i) => (
+                  <li key={i}>
+                    <Badge tone="danger" className="mr-2">{e.documento}</Badge>
+                    {e.problema}
+                  </li>
+                ))}
+                {s.total_erros > s.erros.length && <li className="text-ink-3">… e mais {s.total_erros - s.erros.length}.</li>}
+              </ul>
+            </div>
+          ))}
+          {r.ok && <div className="text-[13px] text-ink-3">{r.series.map((s) => `${s.tipo} ${s.serie}: ${s.documentos}`).join(" · ")}</div>}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -1062,6 +1165,8 @@ interface EstadoRede {
   porta: number;
   servidor: string;
   chave: string;
+  /** A chave em uso tem menos de 10 caracteres (aceite, mas fraca). */
+  chave_curta?: boolean;
   servidor_activo: number | null;
   enderecos: string[];
   ligados: { posto_id: number; posto: string; utilizador: string | null; endereco: string; ultimo: string; pedidos: number }[];
@@ -1072,6 +1177,14 @@ const MODOS = [
   { id: "servidor", label: "Servidor", icon: Server, texto: "Esta máquina guarda a base de dados e serve os outros postos da rede local." },
   { id: "cliente", label: "Posto em rede", icon: Wifi, texto: "Esta máquina trabalha sobre a base de dados do servidor." },
 ] as const;
+
+/** Chave de rede forte: 20 caracteres sem ambiguidades (sem 0/O, 1/I/L), em grupos de 5. */
+function gerarChaveRede() {
+  const alfabeto = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  const b = crypto.getRandomValues(new Uint8Array(20));
+  const c = Array.from(b, (x) => alfabeto[x % alfabeto.length]).join("");
+  return c.match(/.{5}/g)!.join("-");
+}
 
 /** Vários postos ligados ao mesmo servidor (substitui o SQL Server partilhado do KIGEST). */
 function Rede() {
@@ -1142,9 +1255,25 @@ function Rede() {
               <Field label="Porta">
                 <Input className="num" value={v.porta ?? 7799} onChange={(e) => set({ porta: Number(e.target.value.replace(/\D/g, "")) || 0 })} />
               </Field>
-              <Field label="Chave de rede" className={v.modo === "cliente" ? "col-span-3" : "col-span-2"} hint="Igual em todos os postos; mínimo 6 caracteres">
-                <Input value={v.chave ?? ""} onChange={(e) => set({ chave: e.target.value })} />
+              <Field
+                label="Chave de rede"
+                className={v.modo === "cliente" ? "col-span-3" : "col-span-2"}
+                hint="Igual em todos os postos (mínimo 10 caracteres). Nunca passa na rede: serve para cifrar os pedidos."
+              >
+                <div className="flex gap-2">
+                  <Input className="font-mono" value={v.chave ?? ""} onChange={(e) => set({ chave: e.target.value })} />
+                  {v.modo === "servidor" && (
+                    <Button variant="secondary" onClick={() => set({ chave: gerarChaveRede() })}>
+                      Gerar chave
+                    </Button>
+                  )}
+                </div>
               </Field>
+              {r.chave_curta && (
+                <p className="col-span-3 rounded-lg bg-accent-50 px-3 py-2 text-[12.5px] text-accent-ink">
+                  A chave de rede em uso é curta. Gere uma chave nova no servidor e escreva-a em cada posto.
+                </p>
+              )}
             </div>
           )}
 

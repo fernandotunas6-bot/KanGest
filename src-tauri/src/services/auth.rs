@@ -90,7 +90,7 @@ pub async fn seguranca_guardar(st: &AppState, p: PoliticaIn) -> AppResult<Value>
         ("seguranca.inatividade_min", p.inatividade_min.clamp(0, 480).to_string()),
         ("seguranca.login_pin", if p.login_pin { "1" } else { "0" }.to_string()),
     ];
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     for (k, v) in valores {
         sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").bind(k).bind(v).execute(&mut *tx).await?;
     }
@@ -258,7 +258,8 @@ pub async fn login(st: &AppState, i: LoginIn) -> AppResult<Value> {
 }
 
 /// Falhas seguidas de entrada por PIN em cada posto (um PIN de 4 dígitos não pode ser adivinhado à força).
-static FALHAS_PIN: std::sync::Mutex<Option<std::collections::HashMap<i64, (u32, chrono::DateTime<chrono::Local>)>>> = std::sync::Mutex::new(None);
+type FalhasPin = std::sync::Mutex<Option<std::collections::HashMap<i64, (u32, chrono::DateTime<chrono::Local>)>>>;
+static FALHAS_PIN: FalhasPin = std::sync::Mutex::new(None);
 
 #[derive(Deserialize)]
 pub struct PinIn {
@@ -496,7 +497,7 @@ pub async fn guardar(st: &AppState, u: UtilizadorIn) -> AppResult<Value> {
     }
     let ativo = u.ativo.unwrap_or(true) as i64;
     let limite = u.limite_desconto.unwrap_or(0.0).clamp(0.0, 100.0);
-    let mut tx = st.pool.begin().await?;
+    let mut tx = crate::db::transacao(&st.pool).await?;
     let id = match u.id {
         Some(id) => {
             sqlx::query("UPDATE utilizadores SET nome = ?, login = ?, perfil = ?, ativo = ?, permissoes = ?, limite_desconto = ? WHERE id = ?")

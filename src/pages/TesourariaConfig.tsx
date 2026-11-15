@@ -84,7 +84,7 @@ export default function TesourariaConfig() {
                 >
                   <Td>
                     <span className="inline-flex items-center gap-2 font-medium">
-                      {c.tipo === "CAIXA" ? <Banknote className="size-4 text-[#9a6514]" /> : <Building2 className="size-4 text-brand" />}
+                      {c.tipo === "CAIXA" ? <Banknote className="size-4 text-accent-ink" /> : <Building2 className="size-4 text-brand" />}
                       {c.descricao}
                     </span>
                     {!c.ativo && <Badge tone="danger" className="ml-2">Inactiva</Badge>}

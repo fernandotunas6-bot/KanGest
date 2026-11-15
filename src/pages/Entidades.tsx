@@ -1,32 +1,44 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { FileSpreadsheet, HandCoins, Plus, Printer, Search, Users } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce } from "@/lib/hooks";
-import { kz, parseKz, toInputKz } from "@/lib/format";
-import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
+import { kz, nifValido, parseKz, toInputKz } from "@/lib/format";
+import { exportarExcel, kzXL } from "@/lib/csv";
 import { imprimir } from "@/lib/print";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import type { Entidade } from "@/lib/types";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 
 export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
   const [q, setQ] = useState("");
   const [editar, setEditar] = useState<Partial<Entidade> | null>(null);
   const dq = useDebounce(q);
   const nav = useNavigate();
+  const [sp, setSp] = useSearchParams();
+  // ?id=… (pesquisa global, Ctrl+K): abre logo a ficha
+  useEffect(() => {
+    const id = Number(sp.get("id"));
+    if (!id) return;
+    setSp({}, { replace: true });
+    if (id !== 1) call<Entidade>("entidades.obter", { id }).then(setEditar, (e: Error) => toast.error(e.message));
+  }, [sp, setSp]);
   const nome = tipo === "C" ? "Clientes" : "Fornecedores";
   const lista = useQuery({ queryKey: ["entidades", tipo, dq], queryFn: () => call<Entidade[]>("entidades.listar", { tipo, q: dq }) });
+  const { ordenados, cab } = useOrdenacao(lista.data, (e, k: "nome" | "nif" | "localidade" | "saldo") =>
+    k === "nome" ? e.nome : k === "nif" ? e.nif : k === "localidade" ? e.localidade : (e.saldo ?? 0),
+  );
   const empresa = useEmpresa();
   const linhas = lista.data ?? [];
   const totalDivida = linhas.reduce((s, e) => s + Math.max(0, e.saldo ?? 0), 0);
   function exportar() {
-    exportarFicheiro(
-      `${nome.toLowerCase()}.csv`,
-      csv([["Nome", "NIF", "Telefone", "Email", "Endereço", "Localidade", "Província", "Saldo em dívida"], ...linhas.map((e) => [e.nome, e.nif, e.telefone ?? "", e.email ?? "", e.endereco ?? "", e.localidade ?? "", e.provincia ?? "", csvKz(e.saldo ?? 0)])]),
+    exportarExcel(
+      `${nome.toLowerCase()}.xlsx`,
+      [["Nome", "NIF", "Telefone", "Email", "Endereço", "Localidade", "Província", "Saldo em dívida"], ...(ordenados ?? linhas).map((e) => [e.nome, e.nif, e.telefone ?? "", e.email ?? "", e.endereco ?? "", e.localidade ?? "", e.provincia ?? "", kzXL(e.saldo ?? 0)])],
+      { titulo: nome },
     );
   }
 
@@ -38,7 +50,7 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
         actions={
           <>
             <Button variant="secondary" onClick={exportar} disabled={!linhas.length}>
-              <FileSpreadsheet className="size-4" /> CSV
+              <FileSpreadsheet className="size-4" /> Excel
             </Button>
             <Button variant="secondary" onClick={imprimir} disabled={!linhas.length}>
               <Printer className="size-4" /> Imprimir
@@ -64,18 +76,20 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
         {lista.data?.length === 0 ? (
           <Empty icon={<Users className="size-6" />} title={`Sem ${nome.toLowerCase()}`} />
         ) : (
-          <Table className="max-h-[calc(100vh-260px)]">
+          <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
-                <Th>Nome</Th>
-                <Th>NIF</Th>
+                <Th {...cab("nome")}>Nome</Th>
+                <Th {...cab("nif")}>NIF</Th>
                 <Th>Contacto</Th>
-                <Th>Localidade</Th>
-                <Th className="text-right">Saldo em dívida</Th>
+                <Th {...cab("localidade")}>Localidade</Th>
+                <Th className="text-right" {...cab("saldo")}>
+                  Saldo em dívida
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {lista.data?.map((e) => (
+              {ordenados?.map((e) => (
                 <tr key={e.id} className="cursor-pointer hover:bg-sunken/60" onClick={() => e.id !== 1 && setEditar(e)}>
                   <Td className="font-medium">
                     {e.nome} {e.id === 1 && <Badge className="ml-2">Sistema</Badge>}
@@ -83,7 +97,7 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
                   <Td className="font-mono text-[12.5px]">{e.nif}</Td>
                   <Td className="text-ink-2">{[e.telefone, e.email].filter(Boolean).join(" · ") || "—"}</Td>
                   <Td className="text-ink-2">{e.localidade ?? "—"}</Td>
-                  <Td className="num text-right">{(e.saldo ?? 0) > 0 ? <span className="font-medium text-[#9a6514]">{kz(e.saldo)}</span> : <span className="text-ink-3">—</span>}</Td>
+                  <Td className="num text-right">{(e.saldo ?? 0) > 0 ? <span className="font-medium text-accent-ink">{kz(e.saldo)}</span> : <span className="text-ink-3">—</span>}</Td>
                 </tr>
               ))}
             </tbody>
@@ -167,8 +181,11 @@ function EntidadeForm({ inicial, onClose }: { inicial: Partial<Entidade>; onClos
         <Field label="Nome / Razão social" className="col-span-2">
           <Input autoFocus value={e.nome ?? ""} onChange={(x) => set("nome", x.target.value)} />
         </Field>
-        <Field label="NIF" hint="Vazio = 999999999 (consumidor final)">
-          <Input value={e.nif ?? ""} onChange={(x) => set("nif", x.target.value)} />
+        <Field
+          label="NIF"
+          hint={nifValido(e.nif, e.pais ?? "AO") ? "Vazio = 999999999 (consumidor final)" : "Em Angola: 10 algarismos (empresas) ou n.º do BI (ex.: 001234567LA041)"}
+        >
+          <Input value={e.nif ?? ""} onChange={(x) => set("nif", x.target.value)} className={cn(!nifValido(e.nif, e.pais ?? "AO") && "border-danger")} />
         </Field>
         <Field label="Tipo">
           <Select value={e.tipo} onChange={(x) => set("tipo", x.target.value)}>

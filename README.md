@@ -6,9 +6,9 @@ A análise do sistema antigo e o roteiro estão em [docs/ANALISE-KIGEST.md](docs
 ## Baixar
 
 - **Página do produto:** https://kangest.pages.dev (cópia em https://fernandotunas6-bot.github.io/KanGest/)
-- **Windows 10/11 (64 bits):** [KanGest_1.0.0_x64-setup.exe](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_x64-setup.exe)
-- **macOS Apple Silicon (M1–M4):** [KanGest_1.0.0_aarch64.dmg](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_aarch64.dmg)
-- **macOS Intel:** [KanGest_1.0.0_x64.dmg](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.0.0/KanGest_1.0.0_x64.dmg)
+- **Windows 10/11 (64 bits):** [KanGest_1.2.0_x64-setup.exe](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.2.0/KanGest_1.2.0_x64-setup.exe)
+- **macOS Apple Silicon (M1–M4):** [KanGest_1.2.0_aarch64.dmg](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.2.0/KanGest_1.2.0_aarch64.dmg)
+- **macOS Intel:** [KanGest_1.2.0_x64.dmg](https://github.com/fernandotunas6-bot/KanGest/releases/download/v1.2.0/KanGest_1.2.0_x64.dmg)
 - **Todas as versões:** https://github.com/fernandotunas6-bot/KanGest/releases
 
 Outros produtos na mesma página: [SIGA Plus](https://www.portal-siga.com) (gestão escolar) e o projecto da
@@ -40,7 +40,7 @@ A base de dados SQLite fica na pasta de dados da aplicação:
 
 ```bash
 npm ci
-npm run tauri build -- --bundles nsis          # Windows → src-tauri/target/release/bundle/nsis/KanGest_1.0.0_x64-setup.exe
+npm run tauri build -- --bundles nsis          # Windows → src-tauri/target/release/bundle/nsis/KanGest_1.2.0_x64-setup.exe
 CI=true npm run tauri build -- --bundles app,dmg   # macOS → src-tauri/target/release/bundle/dmg/*.dmg
 ```
 
@@ -60,6 +60,10 @@ selo da licença e do executável) estão em [docs/SEGURANCA.md](docs/SEGURANCA.
 cd src-tauri && cargo test     # inclui a verificação da assinatura AGT
 npm run typecheck
 ```
+
+O CI (`.github/workflows/ci.yml`) corre em cada push e pull request: `npm run typecheck`, `cargo clippy -- -D warnings`
+e `cargo test`, também numa compilação com uma chave de produtor de teste. No `build.yml`, um teste a falhar trava a
+publicação dos instaladores.
 
 ## Atalhos do POS (iguais ao KIGEST POS)
 
@@ -81,6 +85,16 @@ npm run typecheck
 
 Operações sem permissão (preço, desconto acima do limite, apagar linha…) pedem o **PIN de um supervisor**.
 A matriz de cobertura face ao KIGEST original está em [docs/COBERTURA.md](docs/COBERTURA.md).
+A comparação com o Primavera, o Odoo e outros sistemas (interface, lacunas e roteiro) está em
+[docs/ANALISE-ERP-REFERENCIA.md](docs/ANALISE-ERP-REFERENCIA.md).
+
+## Atalhos da gestão
+
+| Tecla | Acção |
+|---|---|
+| Ctrl+K (⌘K no Mac) | Pesquisar ou ir para: ecrãs, documentos, clientes, NIF e artigos |
+| ↑ / ↓ e Enter | Escolher e abrir um resultado da pesquisa |
+| Esc | Fechar a pesquisa, menus e janelas |
 
 ## Estrutura
 

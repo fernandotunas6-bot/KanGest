@@ -3,6 +3,7 @@
 //!   SourceDocuments (SalesInvoices, MovementOfGoods, WorkingDocuments, Payments).
 //! * Aquisição (TaxAccountingBasis = A): Header, MasterFiles (Supplier, TaxTable) e
 //!   SourceDocuments/PurchaseInvoices.
+//!
 //! Validar no validador da AGT antes de submeter.
 
 use std::collections::BTreeSet;
@@ -77,6 +78,8 @@ struct Doc {
     transporte: Option<String>,
     /// SourceBilling / SourcePayment: P (produzido), I (integrado), M (manual / recuperação)
     fonte: String,
+    /// Versão da chave com que foi assinado (HashControl); vazio nos documentos de versões antigas.
+    hash_versao: Option<String>,
 }
 
 async fn docs(p: &SqlitePool, tipos: &str, de: &str, ate: &str, estado: bool) -> AppResult<Vec<Doc>> {
@@ -84,7 +87,7 @@ async fn docs(p: &SqlitePool, tipos: &str, de: &str, ate: &str, estado: bool) ->
     let sql = format!(
         "SELECT d.id, d.tipo_codigo, d.numero_doc, d.estado, d.data_emissao, d.data_hora, COALESCE(d.entidade_id, 1) AS ent,
                 u.login, d.total_liquido, d.total_iva, d.total, d.hash, o.numero_doc AS origem, d.observacoes, d.motivo_anulacao,
-                d.motivo, d.transporte, d.origem AS fonte
+                d.motivo, d.transporte, d.origem AS fonte, d.hash_versao
          FROM documentos d JOIN utilizadores u ON u.id = d.utilizador_id
          LEFT JOIN documentos o ON o.id = d.doc_origem_id
          LEFT JOIN entidades e ON e.id = d.entidade_id
@@ -114,6 +117,7 @@ async fn docs(p: &SqlitePool, tipos: &str, de: &str, ate: &str, estado: bool) ->
             motivo: r.get("motivo"),
             transporte: r.get("transporte"),
             fonte: r.get("fonte"),
+            hash_versao: r.get("hash_versao"),
         })
         .collect())
 }
@@ -198,11 +202,19 @@ async fn linhas(x: &mut String, p: &SqlitePool, d: &Doc, ind: usize, credito: bo
     Ok(())
 }
 
-fn totais(x: &mut String, ind: usize, d: &Doc) {
+/// Totais do documento e, nas facturas pagas no acto (FR), os meios de pagamento (`Payment`).
+fn totais(x: &mut String, ind: usize, d: &Doc, pagamentos: &[(String, i64)]) {
     let _ = writeln!(x, "{:ind$}<DocumentTotals>", "");
     el(x, ind + 2, "TaxPayable", &m(d.total_iva));
     el(x, ind + 2, "NetTotal", &m(d.total_liquido));
     el(x, ind + 2, "GrossTotal", &m(d.total));
+    for (modo, valor) in pagamentos {
+        let _ = writeln!(x, "{:w$}<Payment>", "", w = ind + 2);
+        el(x, ind + 4, "PaymentMechanism", modo);
+        el(x, ind + 4, "PaymentAmount", &m(*valor));
+        el(x, ind + 4, "PaymentDate", &d.data);
+        let _ = writeln!(x, "{:w$}</Payment>", "", w = ind + 2);
+    }
     let _ = writeln!(x, "{:ind$}</DocumentTotals>", "");
 }
 
@@ -278,11 +290,7 @@ async fn preparar(st: &AppState, i: &SaftIn) -> AppResult<(sqlx::sqlite::SqliteR
     }
     let p = &st.pool;
     let emp = sqlx::query("SELECT * FROM empresa WHERE id = 1").fetch_one(p).await?;
-    let cert: String = sqlx::query_scalar("SELECT valor FROM config WHERE chave = ?")
-        .bind(agt::CERTIFICADO_CONFIG)
-        .fetch_optional(p)
-        .await?
-        .unwrap_or_else(|| "0".into());
+    let cert = Some(agt::certificado(p).await?).filter(|c| !c.is_empty()).unwrap_or_else(|| "0".into());
     let nif: String = emp.get("nif");
     Ok((emp, nif, cert))
 }
@@ -410,8 +418,8 @@ async fn gerar_facturacao(st: &AppState, i: &SaftIn, estado: bool) -> AppResult<
         el(&mut x, 8, "InvoiceNo", &d.numero);
         status(&mut x, 8, "InvoiceStatus", d, "SourceBilling");
         el(&mut x, 8, "Hash", &d.hash);
-        el(&mut x, 8, "HashControl", hc);
-        el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+        el(&mut x, 8, "HashControl", d.hash_versao.as_deref().unwrap_or(hc));
+        el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
         el(&mut x, 8, "InvoiceDate", &d.data);
         el(&mut x, 8, "InvoiceType", &d.tipo);
         x.push_str("        <SpecialRegimes>\n");
@@ -423,7 +431,11 @@ async fn gerar_facturacao(st: &AppState, i: &SaftIn, estado: bool) -> AppResult<
         el(&mut x, 8, "SystemEntryDate", &d.data_hora);
         el(&mut x, 8, "CustomerID", &d.entidade_id.to_string());
         linhas(&mut x, p, d, 8, d.tipo != "NC", false).await?;
-        totais(&mut x, 8, d);
+        let pagos: Vec<(String, i64)> = sqlx::query_as("SELECT modo_codigo, valor FROM documento_pagamentos WHERE documento_id = ? AND valor > 0 ORDER BY id")
+            .bind(d.id)
+            .fetch_all(p)
+            .await?;
+        totais(&mut x, 8, d, &pagos);
         retencoes(&mut x, p, d, 8).await?;
         x.push_str("      </Invoice>\n");
     }
@@ -459,8 +471,8 @@ async fn gerar_facturacao(st: &AppState, i: &SaftIn, estado: bool) -> AppResult<
             el(&mut x, 8, "DocumentNumber", &d.numero);
             status(&mut x, 8, "MovementStatus", d, "SourceBilling");
             el(&mut x, 8, "Hash", &d.hash);
-            el(&mut x, 8, "HashControl", hc);
-            el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+            el(&mut x, 8, "HashControl", d.hash_versao.as_deref().unwrap_or(hc));
+            el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
             el(&mut x, 8, "MovementDate", &d.data);
             el(&mut x, 8, "MovementType", "GT");
             el(&mut x, 8, "SystemEntryDate", &d.data_hora);
@@ -478,7 +490,7 @@ async fn gerar_facturacao(st: &AppState, i: &SaftIn, estado: bool) -> AppResult<
             let inicio = campo("carga_data");
             el(&mut x, 8, "MovementStartTime", if inicio.len() >= 16 { &inicio } else { &d.data_hora });
             linhas(&mut x, p, d, 8, true, true).await?;
-            totais(&mut x, 8, d);
+            totais(&mut x, 8, d, &[]);
             x.push_str("      </StockMovement>\n");
         }
         x.push_str("    </MovementOfGoods>\n");
@@ -495,15 +507,15 @@ async fn gerar_facturacao(st: &AppState, i: &SaftIn, estado: bool) -> AppResult<
         el(&mut x, 8, "DocumentNumber", &d.numero);
         status(&mut x, 8, "WorkStatus", d, "SourceBilling");
         el(&mut x, 8, "Hash", &d.hash);
-        el(&mut x, 8, "HashControl", hc);
-        el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+        el(&mut x, 8, "HashControl", d.hash_versao.as_deref().unwrap_or(hc));
+        el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
         el(&mut x, 8, "WorkDate", &d.data);
         el(&mut x, 8, "WorkType", &d.tipo);
         el(&mut x, 8, "SourceID", &d.login);
         el(&mut x, 8, "SystemEntryDate", &d.data_hora);
         el(&mut x, 8, "CustomerID", &d.entidade_id.to_string());
         linhas(&mut x, p, d, 8, true, false).await?;
-        totais(&mut x, 8, d);
+        totais(&mut x, 8, d, &[]);
         x.push_str("      </WorkDocument>\n");
     }
     x.push_str("    </WorkingDocuments>\n");
@@ -517,7 +529,7 @@ async fn gerar_facturacao(st: &AppState, i: &SaftIn, estado: bool) -> AppResult<
     for d in &recibos {
         x.push_str("      <Payment>\n");
         el(&mut x, 8, "PaymentRefNo", &d.numero);
-        el(&mut x, 8, "Period", &d.data[5..7].trim_start_matches('0').to_string());
+        el(&mut x, 8, "Period", d.data[5..7].trim_start_matches('0'));
         el(&mut x, 8, "TransactionDate", &d.data);
         el(&mut x, 8, "PaymentType", "RC");
         status(&mut x, 8, "PaymentStatus", d, "SourcePayment");

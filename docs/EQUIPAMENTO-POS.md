@@ -17,26 +17,6 @@ Qualquer leitor USB que funcione como teclado serve (é o modo de origem da maio
 - O leitor deve terminar a leitura com **Enter**. Os que terminam com **Tab** também são aceites.
 - Procura pelo código de barras e pela referência do artigo. `3*código` lança 3 unidades.
 
-### Embalagens e outros códigos
-
-Na ficha do artigo, **Outros códigos e embalagens** junta mais códigos ao mesmo artigo: outro código da mesma unidade
-(quantidade 1) ou o de uma embalagem (ex.: a caixa de 12 garrafas, quantidade 12). Ler o código da caixa lança 12
-unidades; `3*código` lança 36. Um código só pode pertencer a um artigo.
-
-## Balança (etiquetas com peso ou preço)
-
-As balanças de etiquetas (talho, peixaria, padaria, frutaria) imprimem um código EAN-13 com o artigo e o peso ou o
-preço: `2P CCCCC VVVVV K` — prefixo de 20 a 29, código do artigo, valor e dígito de controlo.
-
-1. Em **Parametrização → Opções de venda → Balança**, marque «Ler etiquetas da balança» e escolha o formato da sua
-   balança: se a etiqueta traz o **peso** (em gramas: 3 casas decimais) ou o **preço** (em Kz: 0 casas), os prefixos
-   e quantos algarismos tem o código do artigo (5 na maioria).
-2. Na ficha de cada artigo vendido a peso, preencha o **Código na balança** (o PLU programado na balança).
-3. No POS, ler a etiqueta lança o artigo com o peso lido (0,750 kg). Com o preço na etiqueta, a quantidade é a que dá
-   esse preço ao preço do artigo com IVA.
-
-O dígito de controlo é confirmado: uma leitura errada não lança nada.
-
 ## Impressora térmica (ESC/POS)
 
 Em **Impressora térmica (ESC/POS) e gaveta**, active «Imprimir directamente»:

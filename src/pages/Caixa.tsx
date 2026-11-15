@@ -5,9 +5,9 @@ import { toast } from "sonner";
 import { ArrowDownLeft, ArrowUpRight, History, Lock, Printer, ShoppingCart, Wallet } from "lucide-react";
 import { call } from "@/lib/api";
 import { useTabelas, useTalao58 } from "@/lib/hooks";
-import { dataHora, kz, kzNum, parseKz, qtd } from "@/lib/format";
+import { dataHora, kz, parseKz, qtd } from "@/lib/format";
 import { imprimir } from "@/lib/print";
-import type { CaixaResumo, FechoConfig } from "@/lib/types";
+import type { CaixaResumo } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Stat, Table, Td, Th, cn } from "@/components/ui";
 import { PrintPortal } from "@/components/DocumentoPrint";
@@ -23,6 +23,7 @@ interface SessaoLista {
   valor_contado: number | null;
   estado: string;
   total_vendido: number;
+  numero_z?: number | null;
 }
 
 export default function Caixa() {
@@ -98,12 +99,12 @@ export default function Caixa() {
           />
           <div className="grid grid-cols-4 gap-4">
             <Stat label="Fundo de maneio" value={kz(c.sessao.valor_inicial)} />
-            <Stat label="Total recebido" value={c.total_vendido === null ? "—" : kz(c.total_vendido)} hint={`${c.documentos} documentos`} />
+            <Stat label="Total recebido" value={c.cego ? "—" : kz(c.total_vendido)} hint={`${c.documentos} documentos`} />
             <Stat label="Entradas / Saídas" value={kz(c.entradas - c.saidas)} hint={`+${kz(c.entradas)} · −${kz(c.saidas)}`} tone="accent" />
             <Stat
               label="Numerário esperado na gaveta"
-              value={c.numerario_esperado === null ? "—" : kz(c.numerario_esperado)}
-              hint={c.cego ? "Fecho cego: aparece no relatório depois de fechar" : undefined}
+              value={c.cego ? "Fecho cego" : kz(c.numerario_esperado)}
+              hint={c.cego ? "Os totais aparecem no relatório depois de fechar" : undefined}
               tone="ok"
               icon={<Wallet className="size-4" />}
             />
@@ -153,8 +154,7 @@ export default function Caixa() {
       {mov && <Movimento onClose={() => setMov(false)} onDone={() => { setMov(false); refetch(); }} />}
       {fechar && c && (
         <Fechar
-          esperado={c.numerario_esperado}
-          fecho={c.fecho}
+          resumo={c}
           onClose={() => setFechar(false)}
           onDone={(r) => {
             setFechar(false);
@@ -228,103 +228,115 @@ function Movimento({ onClose, onDone }: { onClose: () => void; onDone: () => voi
   );
 }
 
-function Fechar({ esperado, fecho, onClose, onDone }: { esperado: number | null; fecho: FechoConfig; onClose: () => void; onDone: (r: CaixaResumo) => void }) {
-  const linhas = [...fecho.notas.map((valor) => ({ tipo: "N" as const, valor })), ...fecho.moedas.map((valor) => ({ tipo: "M" as const, valor }))];
-  const [modo, setModo] = useState<"notas" | "total">(linhas.length ? "notas" : "total");
+/** Notas e moedas de kwanza (iguais às aceites pelo servidor). */
+const NOTAS = [5000, 2000, 1000, 500, 200, 100, 50];
+const MOEDAS = [20, 10, 5, 2, 1];
+
+function Fechar({ resumo, onClose, onDone }: { resumo: CaixaResumo; onClose: () => void; onDone: (r: CaixaResumo) => void }) {
+  const modos = useTabelas().data?.modos_pagamento ?? [];
+  const [porNotas, setPorNotas] = useState(true);
+  const [qtds, setQtds] = useState<Record<number, string>>({});
   const [contado, setContado] = useState("");
-  const [qtds, setQtds] = useState<Record<string, string>>({});
+  const [outros, setOutros] = useState<Record<string, string>>({});
+  const [obs, setObs] = useState("");
   const [busy, setBusy] = useState(false);
-  const chave = (l: { tipo: string; valor: number }) => `${l.tipo}${l.valor}`;
-  const quantidade = (l: { tipo: string; valor: number }) => Math.max(0, parseInt(qtds[chave(l)] || "0", 10) || 0);
-  const totalNotas = linhas.reduce((s, l) => s + l.valor * quantidade(l), 0);
-  const valor = modo === "notas" ? totalNotas : parseKz(contado || "0");
+  const totalNotas = [...NOTAS, ...MOEDAS].reduce((s, d) => s + d * 100 * (Number(qtds[d]) || 0), 0);
+  const valor = porNotas ? totalNotas : parseKz(contado || "0");
+  const esperado = resumo.numerario_esperado;
   const dif = esperado === null ? null : valor - esperado;
+  // outras formas de pagamento a conferir (talão do TPA, transferências…)
+  const outrosModos = modos.filter((m) => m.codigo !== "NU" && m.codigo !== "CS" && (resumo.cego || (resumo.por_modo.find((p) => p.codigo === m.codigo)?.total ?? 0) !== 0));
 
   async function fechar() {
     setBusy(true);
     try {
-      const contagem = modo === "notas" ? linhas.map((l) => ({ valor: l.valor, quantidade: quantidade(l), tipo: l.tipo })).filter((x) => x.quantidade > 0) : [];
-      const r = await call<CaixaResumo>("caixa.fechar", { valor_contado: valor, contagem });
-      toast.success("Caixa fechado.");
+      const contagem = porNotas ? Object.fromEntries(Object.entries(qtds).filter(([, q]) => Number(q) > 0).map(([d, q]) => [d, Number(q)])) : undefined;
+      const contado_modos = Object.fromEntries(Object.entries(outros).filter(([, v]) => v.trim() !== "").map(([k, v]) => [k, parseKz(v)]));
+      const r = await call<CaixaResumo>("caixa.fechar", {
+        contagem: porNotas ? contagem : undefined,
+        valor_contado: porNotas ? undefined : parseKz(contado || "0"),
+        contado_modos,
+        observacoes: obs || undefined,
+      });
+      toast.success(`Caixa fechado (Z n.º ${r.sessao.numero_z ?? r.sessao.id}).`);
       onDone(r);
     } catch (e) {
       toast.error((e as Error).message);
-    } finally {
       setBusy(false);
     }
   }
-
-  const coluna = (titulo: string, itens: typeof linhas) =>
-    !!itens.length && (
-      <div>
-        <div className="mb-1.5 text-[12px] font-medium uppercase tracking-wide text-ink-2">{titulo}</div>
-        <div className="space-y-1.5">
-          {itens.map((l) => (
-            <div key={chave(l)} className="grid grid-cols-[72px_80px_1fr] items-center gap-2 text-[13px]">
-              <span className="num text-right font-medium">{kzNum(l.valor)}</span>
-              <Input
-                className="num h-8 text-right"
-                inputMode="numeric"
-                placeholder="0"
-                value={qtds[chave(l)] ?? ""}
-                onChange={(e) => setQtds({ ...qtds, [chave(l)]: e.target.value.replace(/\D/g, "") })}
-                onFocus={(e) => e.target.select()}
-              />
-              <span className="num text-right text-ink-2">{quantidade(l) ? kz(l.valor * quantidade(l)) : ""}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-
+  const celula = (d: number) => (
+    <label key={d} className="flex items-center gap-2">
+      <span className="num w-14 text-right text-ink-2">{d.toLocaleString("pt-PT")}</span>
+      <span className="text-ink-3">×</span>
+      <Input className="num h-8 w-16 text-right" inputMode="numeric" value={qtds[d] ?? ""} onChange={(e) => setQtds({ ...qtds, [d]: e.target.value.replace(/\D/g, "") })} />
+    </label>
+  );
   return (
     <Modal
       open
       onClose={onClose}
       title="Fecho de caixa"
-      width={modo === "notas" ? "max-w-2xl" : "max-w-md"}
+      width="max-w-2xl"
       footer={
         <Button variant="danger" loading={busy} onClick={fechar}>
           Finalizar fecho
         </Button>
       }
     >
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <p className="text-ink-2">{modo === "notas" ? "Conte as notas e as moedas da gaveta." : "Conte o numerário na gaveta e indique o valor físico."}</p>
-        {!!linhas.length && (
-          <div className="flex shrink-0 rounded-lg border border-line p-0.5 text-[12.5px]">
-            {(["notas", "total"] as const).map((m) => (
-              <button key={m} type="button" onClick={() => setModo(m)} className={cn("rounded-md px-2.5 py-1", modo === m ? "bg-brand text-white" : "text-ink-2 hover:bg-sunken")}>
-                {m === "notas" ? "Notas e moedas" : "Só o total"}
-              </button>
-            ))}
-          </div>
-        )}
+      <p className="mb-3 text-ink-2">
+        {resumo.cego
+          ? "Fecho cego: conte o dinheiro e os talões sem ver o valor do sistema. A diferença aparece no relatório, depois de fechar."
+          : "Conte o numerário na gaveta. O sistema compara com o total esperado."}
+      </p>
+      <div className="mb-3 flex gap-2">
+        <Button size="sm" variant={porNotas ? "primary" : "secondary"} onClick={() => setPorNotas(true)}>
+          Contar notas e moedas
+        </Button>
+        <Button size="sm" variant={porNotas ? "secondary" : "primary"} onClick={() => setPorNotas(false)}>
+          Indicar o total
+        </Button>
       </div>
-      {modo === "notas" ? (
-        <div className="grid grid-cols-2 gap-6">
-          {coluna("Notas (Kz)", linhas.filter((l) => l.tipo === "N"))}
-          {coluna("Moedas (Kz)", linhas.filter((l) => l.tipo === "M"))}
+      {porNotas ? (
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-line p-4">
+          <div className="space-y-2">
+            <div className="text-[12px] font-medium uppercase tracking-wide text-ink-2">Notas</div>
+            {NOTAS.map(celula)}
+          </div>
+          <div className="space-y-2">
+            <div className="text-[12px] font-medium uppercase tracking-wide text-ink-2">Moedas</div>
+            {MOEDAS.map(celula)}
+          </div>
         </div>
       ) : (
-        <Field label="Valor físico (Kz)">
+        <Field label="Numerário contado (Kz)">
           <Input autoFocus className="num text-right text-lg" value={contado} onChange={(e) => setContado(e.target.value)} />
         </Field>
       )}
+      {outrosModos.length > 0 && (
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          {outrosModos.map((m) => (
+            <Field key={m.codigo} label={`${m.descricao} (talão / extracto)`} hint="Deixe vazio se não confere esta forma">
+              <Input className="num text-right" value={outros[m.codigo] ?? ""} onChange={(e) => setOutros({ ...outros, [m.codigo]: e.target.value })} />
+            </Field>
+          ))}
+        </div>
+      )}
+      <Field label="Observações" className="mt-3">
+        <Input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: nota de 1000 Kz rasgada; reforço de trocos" />
+      </Field>
       <div className="mt-4 space-y-1 rounded-xl bg-sunken p-4">
         <div className="flex justify-between font-medium">
-          <span>Total contado</span>
+          <span>Numerário contado</span>
           <span className="num">{kz(valor)}</span>
         </div>
-        {esperado === null || dif === null ? (
-          <p className="pt-1 text-[12.5px] text-ink-3">Fecho cego: o valor esperado e a diferença aparecem no relatório depois de fechar.</p>
-        ) : (
+        {esperado !== null && dif !== null && (
           <>
             <div className="flex justify-between">
               <span>Total do sistema (numerário)</span>
               <span className="num">{kz(esperado)}</span>
             </div>
-            <div className={cn("flex justify-between font-medium", dif < 0 ? "text-danger" : dif > 0 ? "text-[#9a6514]" : "text-ok")}>
+            <div className={cn("flex justify-between font-medium", dif < 0 ? "text-danger" : dif > 0 ? "text-accent-ink" : "text-ok")}>
               <span>Diferença</span>
               <span className="num">{kz(dif)}</span>
             </div>
@@ -342,6 +354,7 @@ function Historico({ onClose, onAbrir }: { onClose: () => void; onAbrir: (id: nu
       <Table className="max-h-[60vh]">
         <thead>
           <tr>
+            <Th>Z</Th>
             <Th>Posto</Th>
             <Th>Operador</Th>
             <Th>Abertura</Th>
@@ -354,6 +367,7 @@ function Historico({ onClose, onAbrir }: { onClose: () => void; onAbrir: (id: nu
         <tbody>
           {data?.map((s) => (
             <tr key={s.id}>
+              <Td className="num text-ink-2">{s.numero_z ?? "—"}</Td>
               <Td>{s.posto ?? "—"}</Td>
               <Td>{s.utilizador}</Td>
               <Td className="text-ink-2">{dataHora(s.aberta_em)}</Td>
@@ -375,7 +389,7 @@ function Historico({ onClose, onAbrir }: { onClose: () => void; onAbrir: (id: nu
 }
 
 function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void }) {
-  const dif = r.numerario_esperado === null ? 0 : (r.sessao.valor_contado ?? 0) - r.numerario_esperado;
+  const dif = (r.sessao.valor_contado ?? 0) - (r.numerario_esperado ?? 0);
   const t58 = useTalao58();
   const e = useEmpresa();
   const tabelas = useTabelas();
@@ -402,7 +416,9 @@ function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void })
           <div>{e.localidade || e.provincia || "Luanda"} - Angola</div>
         </div>
       )}
-      <div className="mt-2 text-[12.5px] font-bold">FECHO DE CAIXA Nº - {r.sessao.id}</div>
+      <div className="mt-2 text-[12.5px] font-bold">
+        {r.sessao.estado === "ABERTA" ? "CAIXA EM ABERTO (X)" : `FECHO DE CAIXA (Z) Nº ${r.sessao.numero_z ?? r.sessao.id}`}
+      </div>
       {linha("Data Abertura:", dataHora(r.sessao.aberta_em))}
       {linha("Data de Fecho:", r.sessao.fechada_em ? dataHora(r.sessao.fechada_em) : "(em aberto)")}
       {armazem && linha("Armazém:", armazem.nome)}
@@ -416,27 +432,35 @@ function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void })
         <div key={m.codigo}>{linha(m.descricao, m.total === null ? "—" : kz(m.total))}</div>
       ))}
       <div className="mt-1 border-t border-black pt-1">
-        {linha(`Total de ${r.documentos} documento(s):`, r.total_vendido === null ? "—" : kz(r.total_vendido), true)}
+        {linha(`Total de ${r.documentos} documento(s):`, kz(r.total_vendido), true)}
         {linha("Fundo de maneio", kz(r.sessao.valor_inicial))}
         {linha("Entradas", kz(r.entradas))}
         {linha("Saídas", kz(r.saidas))}
-        {linha("Numerário esperado:", r.numerario_esperado === null ? "—" : kz(r.numerario_esperado), true)}
+        {linha("Numerário esperado:", kz(r.numerario_esperado), true)}
         {linha("Valor Físico:", r.sessao.valor_contado === null ? "—" : kz(r.sessao.valor_contado), true)}
-        {r.sessao.valor_contado !== null && r.numerario_esperado !== null && linha(dif < 0 ? "Diferença (falta):" : dif > 0 ? "Diferença (sobra):" : "Diferença:", kz(dif), true)}
+        {r.sessao.valor_contado !== null && linha(dif < 0 ? "Diferença (falta):" : dif > 0 ? "Diferença (sobra):" : "Diferença:", kz(dif), true)}
       </div>
-      {!!r.contagem?.length && (
+      {r.sessao.contagem && Object.keys(r.sessao.contagem).length > 0 && (
         <>
-          <div className="mt-2 border-y border-black py-0.5 text-center">Contagem</div>
-          {r.contagem.map((c, i) => (
-            <div key={i} className="flex justify-between gap-2">
-              <span>
-                {c.quantidade} x {c.tipo === "M" ? "moeda" : c.tipo === "N" ? "nota" : ""} {kzNum(c.valor)}
-              </span>
-              <span>{kz(c.valor * c.quantidade)}</span>
-            </div>
-          ))}
+          <div className="mt-2 border-y border-black py-0.5 text-center">Contagem do numerário</div>
+          {Object.entries(r.sessao.contagem)
+            .sort(([a], [b]) => Number(b) - Number(a))
+            .map(([d, q]) => (
+              <div key={d}>{linha(`${Number(d).toLocaleString("pt-PT")} Kz × ${q}`, kz(Number(d) * 100 * q))}</div>
+            ))}
         </>
       )}
+      {(r.conferencia ?? []).some((c) => c.codigo !== "NU" && c.contado !== null) && (
+        <>
+          <div className="mt-2 border-y border-black py-0.5 text-center">Conferência (contado − sistema)</div>
+          {(r.conferencia ?? [])
+            .filter((c) => c.codigo !== "NU" && c.contado !== null)
+            .map((c) => (
+              <div key={c.codigo}>{linha(`${c.descricao}: ${kz(c.contado)}`, kz(c.diferenca), c.diferenca !== 0)}</div>
+            ))}
+        </>
+      )}
+      {r.sessao.observacoes && <div className="mt-2">Obs.: {r.sessao.observacoes}</div>}
       {r.artigos.length > 0 && (
         <>
           <div className="mt-2 border-y border-black py-0.5 text-center">Artigos vendidos</div>

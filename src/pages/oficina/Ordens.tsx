@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { ClipboardList, FileText, Plus, Printer, Search, Trash2 } from "lucide-react";
+import { ClipboardList, Columns3, FileText, List, Plus, Printer, Search, Trash2 } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce } from "@/lib/hooks";
 import { data, dataHora, hojeISO, qtd } from "@/lib/format";
@@ -13,6 +13,8 @@ import { ArtigoPicker } from "@/components/Pickers";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { useSugestoes, ViaturaForm } from "./Viaturas";
+
+const CHAVE_VISTA = "kangest.ordens.vista";
 
 export const ESTADOS: { id: EstadoOS; label: string; tone: "neutral" | "brand" | "accent" | "ok" | "danger" }[] = [
   { id: "ABERTA", label: "Aberta", tone: "accent" },
@@ -30,7 +32,23 @@ export default function Ordens() {
   const dq = useDebounce(q);
   const [aberta, setAberta] = useState<number | "nova" | null>(null);
   const [viaturaNova, setViaturaNova] = useState<number | null>(null);
-  const lista = useQuery({ queryKey: ["ordens", dq, estado], queryFn: () => call<Ordem[]>("oficina.ordens", { q: dq, estado: estado || null }) });
+  const [vista, setVista] = useState<"lista" | "quadro">(() => {
+    try {
+      return localStorage.getItem(CHAVE_VISTA) === "quadro" ? "quadro" : "lista";
+    } catch {
+      return "lista";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHAVE_VISTA, vista);
+    } catch {
+      /* armazenamento indisponível */
+    }
+  }, [vista]);
+  // no quadro vêem-se todas as colunas: o filtro de estado só se aplica à lista
+  const filtroEstado = vista === "quadro" ? "" : estado;
+  const lista = useQuery({ queryKey: ["ordens", dq, filtroEstado], queryFn: () => call<Ordem[]>("oficina.ordens", { q: dq, estado: filtroEstado || null }) });
 
   // /oficina/ordens?nova=<viatura>: abre logo uma OS nova para a viatura
   useEffect(() => {
@@ -48,16 +66,44 @@ export default function Ordens() {
         title="Ordens de Serviço"
         subtitle="Entrada de viaturas, diagnóstico, trabalhos e facturação"
         actions={
-          <Button
-            onClick={() => {
-              setViaturaNova(null);
-              setAberta("nova");
-            }}
-          >
-            <Plus className="size-4" /> Nova OS
-          </Button>
+          <>
+            <div className="flex rounded-lg bg-sunken p-0.5" role="group" aria-label="Vista">
+              {(
+                [
+                  ["lista", "Lista", List],
+                  ["quadro", "Quadro", Columns3],
+                ] as const
+              ).map(([id, label, Icon]) => (
+                <button
+                  key={id}
+                  onClick={() => setVista(id)}
+                  aria-pressed={vista === id}
+                  className={cn("inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px]", vista === id ? "bg-surface font-medium text-ink shadow-sm ring-1 ring-line" : "text-ink-2 hover:text-ink")}
+                >
+                  <Icon className="size-4" /> {label}
+                </button>
+              ))}
+            </div>
+            <Button
+              onClick={() => {
+                setViaturaNova(null);
+                setAberta("nova");
+              }}
+            >
+              <Plus className="size-4" /> Nova OS
+            </Button>
+          </>
         }
       />
+      {vista === "quadro" ? (
+        <>
+          <div className="relative mb-4 max-w-xl">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
+            <Input className="pl-9" placeholder="N.º da OS, matrícula, cliente ou avaria…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <QuadroOrdens ordens={lista.data} chave={["ordens", dq, filtroEstado]} onAbrir={setAberta} />
+        </>
+      ) : (
       <Card>
         <div className="flex flex-wrap items-center gap-3 border-b border-line p-4">
           <div className="relative min-w-64 flex-1">
@@ -79,7 +125,7 @@ export default function Ordens() {
         {lista.data?.length === 0 ? (
           <Empty icon={<ClipboardList className="size-6" />} title="Sem ordens de serviço" text="Abra uma OS quando a viatura dá entrada na oficina." />
         ) : (
-          <Table className="max-h-[calc(100vh-260px)]">
+          <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
                 <Th>N.º</Th>
@@ -116,8 +162,125 @@ export default function Ordens() {
           </Table>
         )}
       </Card>
+      )}
       {aberta !== null && <OrdemForm id={aberta === "nova" ? null : aberta} viaturaInicial={viaturaNova} onClose={() => setAberta(null)} onCriada={(id) => setAberta(id)} />}
     </>
+  );
+}
+
+/** Dias inteiros desde uma data (AAAA-MM-DD…) até hoje. */
+const diasDesde = (d: string) => Math.max(0, Math.round((Date.parse(hojeISO()) - Date.parse(d.slice(0, 10))) / 86_400_000));
+/** Uma OS aberta ou em curso há mais do que isto aparece assinalada como parada. */
+const DIAS_PARADA = 7;
+
+/**
+ * Quadro kanban das ordens de serviço (como o kanban do Odoo): uma coluna por estado; arrasta-se o cartão para
+ * mudar o estado. «Facturada» só se chega pela factura, e uma OS facturada já não se move.
+ */
+function QuadroOrdens({ ordens, chave, onAbrir }: { ordens: Ordem[] | undefined; chave: unknown[]; onAbrir: (id: number) => void }) {
+  const qc = useQueryClient();
+  const [arrastada, setArrastada] = useState<Ordem | null>(null);
+  const [alvo, setAlvo] = useState<EstadoOS | null>(null);
+  const podeLargar = (e: EstadoOS) => !!arrastada && e !== "FACTURADA" && e !== arrastada.estado;
+
+  async function mover(o: Ordem, estado: EstadoOS) {
+    // mostra logo a mudança; se o servidor recusar, volta a ler a lista
+    qc.setQueryData<Ordem[]>(chave, (xs) => xs?.map((x) => (x.id === o.id ? { ...x, estado } : x)));
+    try {
+      await call("oficina.ordemEstado", { id: o.id, estado });
+      toast.success(`${o.numero}: ${estadoDe(estado).label.toLowerCase()}.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      qc.invalidateQueries({ queryKey: ["ordens"] });
+      qc.invalidateQueries({ queryKey: ["ordem", o.id] });
+    }
+  }
+
+  if (!ordens) return <div className="h-[420px] animate-pulse rounded-xl bg-sunken/60" />;
+  return (
+    <div className="grid grid-cols-5 gap-3">
+      {ESTADOS.map((col) => {
+        const cartoes = ordens.filter((o) => o.estado === col.id);
+        const largar = podeLargar(col.id);
+        return (
+          <section
+            key={col.id}
+            aria-label={col.label}
+            onDragOver={(e) => {
+              if (!largar) return;
+              e.preventDefault();
+              setAlvo(col.id);
+            }}
+            onDragLeave={() => setAlvo((a) => (a === col.id ? null : a))}
+            onDrop={(e) => {
+              e.preventDefault();
+              setAlvo(null);
+              if (arrastada && largar) mover(arrastada, col.id);
+            }}
+            className={cn(
+              "flex min-h-[420px] flex-col rounded-xl border bg-sunken/50 p-2 transition",
+              alvo === col.id ? "border-brand bg-brand-50/60" : "border-transparent",
+              arrastada && !largar && col.id !== arrastada.estado && "opacity-60",
+            )}
+          >
+            <header className="mb-2 flex items-center gap-2 px-1.5 pt-1">
+              <Badge tone={col.tone}>{col.label}</Badge>
+              <span className="num text-[12.5px] text-ink-3">{cartoes.length}</span>
+            </header>
+            <div className="flex flex-1 flex-col gap-2">
+              {cartoes.map((o) => {
+                const dias = diasDesde(o.data_entrada);
+                const parada = (o.estado === "ABERTA" || o.estado === "EM_CURSO") && dias > DIAS_PARADA;
+                const fixa = o.estado === "FACTURADA";
+                return (
+                  <article
+                    key={o.id}
+                    draggable={!fixa}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/plain", String(o.id));
+                      e.dataTransfer.effectAllowed = "move";
+                      setArrastada(o);
+                    }}
+                    onDragEnd={() => {
+                      setArrastada(null);
+                      setAlvo(null);
+                    }}
+                    onClick={() => onAbrir(o.id)}
+                    title={fixa ? "Facturada: já não muda de estado" : "Arraste para mudar o estado; clique para abrir"}
+                    className={cn(
+                      "cursor-pointer rounded-lg border border-line bg-surface p-3 shadow-card transition hover:border-line-strong",
+                      !fixa && "active:cursor-grabbing",
+                      arrastada?.id === o.id && "opacity-50",
+                    )}
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[13px] font-semibold">{o.numero}</span>
+                      <span className={cn("num text-[11.5px]", parada ? "font-medium text-danger" : "text-ink-3")} title={`Entrada: ${dataHora(o.data_entrada)}`}>
+                        {dias === 0 ? "hoje" : `há ${dias} ${dias === 1 ? "dia" : "dias"}`}
+                      </span>
+                    </div>
+                    <div className="mt-1 truncate text-[13px]">
+                      <span className="font-mono">{o.matricula ?? "—"}</span> <span className="text-ink-2">{[o.marca, o.modelo].filter(Boolean).join(" ")}</span>
+                    </div>
+                    {o.cliente && <div className="truncate text-[12.5px] text-ink-2">{o.cliente}</div>}
+                    {o.avaria && <p className="mt-1.5 line-clamp-2 text-[12.5px] text-ink-3">{o.avaria}</p>}
+                    {(o.tecnico || o.documento || parada) && (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {parada && <Badge tone="danger">Parada</Badge>}
+                        {o.tecnico && <Badge>{o.tecnico}</Badge>}
+                        {o.documento && <Badge tone="brand">{o.documento}</Badge>}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+              {!cartoes.length && <p className="px-2 py-6 text-center text-[12.5px] text-ink-3">{largar ? "Largue aqui" : "Sem ordens"}</p>}
+            </div>
+          </section>
+        );
+      })}
+    </div>
   );
 }
 

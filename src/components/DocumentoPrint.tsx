@@ -254,6 +254,14 @@ export function Ticket({ d, via = "Original" }: { d: DocCompleto; via?: string }
           ))}
         </>
       )}
+      {d.fidelizacao && (d.fidelizacao.ganhos > 0 || d.fidelizacao.gastos > 0) && (
+        <>
+          {cabecalho("Pontos de Fidelização")}
+          {d.fidelizacao.ganhos > 0 && <Row k={doc.credito === 1 ? "Pontos devolvidos" : "Pontos ganhos"} v={`+${d.fidelizacao.ganhos}`} />}
+          {d.fidelizacao.gastos > 0 && <Row k={doc.credito === 1 ? "Pontos retirados" : "Pontos usados"} v={`−${d.fidelizacao.gastos}`} />}
+          <Row k="Saldo de pontos" v={String(d.fidelizacao.saldo)} />
+        </>
+      )}
       {!recibo && d.resumo_iva.length > 0 && (
         <>
           {cabecalho("Resumo de Imposto")}

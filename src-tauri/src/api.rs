@@ -1785,7 +1785,7 @@ async fn resolver_linhas(st: &AppState, corpo: &mut Map<String, Value>) -> Resul
     for (n, l) in linhas.iter_mut().enumerate() {
         let n = n + 1;
         let o = l.as_object_mut().ok_or_else(|| Resposta::erro(422, "validacao", format!("A linha {n} não é um objecto.")))?;
-        if o.get("artigo_id").map_or(true, Value::is_null) {
+        if o.get("artigo_id").is_none_or(Value::is_null) {
             let id = match (o.get("referencia").and_then(Value::as_str), o.get("codigo_barras").and_then(Value::as_str)) {
                 (Some(r), _) => {
                     let id: Option<i64> = sqlx::query_scalar("SELECT id FROM artigos WHERE referencia = ? AND ativo = 1 ORDER BY id LIMIT 1").bind(r.trim()).fetch_optional(&st.pool).await?;
@@ -1846,7 +1846,7 @@ async fn resolver_cliente(st: &AppState, c: &Chave, corpo: &mut Map<String, Valu
         Some(id) => id,
         None => {
             c.exigir("clientes")?;
-            if o.get("nome").and_then(Value::as_str).map_or(true, |n| n.trim().is_empty()) {
+            if o.get("nome").and_then(Value::as_str).is_none_or(|n| n.trim().is_empty()) {
                 return Err(Resposta::erro(422, "validacao", format!("O cliente com o NIF {nif} não existe: indique também cliente.nome para o criar.")));
             }
             let mut params = Map::new();
@@ -1910,7 +1910,7 @@ async fn precos_da_origem(st: &AppState, c: &Chave, corpo: &mut Map<String, Valu
             None => {
                 o.insert("desconto_pct".into(), json!(desconto));
             }
-            Some(d) if d.map_or(true, |d| d > desconto + 1e-9) && !pode_desconto => {
+            Some(d) if d.is_none_or(|d| d > desconto + 1e-9) && !pode_desconto => {
                 return Err(Resposta::erro(
                     403,
                     "sem_permissao",

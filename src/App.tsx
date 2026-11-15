@@ -11,6 +11,7 @@ import Pos from "@/pages/Pos";
 import Artigos from "@/pages/Artigos";
 import Entidades from "@/pages/Entidades";
 import Documentos from "@/pages/Documentos";
+import QuadroPropostas from "@/pages/QuadroPropostas";
 import NovoDocumento from "@/pages/NovoDocumento";
 import Recibo from "@/pages/Recibo";
 import Stock from "@/pages/Stock";
@@ -32,6 +33,10 @@ import AvisoVencimento from "@/pages/AvisoVencimento";
 import Estorno from "@/pages/Estorno";
 import Adiantamento from "@/pages/Adiantamento";
 import Etiquetas from "@/pages/Etiquetas";
+import Promocoes from "@/pages/Promocoes";
+import SugestaoEncomendas from "@/pages/SugestaoEncomendas";
+import Contabilidade from "@/pages/Contabilidade";
+import Fidelizacao from "@/pages/Fidelizacao";
 import Sobre from "@/pages/Sobre";
 import Parametrizacao from "@/pages/Parametrizacao";
 import FacturacaoElectronica from "@/pages/FacturacaoElectronica";
@@ -90,6 +95,7 @@ export default function App() {
         <Route path="/fornecedores" element={<Entidades tipo="F" />} />
         <Route path="/documentos" element={<Documentos />} />
         <Route path="/documentos/novo/:tipo" element={<NovoDocumento />} />
+        <Route path="/documentos/quadro" element={<QuadroPropostas />} />
         <Route path="/recibos/novo" element={<Recibo tipo="RC" />} />
         <Route path="/pagamentos/novo" element={<Recibo tipo="VRC" />} />
         <Route path="/adiantamentos/novo" element={<Adiantamento />} />
@@ -111,6 +117,10 @@ export default function App() {
         <Route path="/integracoes" element={<Integracoes />} />
         <Route path="/lotes" element={<Lotes />} />
         <Route path="/etiquetas" element={<Etiquetas />} />
+        <Route path="/promocoes" element={<Promocoes />} />
+        <Route path="/compras/sugestao" element={<SugestaoEncomendas />} />
+        <Route path="/contabilidade" element={<Contabilidade />} />
+        <Route path="/fidelizacao" element={<Fidelizacao />} />
         <Route path="/sobre" element={<Sobre />} />
         <Route path="/parametrizacao" element={<Parametrizacao />} />
         <Route path="/facturacao-electronica" element={<FacturacaoElectronica />} />

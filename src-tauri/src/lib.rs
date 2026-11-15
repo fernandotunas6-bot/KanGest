@@ -1,12 +1,14 @@
 mod agt;
 pub mod api;
-mod cofre;
 mod db;
 mod error;
 pub mod http;
+mod produtor;
 mod rede;
+mod segredos;
 pub mod selo;
 mod services;
+mod smtp;
 mod state;
 pub mod webhooks;
 
@@ -32,6 +34,12 @@ fn imprimir(janela: tauri::WebviewWindow) -> Result<(), String> {
     janela.print().map_err(|e| e.to_string())
 }
 
+/// Reinicia a aplicação (depois de marcar um restauro de cópia de segurança).
+#[tauri::command]
+fn reiniciar(app: tauri::AppHandle) {
+    app.restart();
+}
+
 /// N.º do posto desta máquina (ficheiro local; a base de dados pode vir a ser partilhada).
 fn posto_local(dir: &std::path::Path) -> i64 {
     std::fs::read_to_string(dir.join("posto.json"))
@@ -53,21 +61,22 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let caminho = dir.join("kigest.db");
-            // restauro de uma cópia preparado antes de fechar: a troca faz-se agora, com a base ainda fechada
-            match tauri::async_runtime::block_on(services::sistema::aplicar_restauro(&dir)) {
-                Ok(Some(antes)) => eprintln!("Cópia restaurada; a base anterior ficou em {}", antes.display()),
+            // chave mestra dos segredos da configuração (fora da base de dados)
+            segredos::iniciar(&dir)?;
+            // restauro de uma cópia de segurança marcado antes de reiniciar
+            match services::sistema::aplicar_restauro_pendente(&dir) {
+                Ok(Some(origem)) => eprintln!("Cópia de segurança restaurada: {origem}"),
                 Ok(None) => {}
-                Err(e) => eprintln!("Restauro da cópia falhou (a base actual continua em uso): {e}"),
+                Err(e) => eprintln!("O restauro da cópia de segurança falhou: {e}"),
             }
             let pool = tauri::async_runtime::block_on(db::abrir(&caminho))?;
+            if let Err(e) = tauri::async_runtime::block_on(segredos::cifrar_existentes(&pool)) {
+                eprintln!("Não foi possível cifrar os segredos guardados: {e}");
+            }
             let mut estado = AppState::new(pool);
             estado.pasta_dados = dir.clone();
             estado.pasta_exportacao = app.path().download_dir().unwrap_or_else(|_| dir.clone());
             tauri::async_runtime::block_on(async {
-                // segredos de versões anteriores, ainda em texto, passam a cifrados
-                if let Err(e) = cofre::migrar(&estado.pool).await {
-                    eprintln!("Cofre: não foi possível cifrar os segredos antigos: {e}");
-                }
                 estado.carregar_posto(posto_local(&dir)).await?;
                 // Cópia de segurança automática diária (não impede o arranque se falhar).
                 if let Err(e) = services::sistema::backup_automatico(&estado.pool, &dir).await {
@@ -100,10 +109,12 @@ pub fn run() {
             webhooks::iniciar(estado.clone());
             // Facturação electrónica da AGT: envia e consulta os documentos em segundo plano.
             services::fe::iniciar(estado.clone());
+            // Cópias de segurança periódicas enquanto o programa está aberto.
+            services::sistema::iniciar_agendamento(estado.clone());
             app.manage(estado);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![rpc, imprimir])
+        .invoke_handler(tauri::generate_handler![rpc, imprimir, reiniciar])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o KanGest");
 }

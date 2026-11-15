@@ -24,7 +24,7 @@ import {
   Percent,
   Plus,
   ScanBarcode,
-  Search,
+  Star,
   Tag,
   Trash2,
   UserRound,
@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce, useTabelas } from "@/lib/hooks";
-import { data, kz, kzNum, numero, parseKz, qtd } from "@/lib/format";
+import { data, kz, kzNum, nifValido, numero, parseKz, qtd } from "@/lib/format";
 import type { Artigo, CaixaResumo, DocCompleto, DocResumo, Entidade, Lote, PostoOpcoes } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Badge, Button, Field, Input, Modal, cn } from "@/components/ui";
@@ -52,6 +52,8 @@ interface Linha {
   artigo: Artigo;
   quantidade: number;
   preco: number; // sem IVA (cêntimos)
+  pvp?: number | null; // com IVA (cêntimos): o valor mestre com «preços com IVA incluído»
+  regra?: string | null; // promoção por regras aplicada (ex.: «Leve 3 pague 2»)
   desconto: number; // %
   descricao: string | null; // descrição de linha (F9)
   lote?: string | null; // lote escolhido (vazio = o que expira primeiro)
@@ -59,7 +61,7 @@ interface Linha {
 }
 
 type DescGlobal = { tipo: "pct" | "valor"; valor: number }; // pct: %, valor: cêntimos
-type LinhaGuardada = { artigo_id: number; quantidade: number; preco: number; desconto: number; descricao?: string | null };
+type LinhaGuardada = { artigo_id: number; quantidade: number; preco: number; pvp?: number | null; desconto: number; descricao?: string | null };
 
 const OPCOES_PADRAO: PostoOpcoes = {
   formato: "ticket",
@@ -79,9 +81,60 @@ const CONSUMIDOR: Entidade = {
 const uid = () => crypto.randomUUID();
 const precoNivel = (a: Artigo, nivel: number) => [a.preco1, a.preco2, a.preco3, a.preco4][nivel - 1] || a.preco1;
 const comIvaArt = (preco: number, a: Artigo) => Math.round(preco * (1 + a.taxa_pct / 100));
+type SaldoPontos = { pontos: number; valor: number; pode_pagar: boolean };
+const semIvaArt = (pvp: number, a: Artigo) => Math.round((pvp * 100) / (100 + a.taxa_pct));
+/** PVP com IVA do nível de preço: o guardado, se ainda bater com o preço sem IVA; senão, calculado (como o servidor). */
+const pvpNivel = (a: Artigo, nivel: number) => {
+  const n = [a.preco1, a.preco2, a.preco3, a.preco4][nivel - 1] ? nivel : 1;
+  const preco = precoNivel(a, n);
+  const g = [a.pvp1, a.pvp2, a.pvp3, a.pvp4][n - 1];
+  return g != null && semIvaArt(g, a) === preco ? g : comIvaArt(preco, a);
+};
+
+type CalcLinha = { bruto: number; desc: number; liquido: number; iva: number; total: number };
+
+function resumir(linhas: Linha[], calc: CalcLinha[]) {
+  const t = calc.reduce(
+    (s, c, i) => ({ bruto: s.bruto + c.bruto, desc: s.desc + c.desc, iva: s.iva + c.iva, total: s.total + c.total, itens: s.itens + linhas[i].quantidade }),
+    { bruto: 0, desc: 0, iva: 0, total: 0, itens: 0 },
+  );
+  const maxDesc = calc.reduce((m, c) => Math.max(m, c.bruto ? (c.desc * 100) / c.bruto : 0), 0);
+  return { linhas: calc, ...t, maxDesc };
+}
+
+/** «Preços com IVA incluído»: a linha parte do PVP (quantidade × PVP − desconto) e o IVA sai do total. */
+function calcularComIva(linhas: Linha[], g: DescGlobal) {
+  const gp = g.tipo === "pct" ? g.valor : 0;
+  const base = linhas.map((l) => {
+    const brutoG = Math.round(l.quantidade * (l.pvp ?? comIvaArt(l.preco, l.artigo)));
+    const pct = 100 - ((100 - l.desconto) * (100 - gp)) / 100;
+    const descG = Math.round((brutoG * pct) / 100);
+    return { descG, total: brutoG - descG };
+  });
+  if (g.tipo === "valor" && g.valor > 0 && base.length) {
+    const tot = base.reduce((s, b) => s + b.total, 0);
+    const valor = Math.min(g.valor, tot);
+    let restante = valor;
+    base.forEach((b, i) => {
+      const quota = i === base.length - 1 ? restante : Math.round((valor * b.total) / (tot || 1));
+      const d = Math.min(quota, b.total, restante);
+      restante -= d;
+      b.total -= d;
+      b.descG += d;
+    });
+  }
+  const calc = base.map((b, i) => {
+    const t = linhas[i].artigo.taxa_pct;
+    const iva = Math.round((b.total * t) / (100 + t));
+    const desc = Math.round((b.descG * 100) / (100 + t));
+    return { bruto: b.total - iva + desc, desc, liquido: b.total - iva, iva, total: b.total };
+  });
+  return resumir(linhas, calc);
+}
 
 /** Mesmas regras de arredondamento do backend (documentos::emitir). */
-function calcular(linhas: Linha[], g: DescGlobal) {
+function calcular(linhas: Linha[], g: DescGlobal, comIva = false) {
+  if (comIva) return calcularComIva(linhas, g);
   const gp = g.tipo === "pct" ? g.valor : 0;
   const base = linhas.map((l) => {
     const bruto = Math.round(l.quantidade * l.preco);
@@ -105,12 +158,7 @@ function calcular(linhas: Linha[], g: DescGlobal) {
     const iva = Math.round((b.liquido * linhas[i].artigo.taxa_pct) / 100);
     return { ...b, iva, total: b.liquido + iva };
   });
-  const t = calc.reduce(
-    (s, c, i) => ({ bruto: s.bruto + c.bruto, desc: s.desc + c.desc, iva: s.iva + c.iva, total: s.total + c.total, itens: s.itens + linhas[i].quantidade }),
-    { bruto: 0, desc: 0, iva: 0, total: 0, itens: 0 },
-  );
-  const maxDesc = calc.reduce((m, c) => Math.max(m, c.bruto ? (c.desc * 100) / c.bruto : 0), 0);
-  return { linhas: calc, ...t, maxDesc };
+  return resumir(linhas, calc);
 }
 
 type Teclado = { modo: "qtd" | "preco" | "desc" | "global" } | null;
@@ -126,6 +174,12 @@ export default function Pos() {
 
   const [busca, setBusca] = useState("");
   const [familia, setFamilia] = useState<number | null>(null);
+  // relógio da barra (os terminais POS ficam muitas vezes em ecrã inteiro, sem o relógio do sistema)
+  const [agora, setAgora] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setAgora(new Date()), 15_000);
+    return () => clearInterval(t);
+  }, []);
   const [linhas, setLinhas] = useState<Linha[]>([]);
   const [sel, setSel] = useState<number | null>(null);
   const [cliente, setCliente] = useState<Entidade>(CONSUMIDOR);
@@ -145,6 +199,8 @@ export default function Pos() {
   const [verSuspensos, setVerSuspensos] = useState(false);
   const [verProformas, setVerProformas] = useState(false);
   const [pedidoPin, setPedidoPin] = useState<PedidoPin>(null);
+  const [cupao, setCupao] = useState<{ codigo: string; tipo: "PCT" | "VALOR"; valor: number; descricao: string | null } | null>(null);
+  const [pedirCupao, setPedirCupao] = useState(false);
   const [docEmitido, setDocEmitido] = useState<number | null>(null);
   const [impressaoAuto, setImpressaoAuto] = useState<number | null>(null);
   const buscaRef = useRef<HTMLInputElement>(null);
@@ -162,10 +218,18 @@ export default function Pos() {
   });
 
   const focar = () => setTimeout(() => buscaRef.current?.focus(), 30);
-  const totais = useMemo(() => calcular(linhas, descGlobal), [linhas, descGlobal]);
+  const comIva = !!tabelas.data?.precos_com_iva;
+  // fidelização: saldo de pontos do cliente identificado
+  const fid = tabelas.data?.fidelizacao;
+  const pontos = useQuery({
+    queryKey: ["pontos", cliente.id],
+    queryFn: () => call<SaldoPontos>("fidelizacao.saldo", { entidade_id: cliente.id }),
+    enabled: !!fid?.ativa && cliente.id !== 1,
+  });
+  const totais = useMemo(() => calcular(linhas, descGlobal, comIva), [linhas, descGlobal, comIva]);
   const idx = sel ?? (linhas.length ? linhas.length - 1 : null); // linha activa (seleccionada ou a última)
   const linhaAtiva = idx !== null ? linhas[idx] : null;
-  const algumModal = pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido;
+  const algumModal = pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido || pedirCupao;
 
   /** Executa a acção se o operador tiver permissão (e limite de desconto); caso contrário pede o PIN de um supervisor. */
   function comPermissao(permissao: string, descricao: string, acao: () => void, desconto?: number) {
@@ -186,7 +250,10 @@ export default function Pos() {
           return n;
         }
         setSel(ls.length);
-        return [...ls, { key: uid(), artigo: a, quantidade, preco: precoNivel(a, cliente.nivel_preco), desconto: Math.max(cliente.desconto || 0, a.promo_atual || 0), descricao: null }];
+        return [
+          ...ls,
+          { key: uid(), artigo: a, quantidade, preco: precoNivel(a, cliente.nivel_preco), pvp: pvpNivel(a, cliente.nivel_preco), desconto: Math.max(cliente.desconto || 0, a.promo_atual || 0), descricao: null },
+        ];
       });
     },
     [cliente, opcoes.repetir_linhas],
@@ -202,10 +269,9 @@ export default function Pos() {
     try {
       const a = await call<Artigo | null>("artigos.codigo", { codigo });
       if (a) {
-        // caixa de 12 → 12 unidades; etiqueta da balança → o peso (ou a quantidade do preço da etiqueta)
-        const q = +(quantidade * (a.leitura?.quantidade ?? 1)).toFixed(3);
-        adicionar(a, q);
-        if (a.leitura?.origem === "balanca") toast.info(`${a.descricao}: ${qtd(q)} ${a.unidade ?? ""}`.trim(), { duration: 2000 });
+        // embalagem (ex.: pack de 12) ou etiqueta de balança: a quantidade vem no código
+        adicionar(a, a.quantidade_lida ? +(quantidade * a.quantidade_lida).toFixed(6) : quantidade);
+        if (a.etiqueta) toast.info(`${a.descricao}: ${a.etiqueta.tipo === "PESO" ? `${qtd(a.etiqueta.valor)} kg` : kz(a.etiqueta.valor)} (etiqueta da balança)`);
         setBusca("");
       } else if (artigos.data?.length === 1) {
         adicionar(artigos.data[0], quantidade);
@@ -221,7 +287,9 @@ export default function Pos() {
   function mudarCliente(c: Entidade) {
     setCliente(c);
     // reaplica nível de preço e desconto do cliente às linhas não alteradas manualmente
-    setLinhas((ls) => ls.map((l) => (l.manual ? l : { ...l, preco: precoNivel(l.artigo, c.nivel_preco), desconto: Math.max(c.desconto || 0, l.artigo.promo_atual || 0) })));
+    setLinhas((ls) =>
+      ls.map((l) => (l.manual ? l : { ...l, preco: precoNivel(l.artigo, c.nivel_preco), pvp: pvpNivel(l.artigo, c.nivel_preco), desconto: Math.max(c.desconto || 0, l.artigo.promo_atual || 0) })),
+    );
   }
 
   function limpar() {
@@ -229,9 +297,52 @@ export default function Pos() {
     setSel(null);
     setCliente(CONSUMIDOR);
     setDescGlobal({ tipo: "pct", valor: 0 });
+    setCupao(null);
     setOrigem(null);
     setPin(null);
     focar();
+  }
+
+  // ---------------- promoções por regras (o servidor calcula; aplicam-se às linhas não alteradas à mão) ----------------
+  const chavePromo = linhas.map((l) => `${l.artigo.id}:${l.quantidade}:${l.manual ? 1 : 0}`).join("|");
+  useEffect(() => {
+    if (!linhas.length) return;
+    const t = setTimeout(async () => {
+      try {
+        const r = await call<{ desconto: number; regra: string | null }[]>("promocoes.calcular", { linhas: linhas.map((l) => ({ artigo_id: l.artigo.id, quantidade: l.quantidade })) });
+        setLinhas((ls) =>
+          ls.map((l, i) => {
+            if (l.manual || !r[i] || ls.length !== r.length) return l;
+            const base = Math.max(cliente.desconto || 0, l.artigo.promo_atual || 0);
+            const desconto = Math.max(base, r[i].desconto);
+            const regra = r[i].desconto > base ? r[i].regra : null;
+            return desconto === l.desconto && regra === (l.regra ?? null) ? l : { ...l, desconto, regra };
+          }),
+        );
+      } catch {
+        // sem regras ou sem ligação: fica o desconto que já havia
+      }
+    }, 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chavePromo, cliente.id]);
+
+  // ---------------- cupão de desconto ----------------
+  async function aplicarCupao(codigo: string) {
+    if (!codigo.trim()) return;
+    try {
+      const c = await call<{ codigo: string; tipo: "PCT" | "VALOR"; valor: number; descricao: string | null }>("cupoes.validar", { codigo, total: totais.total });
+      setCupao(c);
+      setDescGlobal(c.tipo === "PCT" ? { tipo: "pct", valor: c.valor } : { tipo: "valor", valor: Math.round(c.valor) });
+      setPedirCupao(false);
+      toast.success(`Cupão ${c.codigo} aplicado${c.descricao ? ` (${c.descricao})` : ""}.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+  function retirarCupao() {
+    setCupao(null);
+    setDescGlobal({ tipo: "pct", valor: 0 });
   }
 
   // ---------------- operações sobre linhas ----------------
@@ -263,14 +374,14 @@ export default function Pos() {
     } else if (modo === "preco" && i !== null) {
       const l = linhas[i];
       const preco = Math.round((valor * 100) / (1 + l.artigo.taxa_pct / 100));
-      comPermissao("pos.alterar_preco", "Alterar preço", () => atualizar(i, { preco, manual: true }));
+      comPermissao("pos.alterar_preco", "Alterar preço", () => atualizar(i, { preco, pvp: Math.round(valor * 100), manual: true }));
     } else if (modo === "desc" && i !== null) {
       if (valor > 100) return toast.error("Desconto inválido.");
       comPermissao("pos.desconto", `Desconto de ${valor}%`, () => atualizar(i, { desconto: valor, manual: true }), valor);
     } else if (modo === "global") {
       const g: DescGlobal = descGlobal.tipo === "pct" ? { tipo: "pct", valor } : { tipo: "valor", valor: Math.round(valor * 100) };
       if (g.tipo === "pct" && g.valor > 100) return toast.error("Desconto inválido.");
-      const efetivo = calcular(linhas, g).maxDesc;
+      const efetivo = calcular(linhas, g, comIva).maxDesc;
       comPermissao("pos.desconto", "Desconto global", () => setDescGlobal(g), efetivo);
     }
     focar();
@@ -285,7 +396,7 @@ export default function Pos() {
     setLinhas(
       origemLinhas
         .filter((l) => mapa.has(l.artigo_id))
-        .map((l) => ({ key: uid(), artigo: mapa.get(l.artigo_id)!, quantidade: l.quantidade, preco: l.preco, desconto: l.desconto, descricao: l.descricao ?? null, manual: true })),
+        .map((l) => ({ key: uid(), artigo: mapa.get(l.artigo_id)!, quantidade: l.quantidade, preco: l.preco, pvp: l.pvp ?? null, desconto: l.desconto, descricao: l.descricao ?? null, manual: true })),
     );
     setSel(null);
   }
@@ -302,7 +413,7 @@ export default function Pos() {
         descricao,
         total: totais.total,
         dados: {
-          linhas: linhas.map((l) => ({ artigo_id: l.artigo.id, quantidade: l.quantidade, preco: l.preco, desconto: l.desconto, descricao: l.descricao })),
+          linhas: linhas.map((l) => ({ artigo_id: l.artigo.id, quantidade: l.quantidade, preco: l.preco, pvp: l.pvp ?? null, desconto: l.desconto, descricao: l.descricao })),
           desc_global: descGlobal,
           origem,
         },
@@ -338,7 +449,7 @@ export default function Pos() {
     try {
       const d = await call<DocCompleto>("documentos.obter", { id });
       await carregarLinhas(
-        d.linhas.map((l) => ({ artigo_id: l.artigo_id, quantidade: l.quantidade, preco: l.preco_unitario, desconto: l.desconto_pct, descricao: l.descricao })),
+        d.linhas.map((l) => ({ artigo_id: l.artigo_id, quantidade: l.quantidade, preco: l.preco_unitario, pvp: l.pvp_unitario ?? null, desconto: l.desconto_pct, descricao: l.descricao })),
       );
       await carregarCliente(d.documento.entidade_id);
       setOrigem({ id: d.documento.id, numero: d.documento.numero_doc });
@@ -348,6 +459,53 @@ export default function Pos() {
       toast.error((e as Error).message);
     }
   }
+
+  // ---------------- venda em curso gravada (falha de energia, programa fechado) ----------------
+  const chaveCarrinho = `kangest.carrinho.${tabelas.data?.posto?.id ?? 1}`;
+  const recuperado = useRef(false);
+  useEffect(() => {
+    if (recuperado.current || !tabelas.data) return;
+    recuperado.current = true;
+    let guardado: { linhas: (LinhaGuardada & { lote?: string | null; manual?: boolean })[]; cliente: number | null; desc_global: DescGlobal; origem: { id: number; numero: string } | null } | null = null;
+    try {
+      guardado = JSON.parse(localStorage.getItem(chaveCarrinho) ?? "null");
+    } catch {
+      guardado = null;
+    }
+    if (!guardado?.linhas?.length || linhas.length) return;
+    (async () => {
+      const arts = await call<Artigo[]>("artigos.porIds", { ids: guardado.linhas.map((l) => l.artigo_id) });
+      const mapa = new Map(arts.map((a) => [a.id, a]));
+      setLinhas(
+        guardado.linhas
+          .filter((l) => mapa.has(l.artigo_id))
+          .map((l) => ({ key: uid(), artigo: mapa.get(l.artigo_id)!, quantidade: l.quantidade, preco: l.preco, pvp: l.pvp ?? null, desconto: l.desconto, descricao: l.descricao ?? null, lote: l.lote ?? null, manual: !!l.manual })),
+      );
+      setDescGlobal(guardado.desc_global ?? { tipo: "pct", valor: 0 });
+      setOrigem(guardado.origem ?? null);
+      await carregarCliente(guardado.cliente);
+      toast.info(`Recuperada a venda que estava em curso (${guardado.linhas.length} linha(s)).`);
+    })().catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabelas.data]);
+  useEffect(() => {
+    if (!recuperado.current) return;
+    try {
+      if (!linhas.length) localStorage.removeItem(chaveCarrinho);
+      else
+        localStorage.setItem(
+          chaveCarrinho,
+          JSON.stringify({
+            linhas: linhas.map((l) => ({ artigo_id: l.artigo.id, quantidade: l.quantidade, preco: l.preco, pvp: l.pvp ?? null, desconto: l.desconto, descricao: l.descricao, lote: l.lote ?? null, manual: !!l.manual })),
+            cliente: cliente.id === 1 ? null : cliente.id,
+            desc_global: descGlobal,
+            origem,
+          }),
+        );
+    } catch {
+      // armazenamento indisponível: a venda continua só em memória
+    }
+  }, [linhas, cliente, descGlobal, origem, chaveCarrinho]);
 
   // ---------------- pagamento ----------------
   function abrirPagamento() {
@@ -365,6 +523,7 @@ export default function Pos() {
     setFimVenda({ documento: d.documento.numero_doc, total: d.documento.total, pago: d.documento.valor_entregue || d.documento.total, troco: d.documento.troco });
     qc.invalidateQueries({ queryKey: ["caixa"] });
     qc.invalidateQueries({ queryKey: ["pos-artigos"] });
+    qc.invalidateQueries({ queryKey: ["pontos"] });
     const id = d.documento.id;
     const imprime = opcoes.imprimir_auto && d.documento.total >= (opcoes.valor_minimo_impressao || 0);
     if (opcoes.mostrar_opcoes_impressao) {
@@ -539,7 +698,8 @@ export default function Pos() {
     { k: "F3", label: "Quantidade", icon: <Hash className="size-4" />, on: () => abrirTeclado("qtd") },
     { k: "F6", label: "Desc. linha", icon: <Percent className="size-4" />, on: () => abrirTeclado("desc") },
     { k: "F7", label: "Preço", icon: <Tag className="size-4" />, on: () => abrirTeclado("preco") },
-    { k: "F8", label: "Desc. global", icon: <Percent className="size-4" />, on: () => abrirTeclado("global") },
+    { k: "F8", label: "Desc. global", icon: <Percent className="size-4" />, on: () => (cupao ? toast.info("Retire o cupão para dar outro desconto global.") : abrirTeclado("global")) },
+    { k: "", label: "Cupão", icon: <Tag className="size-4" />, on: () => (linhas.length ? setPedirCupao(true) : toast.info("Adicione artigos antes do cupão.")) },
     { k: "F9", label: "Descrição", icon: <Pencil className="size-4" />, on: () => linhaAtiva && setDescricaoLinha(true) },
     { k: "", label: "Lote", icon: <Boxes className="size-4" />, on: () => (linhaAtiva?.artigo.controla_lote ? setEscolherLote(true) : toast.info("Este artigo não é controlado por lotes.")) },
     { k: "Del", label: "Apagar linha", icon: <Trash2 className="size-4" />, on: () => apagarLinha() },
@@ -593,7 +753,13 @@ export default function Pos() {
           <Button variant="ghost" size="sm" onClick={alternarEcraInteiro} title={cheio ? "Sair do ecrã inteiro" : "Ecrã inteiro"}>
             {cheio ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
           </Button>
-          <span className="text-[13px] text-ink-2">{sessao?.nome}</span>
+          <span className="num hidden text-[13px] text-ink-2 md:inline" title={agora.toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long" })}>
+            {agora.toLocaleDateString("pt-PT", { weekday: "short", day: "2-digit", month: "2-digit" })} · <b className="font-semibold text-ink">{agora.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</b>
+          </span>
+          <span className="flex items-center gap-2 text-[13px] text-ink-2">
+            <span className="grid size-7 place-items-center rounded-full bg-brand text-[12px] font-semibold text-white">{sessao?.nome.slice(0, 1).toUpperCase()}</span>
+            {sessao?.nome}
+          </span>
           <Button variant="ghost" size="sm" onClick={bloquearSessao} title="Bloquear o posto (retoma-se com a senha ou o PIN; a venda fica como está)">
             <Lock className="size-4" />
           </Button>
@@ -688,19 +854,28 @@ export default function Pos() {
                         focar();
                       }}
                       disabled={semStock}
-                      className="group flex h-[118px] flex-col rounded-xl border border-line bg-surface p-3 text-left shadow-card transition hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-md disabled:opacity-45 disabled:hover:translate-y-0"
+                      className="group relative flex h-[118px] flex-col rounded-xl border border-line bg-surface p-3 text-left shadow-card transition hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:bg-sunken/60 disabled:hover:translate-y-0 disabled:hover:border-line disabled:hover:shadow-card"
                     >
+                      {semStock && <span className="absolute right-2 top-2 rounded-md bg-danger-50 px-1.5 py-0.5 text-[10.5px] font-medium text-danger">Sem stock</span>}
                       <span className="line-clamp-2 text-[13.5px] font-medium leading-snug">{a.descricao}</span>
                       <span className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink-3">
                         {a.referencia}
-                        {!!a.promo_atual && <span className="rounded bg-accent-50 px-1.5 py-px font-medium text-[#9a6514]">−{numero(a.promo_atual, 2)}%</span>}
+                        {!!a.promo_atual && <span className="rounded bg-accent-50 px-1.5 py-px font-medium text-accent-ink">−{numero(a.promo_atual, 2)}%</span>}
                       </span>
-                      <div className="mt-auto flex items-end justify-between">
-                        <span className="num text-[15px] font-semibold text-brand-700">{kzNum(comIvaArt(precoNivel(a, cliente.nivel_preco), a))}</span>
-                        {a.controla_stock === 1 && (
-                          <span className={cn("num text-[11px]", a.stock <= a.qtd_minima ? "text-danger" : "text-ink-3")}>
-                            {qtd(a.stock)} {a.unidade}
-                          </span>
+                      <div className="mt-auto flex items-end justify-between gap-2">
+                        <span className={cn("num text-[16px] font-semibold", semStock ? "text-ink-3" : "text-brand-700")}>{kzNum(pvpNivel(a, cliente.nivel_preco))}</span>
+                        {a.tipo === "S" ? (
+                          <span className="text-[11px] text-ink-3">Serviço</span>
+                        ) : (
+                          a.controla_stock === 1 && (
+                            <span
+                              className={cn("num inline-flex items-center gap-1 text-[11px]", a.stock <= 0 ? "text-danger" : a.stock <= a.qtd_minima ? "text-accent-ink" : "text-ink-3")}
+                              title={a.stock <= a.qtd_minima ? "No mínimo ou abaixo" : "Em stock"}
+                            >
+                              <span className={cn("size-1.5 rounded-full", a.stock <= 0 ? "bg-danger" : a.stock <= a.qtd_minima ? "bg-accent" : "bg-ok")} />
+                              {qtd(a.stock)} {a.unidade ?? "un"}
+                            </span>
+                          )
                         )}
                       </div>
                     </button>
@@ -716,8 +891,10 @@ export default function Pos() {
               <button
                 key={t.label}
                 onClick={t.on}
-                className="flex flex-col items-center justify-center gap-1 rounded-xl border border-line bg-surface px-1 py-2 text-[11.5px] text-ink-2 shadow-card transition hover:border-brand/50 hover:text-ink"
+                title={t.k ? `${t.label} (${t.k})` : t.label}
+                className="relative flex flex-col items-center justify-center gap-1 rounded-xl border border-line bg-surface px-1 pb-2 pt-3.5 text-[11.5px] text-ink-2 shadow-card transition hover:border-brand/50 hover:text-ink active:scale-[0.97]"
               >
+                {t.k && <kbd className="absolute right-1 top-1 px-1 py-px text-[9.5px] text-ink-3">{t.k}</kbd>}
                 {t.icon}
                 <span className="text-center leading-tight">{t.label}</span>
               </button>
@@ -734,7 +911,15 @@ export default function Pos() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{cliente.nome}</div>
-                <div className="text-[12px] text-ink-3">NIF {cliente.nif}</div>
+                <div className="flex items-center gap-2 text-[12px] text-ink-3">
+                  NIF {cliente.nif}
+                  {pontos.data && cliente.id !== 1 && (
+                    <span className="inline-flex items-center gap-0.5 font-medium text-accent-ink" title={`Vale ${kz(pontos.data.valor)}`}>
+                      <Star className="size-3" />
+                      {numero(pontos.data.pontos, 0)} pontos
+                    </span>
+                  )}
+                </div>
               </div>
             </button>
             <button
@@ -772,8 +957,24 @@ export default function Pos() {
             {linhas.length === 0 ? (
               <div className="grid h-full place-items-center px-8 text-center text-ink-3">
                 <div>
-                  <Search className="mx-auto mb-2 size-7" />
-                  Leia um código de barras ou toque num artigo para começar.
+                  <div className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-brand-50 text-brand">
+                    <ScanBarcode className="size-6" />
+                  </div>
+                  <p className="font-medium text-ink-2">Leia um código de barras ou toque num artigo.</p>
+                  <ul className="mx-auto mt-4 w-fit space-y-1.5 text-left text-[12.5px]">
+                    {(
+                      [
+                        ["Enter", "ler o código (3*código = 3 unidades)"],
+                        ["F2", "lista de artigos"],
+                        ["F4", "escolher o cliente"],
+                        ["F12", "pagamento"],
+                      ] as const
+                    ).map(([k, d]) => (
+                      <li key={k} className="flex items-center gap-2">
+                        <kbd className="min-w-[44px] text-center">{k}</kbd> {d}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
             ) : (
@@ -781,14 +982,23 @@ export default function Pos() {
                 {linhas.map((l, i) => {
                   const c = totais.linhas[i];
                   return (
-                    <li key={l.key} onClick={() => setSel(i)} className={cn("cursor-pointer border-b border-line/70 px-5 py-3", idx === i && "bg-brand-50/60")}>
+                    <li key={l.key} onClick={() => setSel(i)} className={cn("relative cursor-pointer border-b border-line/70 px-5 py-3", idx === i && "bg-brand-50/60")}>
+                      {idx === i && <span className="absolute inset-y-0 left-0 w-1 bg-brand" />}
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="truncate font-medium">{l.descricao || l.artigo.descricao}</div>
+                          <div className="truncate font-medium">
+                            <span className="num mr-1.5 text-[12px] font-normal text-ink-3">{i + 1}.</span>
+                            {l.descricao || l.artigo.descricao}
+                          </div>
                           <div className="num text-[12px] text-ink-3">
-                            {kzNum(comIvaArt(l.preco, l.artigo))} / {l.artigo.unidade ?? "UN"} · IVA {l.artigo.taxa_pct}%
+                            {kzNum(l.pvp ?? comIvaArt(l.preco, l.artigo))} / {l.artigo.unidade ?? "UN"} · IVA {l.artigo.taxa_pct}%
                             {l.desconto ? ` · \u2212${numero(l.desconto, 2)}%` : ""}
                           </div>
+                          {l.regra && <div className="mt-0.5 inline-block rounded bg-accent-50 px-1.5 py-px text-[11.5px] font-medium text-accent-ink">{l.regra}</div>}
+                          {/* preço líquido (já com os descontos) abaixo do custo médio: só aviso, a venda continua possível */}
+                          {!!c && l.artigo.custo_medio > 0 && l.quantidade > 0 && c.liquido < Math.round(l.artigo.custo_medio * l.quantidade) && (
+                            <div className="mt-0.5 text-[12px] font-medium text-danger">Abaixo do custo médio ({kzNum(l.artigo.custo_medio)} s/ IVA)</div>
+                          )}
                           {!!l.artigo.controla_lote && (
                             <button
                               className="mt-0.5 text-[12px] text-accent hover:underline"
@@ -806,7 +1016,8 @@ export default function Pos() {
                       </div>
                       <div className="mt-2 flex items-center gap-2">
                         <button
-                          className="grid size-7 place-items-center rounded-md border border-line hover:bg-sunken"
+                          className="grid size-8 place-items-center rounded-md border border-line bg-surface hover:bg-sunken"
+                          aria-label="Menos uma unidade"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (l.quantidade > 1) comPermissao("pos.quantidade", "Alterar quantidade", () => atualizar(i, { quantidade: +(l.quantidade - 1).toFixed(3) }));
@@ -815,7 +1026,7 @@ export default function Pos() {
                           <Minus className="size-3.5" />
                         </button>
                         <button
-                          className="num h-7 min-w-14 rounded-md border border-line px-2 text-center hover:bg-sunken"
+                          className="num h-8 min-w-14 rounded-md border border-line bg-surface px-2 text-center font-medium hover:bg-sunken"
                           onClick={(e) => {
                             e.stopPropagation();
                             setSel(i);
@@ -825,7 +1036,8 @@ export default function Pos() {
                           {qtd(l.quantidade)}
                         </button>
                         <button
-                          className="grid size-7 place-items-center rounded-md border border-line hover:bg-sunken"
+                          className="grid size-8 place-items-center rounded-md border border-line bg-surface hover:bg-sunken"
+                          aria-label="Mais uma unidade"
                           onClick={(e) => {
                             e.stopPropagation();
                             atualizar(i, { quantidade: +(l.quantidade + 1).toFixed(3) });
@@ -854,6 +1066,16 @@ export default function Pos() {
             <div className="space-y-1 text-[13px] text-ink-2">
               <Linha2 k={`Subtotal (${qtd(totais.itens)} ${totais.itens === 1 ? "item" : "itens"})`} v={kz(totais.bruto)} />
               {totais.desc > 0 && <Linha2 k="Descontos" v={`\u2212${kz(totais.desc)}`} />}
+              {cupao && (
+                <div className="flex items-center justify-between rounded-md bg-accent-50 px-2 py-1 text-accent-ink">
+                  <span>
+                    Cupão <b>{cupao.codigo}</b> ({cupao.tipo === "PCT" ? `\u2212${numero(cupao.valor, 2)}%` : `\u2212${kz(cupao.valor)}`})
+                  </span>
+                  <button className="text-[12px] underline" onClick={retirarCupao}>
+                    retirar
+                  </button>
+                </div>
+              )}
               <Linha2 k="IVA" v={kz(totais.iva)} />
             </div>
             <div className="mt-2 flex items-baseline justify-between">
@@ -864,8 +1086,9 @@ export default function Pos() {
               <Button variant="secondary" size="lg" onClick={limpar} disabled={!linhas.length}>
                 <XCircle className="size-4" /> Cancelar
               </Button>
-              <Button size="lg" variant="accent" className="text-[16px]" onClick={abrirPagamento} disabled={!linhas.length || caixaFechado}>
+              <Button size="lg" variant="accent" className="text-[16px]" onClick={abrirPagamento} disabled={!linhas.length || caixaFechado} title="Pagamento (F12)">
                 <Banknote className="size-5" /> Pagar
+                <kbd className="ml-1 border-on-accent/25 bg-white/35 text-[10.5px] text-on-accent">F12</kbd>
               </Button>
             </div>
           </div>
@@ -913,7 +1136,7 @@ export default function Pos() {
         sufixo={teclado?.modo === "qtd" ? linhaAtiva?.artigo.unidade ?? "" : teclado?.modo === "desc" || (teclado?.modo === "global" && descGlobal.tipo === "pct") ? "%" : "Kz"}
         ajuda={
           teclado?.modo === "preco"
-            ? `Preço actual: ${kz(linhaAtiva ? comIvaArt(linhaAtiva.preco, linhaAtiva.artigo) : 0)}`
+            ? `Preço actual: ${kz(linhaAtiva ? (linhaAtiva.pvp ?? comIvaArt(linhaAtiva.preco, linhaAtiva.artigo)) : 0)}`
             : teclado?.modo === "desc" || teclado?.modo === "global"
               ? sessao?.limite_desconto
                 ? `O seu limite de desconto é ${sessao.limite_desconto}%.`
@@ -928,7 +1151,7 @@ export default function Pos() {
             : teclado.modo === "qtd"
               ? String(linhaAtiva.quantidade).replace(".", ",")
               : teclado.modo === "preco"
-                ? (comIvaArt(linhaAtiva.preco, linhaAtiva.artigo) / 100).toFixed(2).replace(".", ",")
+                ? ((linhaAtiva.pvp ?? comIvaArt(linhaAtiva.preco, linhaAtiva.artigo)) / 100).toFixed(2).replace(".", ",")
                 : teclado.modo === "desc"
                   ? String(linhaAtiva.desconto || "")
                   : descGlobal.tipo === "pct"
@@ -983,6 +1206,15 @@ export default function Pos() {
       />
 
       <TextoModal
+        open={pedirCupao}
+        titulo="Cupão de desconto"
+        label="Código do cupão"
+        valorInicial=""
+        onConfirm={aplicarCupao}
+        onClose={() => { setPedirCupao(false); focar(); }}
+      />
+
+      <TextoModal
         open={suspender}
         titulo="Suspender documento"
         label="Identificação (cliente, mesa, observação)"
@@ -1011,9 +1243,11 @@ export default function Pos() {
           cliente={cliente}
           linhas={linhas}
           descGlobal={descGlobal}
+          cupao={cupao?.codigo ?? null}
           origemId={origem?.id ?? null}
           pin={pin}
           modos={tabelas.data?.modos_pagamento ?? []}
+          pontos={cliente.id !== 1 && pontos.data?.pode_pagar ? { ...pontos.data, valor_ponto: fid?.valor_ponto ?? 0 } : null}
           onClose={() => { setPagar(false); focar(); }}
           onEmitido={aposEmissao}
         />
@@ -1092,9 +1326,11 @@ function Pagamento({
   cliente,
   linhas,
   descGlobal,
+  cupao,
   origemId,
   pin,
   modos,
+  pontos,
   onClose,
   onEmitido,
 }: {
@@ -1102,9 +1338,12 @@ function Pagamento({
   cliente: Entidade;
   linhas: Linha[];
   descGlobal: DescGlobal;
+  cupao: string | null;
   origemId: number | null;
   pin: string | null;
   modos: { codigo: string; descricao: string }[];
+  /** saldo de pontos do cliente, quando pode pagar com eles */
+  pontos: (SaldoPontos & { valor_ponto: number }) | null;
   onClose: () => void;
   onEmitido: (d: DocCompleto) => void;
 }) {
@@ -1116,6 +1355,18 @@ function Pagamento({
   const pago = Object.values(valores).reduce((s, v) => s + parseKz(v || "0"), 0);
   const falta = Math.max(0, total - pago);
   const troco = Math.max(0, pago - total);
+  // pagamento com pontos (SAF-T «DE»): até ao saldo e ao total; o resto fica em numerário
+  const emPontos = parseKz(valores.DE || "0");
+  const pontosUsados = pontos && pontos.valor_ponto > 0 ? Math.ceil(emPontos / pontos.valor_ponto) : 0;
+  function usarPontos() {
+    if (!pontos) return;
+    const outros = Object.entries(valores).filter(([m]) => m !== "DE" && m !== "NU").reduce((s, [, v]) => s + parseKz(v || "0"), 0);
+    const usar = Math.max(0, Math.min(pontos.valor, total - outros));
+    const fmt = (c: number) => (c / 100).toFixed(2).replace(".", ",");
+    setValores({ ...valores, DE: fmt(usar), NU: fmt(Math.max(0, total - outros - usar)) });
+    // o foco volta ao numerário: Enter emite (e não volta a carregar no botão)
+    requestAnimationFrame(() => nuRef.current?.select());
+  }
 
   useEffect(() => {
     nuRef.current?.select();
@@ -1123,6 +1374,7 @@ function Pagamento({
 
   async function emitir() {
     if (tipo === "FR" && falta > 0) return toast.error(`Falta pagar ${kz(falta)}.`);
+    if (tipo === "FR" && pontos && emPontos > pontos.valor) return toast.error(`O cliente só tem ${kz(pontos.valor)} em pontos.`);
     setBusy(true);
     try {
       const d = await call<DocCompleto>("documentos.emitir", {
@@ -1132,6 +1384,8 @@ function Pagamento({
           artigo_id: l.artigo.id,
           quantidade: l.quantidade,
           preco_unitario: l.preco,
+          // com «preços com IVA incluído» o servidor parte do PVP da linha
+          pvp_unitario: l.pvp ?? undefined,
           desconto_pct: l.desconto,
           descricao: l.descricao ?? undefined,
           lote: l.lote || undefined,
@@ -1140,6 +1394,7 @@ function Pagamento({
         desconto_global_valor: descGlobal.tipo === "valor" && descGlobal.valor > 0 ? descGlobal.valor : undefined,
         doc_origem_id: origemId ?? undefined,
         autorizacao_pin: pin ?? undefined,
+        cupao: cupao ?? undefined,
         pagamentos: tipo === "FR" ? Object.entries(valores).map(([modo, v]) => ({ modo, valor: parseKz(v || "0") })) : [],
       });
       toast.success(`${d.documento.numero_doc} emitido.`);
@@ -1151,8 +1406,10 @@ function Pagamento({
     }
   }
 
-  const rapidos = [total, Math.ceil(total / 100000) * 100000, Math.ceil(total / 500000) * 500000, Math.ceil(total / 1000000) * 1000000]
-    .filter((v, i, a) => v >= total && a.indexOf(v) === i)
+  // numerário rápido: o que falta depois dos pontos
+  const restante = Math.max(0, total - emPontos);
+  const rapidos = [restante, Math.ceil(restante / 100000) * 100000, Math.ceil(restante / 500000) * 500000, Math.ceil(restante / 1000000) * 1000000]
+    .filter((v, i, a) => v > 0 && v >= restante && a.indexOf(v) === i)
     .slice(0, 4);
 
   return (
@@ -1168,6 +1425,7 @@ function Pagamento({
           </Button>
           <Button size="lg" variant="accent" loading={busy} onClick={emitir} disabled={tipo === "FR" && falta > 0}>
             Emitir {tipo === "FR" ? "Factura/Recibo" : "Factura"}
+            <kbd className="ml-1 border-on-accent/25 bg-white/35 text-[10.5px] text-on-accent">Enter</kbd>
           </Button>
         </>
       }
@@ -1224,12 +1482,35 @@ function Pagamento({
                     />
                   </label>
                 ))}
+              {pontos && (
+                <div className="mt-3 rounded-xl border border-accent/40 bg-accent-50/60 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2 text-[13px]">
+                    <span className="flex items-center gap-1.5 font-medium text-accent-ink">
+                      <Star className="size-4" />
+                      {numero(pontos.pontos, 0)} pontos · {kz(pontos.valor)}
+                    </span>
+                    <Button type="button" size="sm" variant="secondary" onClick={usarPontos}>
+                      Usar pontos
+                    </Button>
+                  </div>
+                  <label className="grid grid-cols-[minmax(0,1fr)_150px] items-center gap-3">
+                    <span className="text-[13px] text-ink-2">{pontosUsados > 0 ? `Pago com ${numero(pontosUsados, 0)} pontos` : "Pago com pontos"}</span>
+                    <Input
+                      className="num h-9 text-right"
+                      value={valores.DE ?? ""}
+                      placeholder="0,00"
+                      onChange={(e) => setValores({ ...valores, DE: e.target.value })}
+                      onFocus={(e) => e.target.select()}
+                    />
+                  </label>
+                </div>
+              )}
             </div>
             <div className="flex flex-col gap-3">
               <div className="text-[12px] font-medium uppercase tracking-wide text-ink-2">Numerário rápido</div>
               <div className="grid grid-cols-2 gap-2">
                 {rapidos.map((v) => (
-                  <Button type="button" key={v} variant="secondary" size="lg" className="num" onClick={() => setValores({ NU: (v / 100).toFixed(2).replace(".", ",") })}>
+                  <Button type="button" key={v} variant="secondary" size="lg" className="num" onClick={() => setValores({ ...(emPontos > 0 ? { DE: valores.DE } : {}), NU: (v / 100).toFixed(2).replace(".", ",") })}>
                     {kzNum(v)}
                   </Button>
                 ))}
@@ -1310,8 +1591,8 @@ function ClienteModal({ modo, onClose, onSelect }: { modo: "" | "lista" | "novo"
             <Input autoFocus value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} />
           </Field>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="NIF">
-              <Input value={f.nif} onChange={(e) => setF({ ...f, nif: e.target.value })} />
+            <Field label="NIF" hint={nifValido(f.nif) ? undefined : "10 algarismos ou n.º do BI (ex.: 001234567LA041)"}>
+              <Input value={f.nif} onChange={(e) => setF({ ...f, nif: e.target.value })} className={cn(!nifValido(f.nif) && "border-danger")} />
             </Field>
             <Field label="Telefone">
               <Input value={f.telefone} onChange={(e) => setF({ ...f, telefone: e.target.value })} />
@@ -1363,8 +1644,8 @@ function EditarClienteModal({ cliente, onClose, onSaved }: { cliente: Entidade; 
         <Field label="Nome" className="col-span-2">
           <Input autoFocus value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} />
         </Field>
-        <Field label="NIF">
-          <Input value={f.nif} onChange={(e) => setF({ ...f, nif: e.target.value })} />
+        <Field label="NIF" hint={nifValido(f.nif) ? undefined : "10 algarismos ou n.º do BI (ex.: 001234567LA041)"}>
+          <Input value={f.nif} onChange={(e) => setF({ ...f, nif: e.target.value })} className={cn(!nifValido(f.nif) && "border-danger")} />
         </Field>
         <Field label="Telefone">
           <Input value={f.telefone ?? ""} onChange={(e) => setF({ ...f, telefone: e.target.value })} />

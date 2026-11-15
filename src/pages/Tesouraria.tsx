@@ -7,6 +7,7 @@ import { call } from "@/lib/api";
 import { data, hojeISO, inicioMesISO, kz, parseKz } from "@/lib/format";
 import { imprimir } from "@/lib/print";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Stat, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 import { PrintPortal } from "@/components/DocumentoPrint";
 
 export interface Conta {
@@ -126,10 +127,10 @@ export default function Tesouraria() {
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <Field label="Data inicial">
-          <Input type="date" className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
+          <InputData className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
         </Field>
         <Field label="Data final">
-          <Input type="date" className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
+          <InputData className="w-40" value={ate} onChange={(e) => setAte(e.target.value)} />
         </Field>
         <Field label="Conta">
           <Select className="w-52" value={conta} onChange={(e) => setConta(e.target.value)}>
@@ -179,7 +180,7 @@ export default function Tesouraria() {
             ))}
           </div>
           {aba === "Fluxo de Caixa" && (
-            <Table className="max-h-[calc(100vh-430px)]">
+            <Table className="max-h-[calc(100vh-474px)]">
               <thead>
                 <tr>
                   <Th>Data</Th>
@@ -307,7 +308,7 @@ export default function Tesouraria() {
             <ul className="space-y-2.5">
               {contas.data?.map((c) => (
                 <li key={c.id} className="flex items-center gap-3">
-                  <span className={cn("rounded-lg p-1.5", c.tipo === "CAIXA" ? "bg-accent-50 text-[#9a6514]" : "bg-brand-50 text-brand")}>
+                  <span className={cn("rounded-lg p-1.5", c.tipo === "CAIXA" ? "bg-accent-50 text-accent-ink" : "bg-brand-50 text-brand")}>
                     {c.tipo === "CAIXA" ? <Banknote className="size-4" /> : <Building2 className="size-4" />}
                   </span>
                   <span className="flex-1 text-[13.5px]">{c.descricao}</span>
@@ -441,7 +442,7 @@ function MovimentoModal({ acao, contas, onClose, onDone }: { acao: "ENTRADA" | "
           </Field>
         ) : (
           <Field label="Data">
-            <Input type="date" value={dataMov} onChange={(e) => setDataMov(e.target.value)} />
+            <InputData value={dataMov} onChange={(e) => setDataMov(e.target.value)} />
           </Field>
         )}
         <Field label="Valor (Kz)">

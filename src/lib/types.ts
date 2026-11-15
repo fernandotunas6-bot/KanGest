@@ -60,6 +60,8 @@ export interface PostoOpcoes {
   visor?: VisorOpcoes;
   /** abrir o POS em ecrã inteiro (terminais dedicados) */
   pos_ecra_inteiro?: boolean;
+  /** fecho de caixa cego: o operador conta sem ver o valor esperado */
+  fecho_cego?: boolean;
 }
 
 export interface Posto {
@@ -89,6 +91,16 @@ export interface Artigo {
   preco2: number;
   preco3: number;
   preco4: number;
+  /** Código do artigo na balança (PLU) das etiquetas EAN-13. */
+  codigo_balanca?: string | null;
+  /** Leitura no POS: quantidade que o código trouxe (embalagem ou etiqueta de balança). */
+  quantidade_lida?: number;
+  etiqueta?: { tipo: "PESO" | "PRECO"; valor: number };
+  /** PVP com IVA guardado de cada nível (valor mestre com «preços com IVA incluído»). */
+  pvp1?: number | null;
+  pvp2?: number | null;
+  pvp3?: number | null;
+  pvp4?: number | null;
   qtd_minima: number;
   qtd_maxima: number;
   controla_stock: number;
@@ -110,27 +122,6 @@ export interface Artigo {
   promo_inicio?: string | null;
   promo_fim?: string | null;
   promo_atual?: number;
-  /** Código do artigo na balança (PLU) das etiquetas com peso ou preço. */
-  codigo_balanca?: string | null;
-  /** Outros códigos de barras e embalagens (quantidade = unidades por leitura). */
-  codigos?: CodigoExtra[];
-  /** Em `artigos.codigo`: quanto vale a leitura quando não é 1 (embalagem ou etiqueta da balança). */
-  leitura?: { origem: "embalagem" | "balanca"; quantidade: number; descricao?: string | null; peso?: number; preco_etiqueta?: number };
-}
-
-export interface CodigoExtra {
-  codigo: string;
-  quantidade: number;
-  descricao: string | null;
-}
-
-/** Formato das etiquetas da balança (EAN-13: prefixo + código do artigo + peso ou preço + controlo). */
-export interface BalancaConfig {
-  ativo: boolean;
-  prefixos: string;
-  digitos_codigo: number;
-  tipo: "PESO" | "PRECO";
-  decimais: number;
 }
 
 export interface Componente {
@@ -199,6 +190,20 @@ export interface Tabelas {
   posto_id: number;
   armazem_id: number;
   posto: Posto;
+  /** Opção de venda «preços com IVA incluído»: as linhas partem do PVP com IVA. */
+  precos_com_iva?: boolean;
+  /** Fidelização de clientes (cartão de pontos). */
+  fidelizacao?: FidelizacaoCfg;
+}
+
+export interface FidelizacaoCfg {
+  ativa: boolean;
+  /** compra (cêntimos, com IVA) que dá um ponto */
+  compra_por_ponto: number;
+  /** valor de cada ponto no pagamento (cêntimos) */
+  valor_ponto: number;
+  /** saldo mínimo para pagar com pontos */
+  minimo_resgate: number;
 }
 
 export type Grupo = "VENDAS" | "COMPRAS" | "STOCK";
@@ -230,6 +235,8 @@ export interface OpcoesImpresso {
   valor_extenso: boolean;
   assinaturas: boolean;
   mostrar_operador: boolean;
+  /** Vendas calculadas a partir do PVP com IVA (3 × 1 000,00 = 3 000,00). */
+  precos_com_iva?: boolean;
 }
 
 export interface Transporte {
@@ -275,6 +282,8 @@ export interface DocLinha {
   quantidade: number;
   unidade: string | null;
   preco_unitario: number;
+  /** Preço unitário com IVA (linhas vendidas com «preços com IVA incluído»). */
+  pvp_unitario?: number | null;
   desconto_pct: number;
   valor_desconto: number;
   taxa_iva_pct: number;
@@ -298,6 +307,7 @@ export interface DocCompleto {
     observacoes: string | null;
     motivo_anulacao: string | null;
     doc_origem: string | null;
+    doc_origem_id: number | null;
     armazem: string | null;
     armazem_destino: string | null;
     vias: number;
@@ -330,8 +340,14 @@ export interface DocCompleto {
   linhas: DocLinha[];
   pagamentos: { modo_codigo: string; descricao: string; valor: number }[];
   liquidacoes: { id: number; numero_doc: string; data_emissao: string; total: number; valor: number }[];
+  /** recibos que liquidaram este documento (servidores anteriores à 1.2 não os enviam) */
+  recibos?: { id: number; numero_doc: string; tipo_codigo: string; tipo_desc: string; data_emissao: string; valor: number; estado: string }[];
+  /** documentos emitidos a partir deste: factura de uma proforma, nota de crédito… */
+  derivados?: { id: number; numero_doc: string; tipo_codigo: string; tipo_desc: string; data_emissao: string; total: number; estado: string }[];
   resumo_iva: { taxa: number; motivo_isencao: string | null; base: number; iva: number }[];
   empresa: Empresa;
+  /** pontos de fidelização do documento (ganhos, gastos) e o saldo actual do cliente */
+  fidelizacao?: { ganhos: number; gastos: number; saldo: number } | null;
 }
 
 export interface Empresa {
@@ -361,8 +377,14 @@ export interface CaixaResumo {
     estado: string;
     utilizador: string;
     posto: string | null;
+    /** N.º do fecho (relatório Z) do posto. */
+    numero_z?: number | null;
+    /** Notas e moedas contadas: valor em Kz → quantidade. */
+    contagem?: Record<string, number> | null;
+    contado_modos?: Record<string, number> | null;
+    observacoes?: string | null;
   };
-  /** Com o fecho cego, os totais vêm a null enquanto o caixa está aberto (para quem não vê relatórios). */
+  /** Com o fecho cego e o caixa aberto, os totais vêm a null. */
   por_modo: { codigo: string; descricao: string; total: number | null }[];
   documentos: number;
   total_vendido: number | null;
@@ -371,17 +393,10 @@ export interface CaixaResumo {
   movimentos: { id: number; data_hora: string; tipo: string; valor: number; descricao: string; rubrica: string | null; modo_codigo: string | null }[];
   artigos: { referencia: string; descricao: string; quantidade: number; total: number }[];
   numerario_esperado: number | null;
-  /** Contagem por notas e moedas do fecho (valor em cêntimos; tipo N nota, M moeda). */
-  contagem: { valor: number; quantidade: number; tipo?: "N" | "M" | null }[] | null;
-  fecho: FechoConfig;
-  cego: boolean;
-}
-
-/** Opções do fecho de caixa: fecho cego e as notas e moedas da contagem (em cêntimos). */
-export interface FechoConfig {
-  fecho_cego: boolean;
-  notas: number[];
-  moedas: number[];
+  /** Fecho cego: quem conta não vê o esperado até fechar. */
+  cego?: boolean;
+  /** Depois do fecho: esperado × contado de cada forma de pagamento. */
+  conferencia?: { codigo: string; descricao: string; esperado: number; contado: number | null; diferenca: number | null }[];
 }
 
 // ---------------- Oficina ----------------

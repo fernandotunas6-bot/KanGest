@@ -72,6 +72,17 @@ pub struct EntidadeIn {
     nivel_preco: Option<i64>,
 }
 
+/// Formato do NIF angolano: 10 algarismos (empresas e NIF atribuído pela AGT), o n.º do BI das pessoas
+/// singulares (9 algarismos, 2 letras da província e 3 algarismos, ex.: 001234567LA041) ou 999999999
+/// (consumidor final).
+pub fn nif_angolano_valido(nif: &str) -> bool {
+    let c: Vec<char> = nif.trim().chars().collect();
+    let algarismos = |x: &[char]| x.iter().all(|c| c.is_ascii_digit());
+    nif.trim() == "999999999"
+        || (c.len() == 10 && algarismos(&c))
+        || (c.len() == 14 && algarismos(&c[..9]) && c[9..11].iter().all(|c| c.is_ascii_uppercase()) && algarismos(&c[11..]))
+}
+
 pub async fn guardar(st: &AppState, e: EntidadeIn) -> AppResult<Value> {
     st.exigir_perm(if e.tipo.as_deref() == Some("F") { "fornecedores" } else { "clientes" })?;
     if e.nome.trim().is_empty() {
@@ -80,7 +91,11 @@ pub async fn guardar(st: &AppState, e: EntidadeIn) -> AppResult<Value> {
     if e.id == Some(1) {
         return Err(AppError::msg("O cliente \"Consumidor Final\" não pode ser alterado."));
     }
-    let nif = e.nif.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "999999999".into());
+    let nif = e
+        .nif
+        .map(|n| n.chars().filter(|c| !c.is_whitespace() && *c != '-' && *c != '.').collect::<String>().to_uppercase())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "999999999".into());
     if nif != "999999999" {
         let dup: Option<String> = sqlx::query_scalar("SELECT nome FROM entidades WHERE nif = ? AND id <> ? AND ativo = 1")
             .bind(&nif)
@@ -95,6 +110,18 @@ pub async fn guardar(st: &AppState, e: EntidadeIn) -> AppResult<Value> {
     let pais = e.pais.map(|p| p.trim().to_uppercase()).filter(|p| !p.is_empty()).unwrap_or_else(|| "AO".into());
     if pais.len() != 2 || !pais.chars().all(|c| c.is_ascii_uppercase()) {
         return Err(AppError::msg("O país indica-se pelo código de 2 letras (ex.: AO, PT, ZA)."));
+    }
+    // NIF angolano: só se recusa um NIF novo ou alterado (as fichas antigas com NIF mal escrito continuam a abrir)
+    if pais == "AO" && !nif_angolano_valido(&nif) {
+        let anterior: Option<String> = match e.id {
+            Some(id) => sqlx::query_scalar("SELECT nif FROM entidades WHERE id = ?").bind(id).fetch_optional(&st.pool).await?,
+            None => None,
+        };
+        if anterior.as_deref() != Some(nif.as_str()) {
+            return Err(AppError::msg(format!(
+                "NIF inválido ({nif}). Em Angola o NIF tem 10 algarismos (empresas) ou é o n.º do BI: 9 algarismos, 2 letras e 3 algarismos (ex.: 001234567LA041)."
+            )));
+        }
     }
     let sql = if e.id.is_some() {
         "UPDATE entidades SET tipo=?1, nome=?2, nif=?3, endereco=?4, localidade=?5, provincia=?6, telefone=?7,

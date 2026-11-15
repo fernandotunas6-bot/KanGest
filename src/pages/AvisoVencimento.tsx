@@ -3,9 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { BellRing, FileSpreadsheet, Printer, Search } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, hojeISO, kz } from "@/lib/format";
-import { csv, csvKz, exportarFicheiro } from "@/lib/csv";
+import { dataXL, exportarExcel, kzXL } from "@/lib/csv";
 import { imprimir } from "@/lib/print";
 import { Badge, Button, Card, Empty, Input, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 
@@ -51,12 +52,13 @@ export default function AvisoVencimento() {
     imprimir();
   }
   function exportar() {
-    exportarFicheiro(
-      `Aviso_vencimento_${hojeISO()}.csv`,
-      csv([
+    exportarExcel(
+      `Aviso_vencimento_${hojeISO()}.xlsx`,
+      [
         ["Entidade", "NIF", "Documento", "Emissão", "Vencimento", "Dias de atraso", "Total", "Pendente"],
-        ...lista.flatMap((e) => e.documentos.map((d) => [e.nome, e.nif, d.numero_doc, d.data_emissao, d.vencimento, d.dias_atraso, csvKz(d.total), csvKz(d.valor_pendente)])),
-      ]),
+        ...lista.flatMap((e) => e.documentos.map((d) => [e.nome, e.nif, d.numero_doc, dataXL(d.data_emissao), dataXL(d.vencimento), d.dias_atraso, kzXL(d.total), kzXL(d.valor_pendente)])),
+      ],
+      { titulo: "Aviso de vencimento" },
     );
   }
 
@@ -82,9 +84,9 @@ export default function AvisoVencimento() {
           <option value="F">Fornecedores</option>
         </Select>
         <span className="text-ink-3">Vencidos de</span>
-        <Input type="date" className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
+        <InputData className="w-40" value={de} onChange={(e) => setDe(e.target.value)} />
         <span className="text-ink-3">até</span>
-        <Input type="date" className="w-40" value={ate} max={hojeISO()} onChange={(e) => setAte(e.target.value)} />
+        <InputData className="w-40" value={ate} max={hojeISO()} onChange={(e) => setAte(e.target.value)} />
         <div className="relative min-w-56 flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
           <Input className="pl-9" placeholder="Pesquisar entidade…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -98,7 +100,7 @@ export default function AvisoVencimento() {
           {!lista.length ? (
             <Empty icon={<BellRing className="size-6" />} title="Sem documentos vencidos" />
           ) : (
-            <Table className="max-h-[calc(100vh-270px)]">
+            <Table className="max-h-[calc(100vh-314px)]">
               <thead>
                 <tr>
                   <Th>Entidade</Th>

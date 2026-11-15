@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Pencil } from "lucide-react";
 import { call } from "@/lib/api";
-import type { BalancaConfig, FechoConfig, OpcoesImpresso, TipoDocumento } from "@/lib/types";
+import type { OpcoesImpresso, TipoDocumento } from "@/lib/types";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 
 interface Modo {
@@ -56,11 +56,7 @@ export default function Parametrizacao() {
       ) : vista === "documentos" ? (
         <Documentos tipos={q.data.tipos} />
       ) : vista === "venda" ? (
-        <>
-          <OpcoesVenda modos={q.data.modos} contas={q.data.contas} />
-          <FechoCaixa />
-          <Balanca />
-        </>
+        <OpcoesVenda modos={q.data.modos} contas={q.data.contas} />
       ) : (
         <Impresso opcoes={q.data.opcoes} />
       )}
@@ -258,132 +254,6 @@ function OpcoesVenda({ modos, contas }: { modos: Modo[]; contas: Dados["contas"]
   );
 }
 
-// ======================================================================= fecho de caixa
-/** Kz a partir de cêntimos, como se escreve nas listas de notas e moedas (0,50 Kz → «0.5»). */
-const kzLista = (v: number[]) => v.map((c) => String(c / 100)).join(", ");
-
-function FechoCaixa() {
-  const cfg = useQuery({ queryKey: ["caixa-config"], queryFn: () => call<FechoConfig>("caixa.config") });
-  const [f, setF] = useState<{ fecho_cego: boolean; notas: string; moedas: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  if (!cfg.data) return null;
-  const v = f ?? { fecho_cego: cfg.data.fecho_cego, notas: kzLista(cfg.data.notas), moedas: kzLista(cfg.data.moedas) };
-  async function gravar() {
-    setBusy(true);
-    try {
-      await call("caixa.configGuardar", v);
-      toast.success("Opções do fecho de caixa gravadas.");
-      setF(null);
-      cfg.refetch();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Card className="mt-5 max-w-3xl p-6">
-      <div className="mb-4 font-medium">Fecho de caixa</div>
-      <label className="flex cursor-pointer items-start gap-3">
-        <input className="mt-1" type="checkbox" checked={v.fecho_cego} onChange={(e) => setF({ ...v, fecho_cego: e.target.checked })} />
-        <span>
-          <span className="font-medium">Fecho cego</span>
-          <span className="block text-[13px] text-ink-3">
-            Com o caixa aberto, o operador não vê o valor esperado nem os totais: conta a gaveta e só depois de fechar o relatório mostra a diferença. Quem tem a permissão
-            Relatórios continua a ver tudo.
-          </span>
-        </span>
-      </label>
-      <div className="mt-4 grid grid-cols-2 gap-4">
-        <Field label="Notas na contagem (Kz)" hint="Separadas por vírgulas">
-          <Input value={v.notas} onChange={(e) => setF({ ...v, notas: e.target.value })} />
-        </Field>
-        <Field label="Moedas na contagem (Kz)" hint="Os cêntimos com ponto: 0.5">
-          <Input value={v.moedas} onChange={(e) => setF({ ...v, moedas: e.target.value })} />
-        </Field>
-      </div>
-      <div className="mt-5 flex justify-end gap-2">
-        {f && (
-          <Button variant="ghost" onClick={() => setF(null)}>
-            Cancelar
-          </Button>
-        )}
-        <Button loading={busy} onClick={gravar}>
-          Gravar
-        </Button>
-      </div>
-    </Card>
-  );
-}
-
-// ======================================================================= balança (etiquetas com peso ou preço)
-function Balanca() {
-  const cfg = useQuery({ queryKey: ["balanca"], queryFn: () => call<BalancaConfig>("balanca.obter") });
-  const [f, setF] = useState<BalancaConfig | null>(null);
-  const [busy, setBusy] = useState(false);
-  if (!cfg.data) return null;
-  const v = f ?? cfg.data;
-  const n = Number(v.digitos_codigo) || 5;
-  // exemplo de etiqueta com o formato escolhido: prefixo + código do artigo + valor + controlo
-  const exemplo = `${(v.prefixos.split(",")[0] || "20").trim()} ${"1".padStart(n, "0")} ${"750".padStart(10 - n, "0")} x`;
-  const valorEx = v.tipo === "PESO" ? `${(750 / 10 ** v.decimais).toLocaleString("pt-PT")} (peso)` : `${(750 / 10 ** v.decimais).toLocaleString("pt-PT")} Kz (preço a pagar)`;
-  async function gravar() {
-    setBusy(true);
-    try {
-      await call("balanca.guardar", { ...v, digitos_codigo: n, decimais: Number(v.decimais) || 0 });
-      toast.success("Formato das etiquetas da balança gravado.");
-      setF(null);
-      cfg.refetch();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Card className="mt-5 max-w-3xl p-6">
-      <div className="mb-1 font-medium">Balança: etiquetas com peso ou preço</div>
-      <p className="mb-4 text-[13px] text-ink-3">
-        A balança imprime etiquetas EAN-13 com o código do artigo (o «Código na balança» da ficha) e o peso ou o preço. O leitor do POS lança o artigo com essa quantidade.
-      </p>
-      <label className="flex cursor-pointer items-center gap-2">
-        <input type="checkbox" checked={v.ativo} onChange={(e) => setF({ ...v, ativo: e.target.checked })} />
-        <span className="font-medium">Ler etiquetas da balança</span>
-      </label>
-      <div className="mt-4 grid grid-cols-4 gap-4">
-        <Field label="A etiqueta traz">
-          <Select value={v.tipo} onChange={(e) => setF({ ...v, tipo: e.target.value as BalancaConfig["tipo"], decimais: e.target.value === "PESO" ? 3 : 0 })}>
-            <option value="PESO">O peso</option>
-            <option value="PRECO">O preço</option>
-          </Select>
-        </Field>
-        <Field label="Prefixos" hint="20 a 29">
-          <Input value={v.prefixos} onChange={(e) => setF({ ...v, prefixos: e.target.value })} />
-        </Field>
-        <Field label="Algarismos do artigo" hint="4 a 6">
-          <Input className="num" value={v.digitos_codigo} onChange={(e) => setF({ ...v, digitos_codigo: Number(e.target.value.replace(/\D/g, "")) || 0 })} />
-        </Field>
-        <Field label="Casas decimais" hint={v.tipo === "PESO" ? "Gramas: 3" : "Kz: 0 · cêntimos: 2"}>
-          <Input className="num" value={v.decimais} onChange={(e) => setF({ ...v, decimais: Number(e.target.value.replace(/\D/g, "")) || 0 })} />
-        </Field>
-      </div>
-      <p className="mt-3 text-[12.5px] text-ink-3">
-        Exemplo: <span className="font-mono">{exemplo}</span> → artigo {"1".padStart(n, "0")}, {valorEx}.
-      </p>
-      <div className="mt-5 flex justify-end gap-2">
-        {f && (
-          <Button variant="ghost" onClick={() => setF(null)}>
-            Cancelar
-          </Button>
-        )}
-        <Button loading={busy} onClick={gravar}>
-          Gravar
-        </Button>
-      </div>
-    </Card>
-  );
-}
-
 // ======================================================================= definição de faturas e recibos
 function Impresso({ opcoes }: { opcoes: OpcoesImpresso }) {
   const qc = useQueryClient();
@@ -393,9 +263,11 @@ function Impresso({ opcoes }: { opcoes: OpcoesImpresso }) {
     setBusy(true);
     try {
       await call("parametros.opcoesGuardar", o);
-      toast.success("Opções do impresso gravadas.");
+      toast.success("Opções gravadas.");
       qc.invalidateQueries({ queryKey: ["parametros"] });
       qc.invalidateQueries({ queryKey: ["documento"] });
+      // o POS e os documentos lêem a opção «preços com IVA incluído» das tabelas
+      qc.invalidateQueries({ queryKey: ["tabelas"] });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -407,13 +279,18 @@ function Impresso({ opcoes }: { opcoes: OpcoesImpresso }) {
     ["valor_extenso", "Valor por extenso", "O total escrito por extenso, com o prefixo de cada documento"],
     ["assinaturas", "Linhas de assinatura", "Espaço para a assinatura do cliente e da empresa"],
     ["mostrar_operador", "Operador", "O nome de quem emitiu o documento"],
+    [
+      "precos_com_iva",
+      "Preços com IVA incluído (retalho)",
+      "As vendas partem do PVP com IVA da ficha do artigo: 3 × 1 000,00 Kz dá 3 000,00 Kz e o IVA sai do total. Sem esta opção, parte-se do preço sem IVA e podem aparecer diferenças de um cêntimo.",
+    ],
   ];
   return (
     <Card className="max-w-2xl p-6">
       <div className="space-y-4">
         {itens.map(([k, titulo, texto]) => (
           <label key={k} className="flex cursor-pointer items-start gap-3">
-            <input className="mt-1" type="checkbox" checked={o[k]} onChange={(e) => setO((x) => ({ ...x, [k]: e.target.checked }))} />
+            <input className="mt-1" type="checkbox" checked={!!o[k]} onChange={(e) => setO((x) => ({ ...x, [k]: e.target.checked }))} />
             <span>
               <span className="font-medium">{titulo}</span>
               <span className="block text-[13px] text-ink-3">{texto}</span>

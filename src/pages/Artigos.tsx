@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Barcode, Copy, Layers, Package, Plus, Search, Tags, Trash2 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Copy, Layers, Package, Plus, Search, Tags, Trash2 } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
 import { call } from "@/lib/api";
 import { useDebounce, useTabelas } from "@/lib/hooks";
 import { comIva, kz, parseKz, qtd, semIva, toInputKz } from "@/lib/format";
-import type { Artigo, CodigoExtra, Componente } from "@/lib/types";
+import type { Artigo, Componente } from "@/lib/types";
 import { ArtigoPicker } from "@/components/Pickers";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { InputData } from "@/components/InputData";
 
 export default function Artigos() {
   const [q, setQ] = useState("");
@@ -19,10 +20,28 @@ export default function Artigos() {
   const dq = useDebounce(q);
   const tabelas = useTabelas();
   const tem = useSession((s) => s.tem);
+  const [sp, setSp] = useSearchParams();
+  // ?id=… (pesquisa global, Ctrl+K): abre logo a ficha do artigo
+  useEffect(() => {
+    const id = Number(sp.get("id"));
+    if (!id) return;
+    setSp({}, { replace: true });
+    if (!tem("artigos.editar")) return;
+    call<Artigo>("artigos.obter", { id }).then(
+      (a) => {
+        setOrigem(undefined);
+        setEditar(a);
+      },
+      (e: Error) => toast.error(e.message),
+    );
+  }, [sp, setSp, tem]);
   const lista = useQuery({
     queryKey: ["artigos", dq, familia],
     queryFn: () => call<Artigo[]>("artigos.listar", { q: dq, familia_id: familia ? Number(familia) : null, inativos: true }),
   });
+  const { ordenados, cab } = useOrdenacao(lista.data, (a, k: "ref" | "desc" | "familia" | "iva" | "custo" | "pvp" | "stock") =>
+    k === "ref" ? a.referencia : k === "desc" ? a.descricao : k === "familia" ? a.familia : k === "iva" ? a.taxa_pct : k === "custo" ? a.custo_medio : k === "pvp" ? a.preco1_iva : a.tipo === "S" ? null : a.stock,
+  );
 
   return (
     <>
@@ -67,20 +86,28 @@ export default function Artigos() {
         {lista.data?.length === 0 ? (
           <Empty icon={<Package className="size-6" />} title="Sem artigos" text="Crie o primeiro artigo para começar a vender." />
         ) : (
-          <Table className="max-h-[calc(100vh-260px)]">
+          <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
-                <Th>Referência</Th>
-                <Th>Descrição</Th>
-                <Th>Família</Th>
-                <Th className="text-right">IVA</Th>
-                <Th className="text-right">Custo médio</Th>
-                <Th className="text-right">PVP (c/ IVA)</Th>
-                <Th className="text-right">Stock</Th>
+                <Th {...cab("ref")}>Referência</Th>
+                <Th {...cab("desc")}>Descrição</Th>
+                <Th {...cab("familia")}>Família</Th>
+                <Th className="text-right" {...cab("iva")}>
+                  IVA
+                </Th>
+                <Th className="text-right" {...cab("custo")}>
+                  Custo médio
+                </Th>
+                <Th className="text-right" {...cab("pvp")}>
+                  PVP (c/ IVA)
+                </Th>
+                <Th className="text-right" {...cab("stock")}>
+                  Stock
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {lista.data?.map((a) => (
+              {ordenados?.map((a) => (
                 <tr key={a.id} className={cn("cursor-pointer hover:bg-sunken/60", !a.ativo && "opacity-50")} onClick={() => {
                     if (!tem("artigos.editar")) return;
                     setOrigem(undefined);
@@ -141,7 +168,7 @@ export default function Artigos() {
 /** Cópia de um artigo para criar outro parecido (Clonar artigo do KIGEST): sem referência, código de barras nem stock. */
 function clonar(a: Partial<Artigo>): Partial<Artigo> {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { id, referencia, codigo_barras, stock, codigo_balanca, codigos, ...resto } = a;
+  const { id, referencia, codigo_barras, stock, ...resto } = a;
   return { ...resto, descricao: `${a.descricao ?? ""} (cópia)`, ativo: 1 };
 }
 
@@ -160,19 +187,30 @@ function ArtigoForm({
   const qc = useQueryClient();
   const [a, setA] = useState<Partial<Artigo>>(inicial);
   const taxa = t?.taxas.find((x) => x.id === a.taxa_iva_id)?.percentagem ?? 0;
-  const [pvp, setPvp] = useState(() => [a.preco1, a.preco2, a.preco3, a.preco4].map((p) => toInputKz(comIva(p ?? 0, taxa))));
+  // PVP com IVA: o guardado quando bate com o preço sem IVA (é o valor mestre); senão, calculado
+  const [pvp, setPvp] = useState(() =>
+    [
+      [a.preco1, a.pvp1],
+      [a.preco2, a.pvp2],
+      [a.preco3, a.pvp3],
+      [a.preco4, a.pvp4],
+    ].map(([p, g]) => toInputKz(g != null && semIva(g, taxa) === (p ?? 0) ? g : comIva(p ?? 0, taxa))),
+  );
   const [custo, setCusto] = useState(toInputKz(a.custo ?? 0));
   const [busy, setBusy] = useState(false);
   const [comps, setComps] = useState<Componente[]>([]);
-  const [codigos, setCodigos] = useState<CodigoExtra[]>([]);
+  // outros códigos de barras (embalagens): carregados da ficha; só se gravam depois de carregados
+  const [codigos, setCodigos] = useState<{ codigo: string; descricao: string; quantidade: number }[] | null>(inicial.id ? null : []);
+  useEffect(() => {
+    if (!inicial.id) return;
+    call<{ codigos: { codigo: string; descricao: string | null; quantidade: number }[] }>("artigos.obter", { id: inicial.id })
+      .then((x) => setCodigos(x.codigos.map((c) => ({ codigo: c.codigo, descricao: c.descricao ?? "", quantidade: c.quantidade }))))
+      .catch(() => {});
+  }, [inicial.id]);
   useEffect(() => {
     const fonte = inicial.id ?? origem;
     if (fonte && inicial.composto) call<Componente[]>("artigos.componentes", { id: fonte }).then(setComps).catch(() => {});
   }, [inicial.id, origem, inicial.composto]);
-  useEffect(() => {
-    // outros códigos e embalagens (não se copiam ao clonar: um código só pode ser de um artigo)
-    if (inicial.id) call<Artigo>("artigos.obter", { id: inicial.id }).then((x) => setCodigos(x.codigos ?? [])).catch(() => {});
-  }, [inicial.id]);
   const custoKit = comps.reduce((s, c) => s + Math.round((c.custo_medio ?? 0) * c.quantidade), 0);
   const set = (k: keyof Artigo, v: unknown) => setA((x) => ({ ...x, [k]: v }));
 
@@ -210,6 +248,11 @@ function ArtigoForm({
         preco2: precos[1],
         preco3: precos[2],
         preco4: precos[3],
+        // o PVP com IVA escrito é o valor mestre (o servidor deriva dele o preço sem IVA)
+        pvp1: parseKz(pvp[0]),
+        pvp2: parseKz(pvp[1]),
+        pvp3: parseKz(pvp[2]),
+        pvp4: parseKz(pvp[3]),
         controla_stock: !!a.controla_stock && !a.composto,
         permite_negativo: !!a.permite_negativo,
         ativo: a.ativo === undefined ? true : !!a.ativo,
@@ -220,8 +263,8 @@ function ArtigoForm({
         promo_inicio: a.promo_inicio || null,
         promo_fim: a.promo_fim || null,
         componentes: a.composto ? comps.map((c) => ({ componente_id: c.componente_id, quantidade: c.quantidade })) : null,
-        codigo_balanca: a.tipo === "P" ? (a.codigo_balanca ?? "").trim() : "",
-        codigos: codigos.filter((c) => c.codigo.trim()).map((c) => ({ codigo: c.codigo.trim(), quantidade: c.quantidade || 1, descricao: c.descricao || null })),
+        codigos: codigos ? codigos.filter((c) => c.codigo.trim()).map((c) => ({ codigo: c.codigo.trim(), descricao: c.descricao || null, quantidade: c.quantidade || 1 })) : undefined,
+        codigo_balanca: a.codigo_balanca ?? "",
       });
       toast.success("Artigo guardado.");
       qc.invalidateQueries({ queryKey: ["artigos"] });
@@ -272,11 +315,6 @@ function ArtigoForm({
         <Field label="Código de barras">
           <Input value={a.codigo_barras ?? ""} onChange={(e) => set("codigo_barras", e.target.value)} />
         </Field>
-        {a.tipo === "P" && (
-          <Field label="Código na balança" hint="PLU das etiquetas com peso ou preço">
-            <Input className="font-mono" inputMode="numeric" value={a.codigo_balanca ?? ""} onChange={(e) => set("codigo_balanca", e.target.value.replace(/\D/g, "").slice(0, 6))} />
-          </Field>
-        )}
         <Field label="Família">
           <Select value={a.familia_id ?? ""} onChange={(e) => set("familia_id", Number(e.target.value))}>
             {t?.familias.map((f) => (
@@ -366,6 +404,37 @@ function ArtigoForm({
       <div className="mt-4 rounded-xl border border-line p-4">
         <div className="mb-3 flex items-center justify-between">
           <span>
+            <span className="font-medium">Outros códigos e balança</span>
+            <span className="block text-[12px] text-ink-3">Códigos de embalagens (ex.: o pack de 12 vende 12 unidades) e o código do artigo nas etiquetas da balança.</span>
+          </span>
+          <Field label="Código na balança (PLU)" className="w-48">
+            <Input className="num" inputMode="numeric" value={a.codigo_balanca ?? ""} onChange={(e) => set("codigo_balanca", e.target.value.replace(/\D/g, "").slice(0, 6))} />
+          </Field>
+        </div>
+        {codigos === null ? (
+          <p className="text-[13px] text-ink-3">A carregar…</p>
+        ) : (
+          <div className="space-y-2">
+            {codigos.map((c, i) => (
+              <div key={i} className="grid grid-cols-[1fr_1fr_110px_36px] items-center gap-2">
+                <Input className="font-mono" placeholder="Código de barras" value={c.codigo} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, codigo: e.target.value } : x)))} />
+                <Input placeholder="Descrição (ex.: Pack de 12)" value={c.descricao} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, descricao: e.target.value } : x)))} />
+                <Input className="num text-right" type="number" min={0} step="any" title="Unidades que este código vende" value={c.quantidade} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, quantidade: Number(e.target.value) } : x)))} />
+                <button type="button" className="rounded-md p-1.5 text-ink-3 hover:bg-danger-50 hover:text-danger" title="Retirar" onClick={() => setCodigos(codigos.filter((_, j) => j !== i))}>
+                  ×
+                </button>
+              </div>
+            ))}
+            <Button type="button" size="sm" variant="secondary" onClick={() => setCodigos([...codigos, { codigo: "", descricao: "", quantidade: 1 }])}>
+              Acrescentar código
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-xl border border-line p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <span>
             <span className="font-medium">Promoção</span>
             <span className="block text-[12px] text-ink-3">Desconto aplicado automaticamente nas vendas entre as datas, sem pedir autorização.</span>
           </span>
@@ -385,10 +454,10 @@ function ArtigoForm({
             />
           </Field>
           <Field label="De" hint="Vazio = desde já">
-            <Input type="date" value={a.promo_inicio ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_inicio", e.target.value || null)} />
+            <InputData value={a.promo_inicio ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_inicio", e.target.value || null)} />
           </Field>
           <Field label="Até" hint="Vazio = sem fim">
-            <Input type="date" value={a.promo_fim ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_fim", e.target.value || null)} />
+            <InputData value={a.promo_fim ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_fim", e.target.value || null)} />
           </Field>
         </div>
       </div>
@@ -464,59 +533,6 @@ function ArtigoForm({
           )}
         </div>
       )}
-
-      <div className="mt-4 rounded-xl border border-line p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <span>
-            <span className="flex items-center gap-2 font-medium">
-              <Barcode className="size-4" /> Outros códigos e embalagens
-            </span>
-            <span className="block text-[12px] text-ink-3">Outro código do mesmo artigo (quantidade 1) ou de uma embalagem: ler a caixa de 12 lança 12 unidades.</span>
-          </span>
-          <Button size="sm" variant="secondary" onClick={() => setCodigos((cs) => [...cs, { codigo: "", quantidade: 1, descricao: null }])}>
-            <Plus className="size-4" /> Código
-          </Button>
-        </div>
-        {codigos.length > 0 && (
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-[12px] text-ink-3">
-                <th className="py-1 font-normal">Código</th>
-                <th className="py-1 font-normal">Descrição</th>
-                <th className="w-28 py-1 text-right font-normal">Unidades</th>
-                <th className="w-10" />
-              </tr>
-            </thead>
-            <tbody>
-              {codigos.map((c, i) => (
-                <tr key={i} className="border-t border-line/70">
-                  <td className="py-1.5 pr-2">
-                    <Input className="h-8 font-mono" value={c.codigo} onChange={(e) => setCodigos((cs) => cs.map((x, j) => (j === i ? { ...x, codigo: e.target.value } : x)))} />
-                  </td>
-                  <td className="py-1.5 pr-2">
-                    <Input className="h-8" placeholder="Ex.: Caixa de 12" value={c.descricao ?? ""} onChange={(e) => setCodigos((cs) => cs.map((x, j) => (j === i ? { ...x, descricao: e.target.value } : x)))} />
-                  </td>
-                  <td className="py-1.5">
-                    <Input
-                      className="num h-8 text-right"
-                      type="number"
-                      min={0}
-                      step="any"
-                      value={c.quantidade}
-                      onChange={(e) => setCodigos((cs) => cs.map((x, j) => (j === i ? { ...x, quantidade: Number(e.target.value) } : x)))}
-                    />
-                  </td>
-                  <td className="py-1.5 text-right">
-                    <button className="rounded-md p-1.5 text-ink-3 hover:bg-danger-50 hover:text-danger" onClick={() => setCodigos((cs) => cs.filter((_, j) => j !== i))}>
-                      <Trash2 className="size-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
 
       {a.tipo === "P" && !a.composto && (
         <div className="mt-4 grid grid-cols-4 items-end gap-4">

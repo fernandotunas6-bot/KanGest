@@ -4,7 +4,7 @@
 //! nem abre a gaveta. Aqui o talão é montado em bytes e enviado em modo "raw" à impressora:
 //!
 //! - `fila`     — fila de impressão local (`lp -o raw` no macOS/Linux; `copy /b` para a partilha
-//!                `\\localhost\<nome>` no Windows, por ser a forma de enviar raw sem drivers);
+//!   `\\localhost\<nome>` no Windows, por ser a forma de enviar raw sem drivers);
 //! - `rede`     — impressora de rede directa em TCP (porta 9100 por omissão);
 //! - `ficheiro` — porta ou dispositivo (ex.: `/dev/usb/lp0`, `\\.\COM3`) ou ficheiro para teste.
 //!
@@ -292,7 +292,7 @@ fn envolver(s: &str, cols: usize) -> Vec<String> {
 // ============================== formatação ==============================
 
 /// Cêntimos em formato angolano: 1.234.567,89
-fn kz(c: i64) -> String {
+pub(super) fn kz(c: i64) -> String {
     let neg = c < 0;
     let v = c.unsigned_abs();
     let inteiros = (v / 100).to_string();
@@ -306,18 +306,18 @@ fn kz(c: i64) -> String {
     format!("{}{com_pontos},{:02}", if neg { "-" } else { "" }, v % 100)
 }
 
-fn qtd(x: f64) -> String {
+pub(super) fn qtd(x: f64) -> String {
     let s = format!("{x:.3}");
     let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
     s.replace('.', ",")
 }
 
-fn pct(x: f64) -> String {
+pub(super) fn pct(x: f64) -> String {
     format!("{}%", qtd(x))
 }
 
 /// "2026-11-10" → "10-11-2026"
-fn data_curta(s: &str) -> String {
+pub(super) fn data_curta(s: &str) -> String {
     match s.get(..10).map(|d| d.split('-').collect::<Vec<_>>()).as_deref() {
         Some([a, m, dia]) => format!("{dia}/{m}/{a}"),
         _ => s.to_string(),
@@ -325,7 +325,7 @@ fn data_curta(s: &str) -> String {
 }
 
 /// "2026-11-10T14:33:02" ou "2026-11-10 14:33:02" → "10-11-2026 14:33"
-fn data_hora(s: &str) -> String {
+pub(super) fn data_hora(s: &str) -> String {
     let s = s.replace('T', " ");
     let (d, h) = s.split_once(' ').unwrap_or((s.as_str(), ""));
     let data = match d.split('-').collect::<Vec<_>>()[..] {
@@ -340,27 +340,27 @@ fn data_hora(s: &str) -> String {
     }
 }
 
-fn txt(v: &Value, k: &str) -> String {
+pub(super) fn txt(v: &Value, k: &str) -> String {
     v[k].as_str().unwrap_or("").trim().to_string()
 }
-fn num(v: &Value, k: &str) -> i64 {
+pub(super) fn num(v: &Value, k: &str) -> i64 {
     v[k].as_i64().unwrap_or(0)
 }
-fn real(v: &Value, k: &str) -> f64 {
+pub(super) fn real(v: &Value, k: &str) -> f64 {
     v[k].as_f64().unwrap_or(0.0)
 }
-fn lista<'a>(v: &'a Value, k: &str) -> &'a [Value] {
+pub(super) fn lista<'a>(v: &'a Value, k: &str) -> &'a [Value] {
     v[k].as_array().map(|a| a.as_slice()).unwrap_or(&[])
 }
 
-const MOTIVOS: [(&str, &str); 3] = [
+pub(super) const MOTIVOS: [(&str, &str); 3] = [
     ("M00", "Regime Transitório"),
     ("M02", "Transmissão de bens e serviço não sujeita"),
     ("M04", "IVA – Regime de Não Sujeição"),
 ];
 
 /// Rodapé obrigatório: caracteres de controlo da assinatura + n.º do certificado AGT.
-fn rodape_agt(d: &Value) -> Option<String> {
+pub(super) fn rodape_agt(d: &Value) -> Option<String> {
     let doc = &d["documento"];
     let ctrl = txt(doc, "hash_controlo");
     if ctrl.is_empty() {
@@ -553,6 +553,23 @@ fn render(cfg: &Config, d: &Value, via: &str) -> Vec<u8> {
             let extra = if txt(p, "modo_codigo") == "NU" { troco } else { 0 };
             t.par(&txt(p, "descricao"), &kz(num(p, "valor") + extra));
         }
+    }
+    // pontos de fidelização: ganhos e usados neste documento e o saldo do cliente
+    let fid = &d["fidelizacao"];
+    if fid.is_object() && (num(fid, "ganhos") > 0 || num(fid, "gastos") > 0) {
+        let nc = num(doc, "credito") == 1;
+        t.separador();
+        t.centrar(true);
+        t.linha("Pontos de Fidelização");
+        t.centrar(false);
+        t.separador();
+        if num(fid, "ganhos") > 0 {
+            t.par(if nc { "Pontos devolvidos" } else { "Pontos ganhos" }, &format!("+{}", num(fid, "ganhos")));
+        }
+        if num(fid, "gastos") > 0 {
+            t.par(if nc { "Pontos retirados" } else { "Pontos usados" }, &format!("-{}", num(fid, "gastos")));
+        }
+        t.par("Saldo de pontos", &num(fid, "saldo").to_string());
     }
     let resumo = lista(d, "resumo_iva");
     if !recibo && !resumo.is_empty() {
