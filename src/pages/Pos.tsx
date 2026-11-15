@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce, useTabelas } from "@/lib/hooks";
-import { data, kz, kzNum, numero, parseKz, qtd } from "@/lib/format";
+import { data, kz, kzNum, nifValido, numero, parseKz, qtd } from "@/lib/format";
 import type { Artigo, CaixaResumo, DocCompleto, DocResumo, Entidade, Lote, PostoOpcoes } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Badge, Button, Field, Input, Modal, cn } from "@/components/ui";
@@ -1403,8 +1403,8 @@ function ClienteModal({ modo, onClose, onSelect }: { modo: "" | "lista" | "novo"
             <Input autoFocus value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} />
           </Field>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="NIF">
-              <Input value={f.nif} onChange={(e) => setF({ ...f, nif: e.target.value })} />
+            <Field label="NIF" hint={nifValido(f.nif) ? undefined : "10 algarismos ou n.º do BI (ex.: 001234567LA041)"}>
+              <Input value={f.nif} onChange={(e) => setF({ ...f, nif: e.target.value })} className={cn(!nifValido(f.nif) && "border-danger")} />
             </Field>
             <Field label="Telefone">
               <Input value={f.telefone} onChange={(e) => setF({ ...f, telefone: e.target.value })} />
@@ -1456,8 +1456,8 @@ function EditarClienteModal({ cliente, onClose, onSaved }: { cliente: Entidade; 
         <Field label="Nome" className="col-span-2">
           <Input autoFocus value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} />
         </Field>
-        <Field label="NIF">
-          <Input value={f.nif} onChange={(e) => setF({ ...f, nif: e.target.value })} />
+        <Field label="NIF" hint={nifValido(f.nif) ? undefined : "10 algarismos ou n.º do BI (ex.: 001234567LA041)"}>
+          <Input value={f.nif} onChange={(e) => setF({ ...f, nif: e.target.value })} className={cn(!nifValido(f.nif) && "border-danger")} />
         </Field>
         <Field label="Telefone">
           <Input value={f.telefone ?? ""} onChange={(e) => setF({ ...f, telefone: e.target.value })} />

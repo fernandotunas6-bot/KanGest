@@ -5,13 +5,13 @@ import { toast } from "sonner";
 import { FileSpreadsheet, HandCoins, Plus, Printer, Search, Users } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce } from "@/lib/hooks";
-import { kz, parseKz, toInputKz } from "@/lib/format";
+import { kz, nifValido, parseKz, toInputKz } from "@/lib/format";
 import { exportarExcel, kzXL } from "@/lib/csv";
 import { imprimir } from "@/lib/print";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import type { Entidade } from "@/lib/types";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, useOrdenacao } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 
 export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
   const [q, setQ] = useState("");
@@ -181,8 +181,11 @@ function EntidadeForm({ inicial, onClose }: { inicial: Partial<Entidade>; onClos
         <Field label="Nome / Razão social" className="col-span-2">
           <Input autoFocus value={e.nome ?? ""} onChange={(x) => set("nome", x.target.value)} />
         </Field>
-        <Field label="NIF" hint="Vazio = 999999999 (consumidor final)">
-          <Input value={e.nif ?? ""} onChange={(x) => set("nif", x.target.value)} />
+        <Field
+          label="NIF"
+          hint={nifValido(e.nif, e.pais ?? "AO") ? "Vazio = 999999999 (consumidor final)" : "Em Angola: 10 algarismos (empresas) ou n.º do BI (ex.: 001234567LA041)"}
+        >
+          <Input value={e.nif ?? ""} onChange={(x) => set("nif", x.target.value)} className={cn(!nifValido(e.nif, e.pais ?? "AO") && "border-danger")} />
         </Field>
         <Field label="Tipo">
           <Select value={e.tipo} onChange={(x) => set("tipo", x.target.value)}>

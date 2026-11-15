@@ -3138,3 +3138,24 @@ async fn fecho_de_caixa_cego_por_notas_e_formas_de_pagamento() {
     assert_eq!(rpc(&st, "caixa.estado", Value::Null).await["numerario_esperado"], 100);
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+#[tokio::test]
+async fn nif_angolano_validado() {
+    let (st, pasta) = base_com_admin("nif").await;
+    // válidos: empresa (10 algarismos), BI (com espaços e minúsculas, normalizado) e estrangeiro com outro formato
+    let a = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Empresa A", "nif": "5417 189 230" })).await;
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": a["id"] })).await["nif"], "5417189230");
+    let b = rpc(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "Maria", "nif": "001234567la041" })).await;
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": b["id"] })).await["nif"], "001234567LA041");
+    rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Fornecedor PT", "nif": "PT509999999", "pais": "PT" })).await;
+    // inválidos em Angola
+    for nif in ["12345", "54171892301", "ABC1234567", "001234567L4041"] {
+        let e = rpc_err(&st, "entidades.guardar", json!({ "tipo": "C", "nome": "X", "nif": nif })).await;
+        assert!(e.contains("NIF inválido"), "{nif}: {e}");
+    }
+    // uma ficha antiga com NIF mal escrito continua a gravar-se se o NIF não mudar
+    sqlx::query("UPDATE entidades SET nif = '123' WHERE id = ?").bind(a["id"].as_i64().unwrap()).execute(&st.pool).await.unwrap();
+    rpc(&st, "entidades.guardar", json!({ "id": a["id"], "tipo": "C", "nome": "Empresa A, Lda", "nif": "123" })).await;
+    assert!(super::entidades::nif_angolano_valido("999999999"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
