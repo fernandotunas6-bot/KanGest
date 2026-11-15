@@ -41,7 +41,7 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · **Esforço:** P pequeno (dia
 |---|---|---|---|---|
 | TPA integrado (o valor vai sozinho para o terminal, sem o operador o escrever) | Padrão | ❌ escreve-se o valor no TPA e no KanGest | Média | G (depende da API do banco/EMIS) |
 | Multicaixa Express / pagamento por QR ou referência | Crescente em Angola | ❌ | Média | M–G |
-| Pagar uma venda com o saldo do cliente (nota de crédito, adiantamento, vale) | Comum | 🟡 **incoerência encontrada:** o POS mostra «Compensação de saldo» ao cliente identificado, mas o servidor recusa esse modo numa FR (só aceita em recibos) | Alta | P |
+| Pagar uma venda com o saldo do cliente (nota de crédito, adiantamento, vale) | Comum | ✅ **feito:** a FR paga-se com o crédito do cliente (modo CS, como nos recibos); o POS mostra o crédito disponível. Antes, o POS oferecia a opção e o servidor recusava-a | — | — |
 | Receber em moeda estrangeira no POS (USD/EUR com troco em Kz) | Comum em Angola | ❌ moeda estrangeira só nas compras | Média | M |
 | Troca num só passo (devolução + venda nova) | Comum | 🟡 faz-se com nota de crédito e depois uma FR | Baixa | P |
 | Gorjetas | Restauração | ❌ | Baixa | P |
@@ -107,7 +107,7 @@ limite de pedidos, registo de pedidos, idempotência na emissão e exportação 
 
 **Fase seguinte (maior retorno para o retalho angolano, esforço pequeno a médio):**
 
-1. Corrigir a compensação de saldo no POS (decidir se a FR pode ser paga com crédito do cliente e alinhar o ecrã com o servidor).
+1. ~~Corrigir a compensação de saldo no POS~~ — feito: a FR paga-se com o crédito do cliente.
 2. Artigos a peso (EAN-13 de balança) e vários códigos de barras/embalagens por artigo.
 3. Contagem do fecho de caixa por notas e moedas e fecho cego.
 4. Webhooks para a API (venda emitida, documento anulado, stock alterado), assinados com HMAC.

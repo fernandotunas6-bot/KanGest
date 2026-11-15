@@ -1089,6 +1089,19 @@ async fn series_manuais_creditos_estado() {
     rpc(&st, "documentos.anular", json!({ "id": rc["documento"]["id"], "motivo": "recibo emitido por engano" })).await;
     assert_eq!(rpc(&st, "documentos.obter", json!({ "id": ra_id })).await["documento"]["credito_disponivel"], 50000, "anular o recibo devolve o crédito");
 
+    // ---------------- Factura/Recibo paga com o crédito do cliente (como o POS oferece) ----------------
+    let fr_cs = |cs: i64, nu: i64, ent: i64| json!({ "tipo": "FR", "entidade_id": ent, "linhas": [{ "artigo_id": art, "quantidade": 1 }], "pagamentos": [{ "modo": "CS", "valor": cs }, { "modo": "NU", "valor": nu }] });
+    assert!(rpc_err(&st, "documentos.emitir", fr_cs(50000, 64000, 1)).await.contains("Identifique o cliente"));
+    assert!(rpc_err(&st, "documentos.emitir", fr_cs(60000, 54000, cli)).await.contains("insuficiente"));
+    assert!(rpc_err(&st, "documentos.emitir", fr_cs(50000, 0, cli)).await.contains("insuficiente"), "o crédito não chega: falta pagar o resto");
+    let fr_pago = rpc(&st, "documentos.emitir", fr_cs(50000, 70000, cli)).await;
+    assert_eq!((fr_pago["documento"]["troco"].as_i64(), fr_pago["documento"]["valor_pendente"].as_i64()), (Some(6000), Some(0)), "troco só do numerário");
+    assert_eq!(rpc(&st, "documentos.obter", json!({ "id": ra_id })).await["documento"]["credito_disponivel"], 0, "o adiantamento foi usado");
+    rpc(&st, "documentos.anular", json!({ "id": fr_pago["documento"]["id"], "motivo": "venda registada por engano" })).await;
+    assert_eq!(rpc(&st, "documentos.obter", json!({ "id": ra_id })).await["documento"]["credito_disponivel"], 50000, "anular a FR devolve o crédito");
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": cli })).await["credito"], 50000, "o POS vê o crédito do cliente");
+    assert!(rpc_err(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 1 }], "pagamentos": [{ "modo": "CS", "valor": 10000 }] })).await.contains("compensação"));
+
     // ---------------- nota de crédito sobre factura paga → crédito → devolução ----------------
     let fr = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
     let nc = rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": cli, "doc_origem_id": fr["documento"]["id"], "motivo": "Serviço não prestado",
