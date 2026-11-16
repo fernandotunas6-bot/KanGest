@@ -201,7 +201,7 @@ pub fn iniciar(st: Arc<AppState>, porta: u16, rede: bool) -> AppResult<u16> {
                 }
                 ATENDER.fetch_add(1, Ordering::SeqCst);
                 let st = st.clone();
-                let lancado = std::thread::Builder::new().name("kangest-api-pedido".into()).spawn(move || {
+                let lancado = std::thread::Builder::new().name("kangest-api-pedido".into()).stack_size(crate::PILHA_PEDIDOS).spawn(move || {
                     atender(&st, fluxo);
                     ATENDER.fetch_sub(1, Ordering::SeqCst);
                 });

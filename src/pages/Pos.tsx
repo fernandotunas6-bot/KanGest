@@ -1650,10 +1650,15 @@ function Pagamento({
 }) {
   const [tipo, setTipo] = useState<"FR" | "FT">("FR");
   const [valores, setValores] = useState<Record<string, string>>({ NU: (total / 100).toFixed(2).replace(".", ",") });
+  // numerário noutras moedas (as que têm câmbio do dia em Tabelas → Moedas): troco em kwanzas
+  const moedas = useQuery({ queryKey: ["moedas"], queryFn: () => call<{ codigo: string; simbolo: string; cambio: number; ativo: number }[]>("moedas.listar"), staleTime: 300_000 })
+    .data?.filter((m) => m.codigo !== "AOA" && m.ativo && m.cambio > 0) ?? [];
+  const [estrangeiras, setEstrangeiras] = useState<Record<string, string>>({});
+  const emMoeda = moedas.reduce((s, m) => s + Math.round(parseKz(estrangeiras[m.codigo] || "0") * m.cambio), 0);
   const [busy, setBusy] = useState(false);
   const nuRef = useRef<HTMLInputElement>(null);
 
-  const pago = Object.values(valores).reduce((s, v) => s + parseKz(v || "0"), 0);
+  const pago = Object.values(valores).reduce((s, v) => s + parseKz(v || "0"), 0) + emMoeda;
   const falta = Math.max(0, total - pago);
   const troco = Math.max(0, pago - total);
   // pagamento com pontos (SAF-T «DE»): até ao saldo e ao total; o resto fica em numerário
@@ -1696,7 +1701,13 @@ function Pagamento({
         doc_origem_id: origemId ?? undefined,
         autorizacao_pin: pin ?? undefined,
         cupao: cupao ?? undefined,
-        pagamentos: tipo === "FR" ? Object.entries(valores).map(([modo, v]) => ({ modo, valor: parseKz(v || "0") })) : [],
+        pagamentos:
+          tipo === "FR"
+            ? [
+                ...Object.entries(valores).map(([modo, v]) => ({ modo, valor: parseKz(v || "0") })),
+                ...moedas.filter((m) => parseKz(estrangeiras[m.codigo] || "0") > 0).map((m) => ({ modo: "NU", valor: 0, moeda: m.codigo, valor_moeda: parseKz(estrangeiras[m.codigo]) })),
+              ]
+            : [],
       });
       toast.success(`${d.documento.numero_doc} emitido.`);
       onEmitido(d);
@@ -1817,6 +1828,53 @@ function Pagamento({
                   </Button>
                 ))}
               </div>
+              {moedas.length > 0 && (
+                <div className="space-y-2 rounded-xl border border-line p-3">
+                  <div className="text-[12px] font-medium uppercase tracking-wide text-ink-2">Noutra moeda (troco em Kz)</div>
+                  {moedas.map((m) => {
+                    const v = parseKz(estrangeiras[m.codigo] || "0");
+                    return (
+                      <div key={m.codigo}>
+                        <label className="grid grid-cols-[52px_minmax(0,1fr)] items-center gap-2">
+                          <span className="text-[13px] font-medium">{m.simbolo || m.codigo}</span>
+                          <Input
+                            className="num h-9 text-right"
+                            inputMode="decimal"
+                            placeholder="0,00"
+                            value={estrangeiras[m.codigo] ?? ""}
+                            onChange={(e) => {
+                              setEstrangeiras({ ...estrangeiras, [m.codigo]: e.target.value });
+                              // o numerário em Kz que estava sugerido deixa de ser preciso
+                              if (valores.NU && parseKz(valores.NU) === total) setValores({ ...valores, NU: "" });
+                            }}
+                            onFocus={(e) => e.target.select()}
+                          />
+                        </label>
+                        <div className="mt-1 flex items-center justify-between gap-2 pl-[60px] text-[11.5px] text-ink-3">
+                          <span>
+                            ×{m.cambio.toLocaleString("pt-PT", { minimumFractionDigits: 2 })} = {kz(Math.round(v * m.cambio))}
+                          </span>
+                          <span className="flex gap-1">
+                            {[20, 50, 100].map((n) => (
+                              <button
+                                key={n}
+                                type="button"
+                                className="rounded border border-line px-1.5 py-0.5 hover:bg-sunken"
+                                onClick={() => {
+                                  setEstrangeiras({ ...estrangeiras, [m.codigo]: String(n) });
+                                  if (valores.NU && parseKz(valores.NU) === total) setValores({ ...valores, NU: "" });
+                                }}
+                              >
+                                {n}
+                              </button>
+                            ))}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               <div className="mt-auto space-y-2 rounded-xl border border-line p-4">
                 <Linha2 k="Recebido" v={kz(pago)} />
                 <div className={cn("flex justify-between", falta > 0 ? "text-danger" : "text-ink-3")}>

@@ -1,0 +1,4 @@
+# Testes: cada teste corre numa thread; a emissão de documentos (função assíncrona muito grande) precisa de mais do que
+# os 2 MB de pilha por omissão numa compilação de desenvolvimento. A aplicação usa a mesma margem (PILHA_PEDIDOS).
+[env]
+RUST_MIN_STACK = "8388608"

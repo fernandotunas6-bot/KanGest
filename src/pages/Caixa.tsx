@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { ArrowDownLeft, ArrowUpRight, History, Lock, Printer, ShoppingCart, Wallet } from "lucide-react";
 import { call } from "@/lib/api";
 import { useTabelas, useTalao58 } from "@/lib/hooks";
-import { dataHora, kz, parseKz, qtd } from "@/lib/format";
+import { dataHora, kz, kzNum, parseKz, qtd } from "@/lib/format";
 import { imprimir } from "@/lib/print";
 import type { CaixaResumo } from "@/lib/types";
 import { useSession } from "@/store/session";
@@ -104,7 +104,13 @@ export default function Caixa() {
             <Stat
               label="Numerário esperado na gaveta"
               value={c.cego ? "Fecho cego" : kz(c.numerario_esperado)}
-              hint={c.cego ? "Os totais aparecem no relatório depois de fechar" : undefined}
+              hint={
+                c.cego
+                  ? "Os totais aparecem no relatório depois de fechar"
+                  : c.moedas_estrangeiras?.length
+                    ? `E ainda: ${c.moedas_estrangeiras.map((m) => `${kzNum(m.valor)} ${m.moeda}`).join(" · ")}`
+                    : undefined
+              }
               tone="ok"
               icon={<Wallet className="size-4" />}
             />
@@ -437,6 +443,7 @@ function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void })
         {linha("Entradas", kz(r.entradas))}
         {linha("Saídas", kz(r.saidas))}
         {linha("Numerário esperado:", kz(r.numerario_esperado), true)}
+        {(r.moedas_estrangeiras ?? []).map((m) => linha(`Em ${m.moeda} (na gaveta):`, `${kzNum(m.valor)} ${m.moeda}`))}
         {linha("Valor Físico:", r.sessao.valor_contado === null ? "—" : kz(r.sessao.valor_contado), true)}
         {r.sessao.valor_contado !== null && linha(dif < 0 ? "Diferença (falta):" : dif > 0 ? "Diferença (sobra):" : "Diferença:", kz(dif), true)}
       </div>
