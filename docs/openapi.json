@@ -74,6 +74,11 @@
               "mensagem": {
                 "type": "string",
                 "example": "Sem permissão: «Emitir Factura (FT) e Guia de Transporte (GT)» (vendas.fatura)."
+              },
+              "pedido": {
+                "type": "integer",
+                "example": 1234,
+                "description": "Número do pedido no registo da API (o mesmo do cabeçalho X-KanGest-Pedido)."
               }
             }
           }
@@ -235,6 +240,28 @@
           },
           "ativo": {
             "type": "boolean"
+          },
+          "atributos": {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "Dados do ramo de actividade (ex.: livraria {autor, editora, ano}; moda {tamanho, cor, modelo}; electrónica {marca, modelo, garantia_meses}).",
+            "example": {
+              "autor": "Pepetela",
+              "editora": "Dom Quixote",
+              "ano": 1980
+            }
           },
           "custo": {
             "type": "integer",
@@ -416,6 +443,28 @@
           "promo_fim": {
             "type": "string",
             "format": "date"
+          },
+          "atributos": {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "Dados do ramo de actividade (ex.: livraria {autor, editora, ano}; moda {tamanho, cor, modelo}; electrónica {marca, modelo, garantia_meses}).",
+            "example": {
+              "autor": "Pepetela",
+              "editora": "Dom Quixote",
+              "ano": 1980
+            }
           }
         },
         "additionalProperties": false

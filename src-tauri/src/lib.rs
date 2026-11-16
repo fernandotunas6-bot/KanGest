@@ -3,6 +3,7 @@ pub mod api;
 mod db;
 mod error;
 pub mod http;
+pub mod internet;
 mod produtor;
 mod rede;
 mod segredos;
@@ -10,6 +11,7 @@ pub mod selo;
 mod services;
 mod smtp;
 mod state;
+mod web;
 pub mod webhooks;
 
 use std::sync::Arc;
@@ -63,6 +65,8 @@ pub fn run() {
             let caminho = dir.join("kigest.db");
             // chave mestra dos segredos da configuração (fora da base de dados)
             segredos::iniciar(&dir)?;
+            // proxy desta máquina para a Internet (internet.json; sem ele, o do sistema)
+            internet::carregar(&dir);
             // restauro de uma cópia de segurança marcado antes de reiniciar
             match services::sistema::aplicar_restauro_pendente(&dir) {
                 Ok(Some(origem)) => eprintln!("Cópia de segurança restaurada: {origem}"),
@@ -84,6 +88,9 @@ pub fn run() {
                 }
                 Ok::<_, AppError>(())
             })?;
+            // Modo web: o servidor de rede entrega ao browser os mesmos ficheiros da aplicação embutidos aqui.
+            let activos = app.asset_resolver();
+            web::registar(Box::new(move |c: &str| activos.get(c.to_string()).map(|a| (a.bytes, a.mime_type))));
             // Postos em rede: abre o servidor ou liga-se a ele conforme o `rede.json` desta máquina.
             let estado = Arc::new(estado);
             rede::registar_estado(estado.clone());

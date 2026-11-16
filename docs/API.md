@@ -112,7 +112,13 @@ Corpo:      Content-Type: application/json
 - **Sincronização:** `alterado_desde=2026-11-14T08:00:00` em artigos, clientes e fornecedores devolve só o que mudou
   desde essa hora (incluindo os desactivados, com `ativo: false`). Para o stock, peça `/stock/movimentos` desde o
   último `id` visto: cada movimento traz o `saldo` do armazém.
-- **Erros:** `{"erro": {"codigo": "…", "mensagem": "…"}}`. As mensagens das regras de negócio são as do programa.
+- **Erros:** `{"erro": {"codigo": "…", "mensagem": "…", "pedido": 1234}}`. As mensagens das regras de negócio são as
+  do programa.
+- **Número do pedido:** cada resposta a um pedido autenticado (ou recusado) leva `X-KanGest-Pedido: <n.º>` e, nos
+  erros, o mesmo número em `erro.pedido`. É o número da linha no registo de pedidos (Sistema → API e Integrações,
+  coluna «N.º»): cite-o ao pedir ajuda.
+- **Rotas:** a lista completa está em `docs/openapi.json` e no código (`api::ROTAS`); um teste confirma que as duas
+  descrevem as mesmas rotas e métodos.
 
 | HTTP | Códigos | Quando |
 |---|---|---|
@@ -141,6 +147,14 @@ Com limite por minuto, cada resposta traz `X-RateLimit-Limit` e `X-RateLimit-Rem
 | GET | `/artigos/codigo/{código}` | `api.artigos` | Pelo código de barras, pela referência, por um código de embalagem ou por uma etiqueta da balança (`leitura.quantidade` diz quanto vale a leitura) |
 | POST | `/artigos` | `artigos.criar` | Criar (`descricao`, `taxa_iva_id`, `preco1` ou `preco1_iva`…) |
 | PUT/PATCH | `/artigos/{id}` | `artigos.editar` | Alterar só os campos enviados |
+
+Cada artigo traz `atributos`, os dados do ramo de actividade da empresa ([RAMOS.md](RAMOS.md)) — por exemplo
+`{"autor": "Pepetela", "editora": "Dom Quixote", "ano": 1980}` numa livraria ou `{"modelo": "CAM01", "tamanho": "M",
+"cor": "Azul"}` numa loja de roupa — e aceita-os ao criar ou alterar (texto, número ou `true`; `{}` apaga-os).
+A pesquisa `q` também os procura.
+
+| Método | Caminho | Permissão | O quê |
+|---|---|---|---|
 | GET | `/stock` | `api.stock` | Existências por artigo, com o detalhe por armazém e o reservado (`artigo_id`, `armazem_id`, `q`, `abaixo_minimo`) |
 | GET | `/stock/movimentos` | `api.stock` | Movimentos (`desde_id`, `artigo_id`, `armazem_id`, `de`) |
 | GET | `/clientes`, `/fornecedores` | `api.entidades` | Lista (`q`, `nif`, `inativos`, `alterado_desde`, `desde_id`, `limite`) |

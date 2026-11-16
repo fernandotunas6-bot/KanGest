@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronDown, FileCode2, FileSpreadsheet, PackageSearch, Printer, X } from "lucide-react";
-import { call } from "@/lib/api";
+import { call, levarFicheiro } from "@/lib/api";
 import { data, hojeISO, inicioMesISO, kz, numero, qtd } from "@/lib/format";
 import { useSession } from "@/store/session";
 import type { Entidade } from "@/lib/types";
@@ -192,6 +192,7 @@ export default function Relatorios() {
     try {
       const r = await call<{ ficheiro: string; facturas: number; recibos: number }>("saft.exportar", { de, ate });
       toast.success(`SAF-T de facturação gerado: ${r.facturas} facturas, ${r.recibos} recibos`, { description: r.ficheiro, duration: 10000 });
+      await levarFicheiro(r.ficheiro);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -204,6 +205,7 @@ export default function Relatorios() {
     try {
       const r = await call<{ ficheiro: string; documentos: number; fornecedores: number; sem_assinatura: number }>("saft.exportarCompras", { de, ate });
       toast.success(`SAF-T de aquisição gerado: ${r.documentos} documentos de ${r.fornecedores} fornecedores`, { description: r.ficheiro, duration: 10000 });
+      await levarFicheiro(r.ficheiro);
       if (r.sem_assinatura) toast.warning(`${r.sem_assinatura} documento(s) de fornecedor sem os 4 caracteres de assinatura (exportados com "0").`, { duration: 10000 });
     } catch (e) {
       toast.error((e as Error).message);
@@ -218,7 +220,10 @@ export default function Relatorios() {
     try {
       const r = await call<{ ficheiro: string; facturas: number }>("saft.exportarEstado", { de, ate });
       if (!r.facturas) toast.warning("Não há documentos de entidades públicas no período.", { duration: 8000 });
-      else toast.success(`SAF-T do Estado gerado: ${r.facturas} documentos`, { description: r.ficheiro, duration: 10000 });
+      else {
+        toast.success(`SAF-T do Estado gerado: ${r.facturas} documentos`, { description: r.ficheiro, duration: 10000 });
+        await levarFicheiro(r.ficheiro);
+      }
     } catch (e) {
       toast.error((e as Error).message);
     } finally {

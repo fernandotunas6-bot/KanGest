@@ -32,7 +32,13 @@ pub const PORTA_PADRAO: u16 = 7799;
 pub const CHAVE_MINIMA: usize = 10;
 /// Métodos que são sempre desta máquina, mesmo em modo cliente: configuração de rede,
 /// impressão (a impressora é local) e gravação de ficheiros exportados.
-const LOCAIS: [&str; 6] = ["rede.", "impressao.", "sistema.exportar", "atualizacao.", "licenca.abrirSite", "partilha."];
+const LOCAIS: [&str; 7] = ["rede.", "impressao.", "sistema.exportar", "atualizacao.", "licenca.abrirSite", "partilha.", "internet."];
+
+/// Métodos que mexem na máquina onde correm (configuração de rede e de Internet, actualizações,
+/// ficheiros no disco, abrir o browser): o servidor recusa-os quando chegam pela rede. A impressão
+/// fica de fora de propósito: um posto no browser imprime pela impressora configurada no seu posto
+/// (de rede, por IP, ou ligada ao servidor).
+const SO_NA_MAQUINA: [&str; 6] = ["rede.", "sistema.exportar", "atualizacao.", "licenca.abrirSite", "partilha.", "internet."];
 
 // ============================== configuração ==============================
 
@@ -51,6 +57,13 @@ pub struct Config {
     /// Sal da derivação da chave (servidor; gerado ao abrir o servidor pela primeira vez).
     #[serde(default)]
     pub sal: String,
+    /// Servidor: também entrega a aplicação ao browser (telemóveis, tablets, terminais Android, iPad).
+    #[serde(default = "verdadeiro")]
+    pub web: bool,
+}
+
+fn verdadeiro() -> bool {
+    true
 }
 
 fn modo_padrao() -> String {
@@ -62,7 +75,7 @@ fn porta_padrao() -> u16 {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { modo: modo_padrao(), porta: PORTA_PADRAO, servidor: String::new(), chave: String::new(), sal: String::new() }
+        Self { modo: modo_padrao(), porta: PORTA_PADRAO, servidor: String::new(), chave: String::new(), sal: String::new(), web: true }
     }
 }
 
@@ -330,14 +343,25 @@ fn resposta(codigo: u16, corpo: &Value) -> Vec<u8> {
         _ => "400 Bad Request",
     };
     format!(
-        "HTTP/1.1 {estado}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{texto}",
+        "HTTP/1.1 {estado}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n{texto}",
         texto.len()
     )
     .into_bytes()
 }
 
-/// Lê um pedido HTTP simples: devolve (linha do pedido, corpo).
-fn ler_pedido(fluxo: &mut TcpStream) -> Result<(String, String), String> {
+/// Pedido HTTP lido da ligação.
+struct PedidoHttp {
+    metodo: String,
+    /// Caminho pedido (sem a query string).
+    caminho: String,
+    /// O browser aceita HTML (navegação) — distingue a página da aplicação da resposta aos postos.
+    aceita_html: bool,
+    aceita_gzip: bool,
+    corpo: String,
+}
+
+/// Lê um pedido HTTP simples (linha do pedido, cabeçalhos que interessam e corpo).
+fn ler_pedido(fluxo: &mut TcpStream) -> Result<PedidoHttp, String> {
     let mut dados = Vec::with_capacity(2048);
     let mut tampao = [0u8; 2048];
     let mut fim_cabecalho = None;
@@ -348,18 +372,28 @@ fn ler_pedido(fluxo: &mut TcpStream) -> Result<(String, String), String> {
         }
         dados.extend_from_slice(&tampao[..n]);
         fim_cabecalho = dados.windows(4).position(|w| w == b"\r\n\r\n");
-        if dados.len() > 32 * 1024 * 1024 {
-            return Err("Pedido demasiado grande.".into());
+        if fim_cabecalho.is_none() && dados.len() > 64 * 1024 {
+            return Err("Cabeçalho demasiado grande.".into());
         }
     }
     let corte = fim_cabecalho.unwrap() + 4;
     let cabecalho = String::from_utf8_lossy(&dados[..corte]).to_string();
     let primeira = cabecalho.lines().next().unwrap_or("").to_string();
-    let tamanho: usize = cabecalho
-        .lines()
-        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().to_string()))
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+    let mut partes = primeira.split_whitespace();
+    let metodo = partes.next().unwrap_or("").to_ascii_uppercase();
+    let caminho = partes.next().unwrap_or("/").split('?').next().unwrap_or("/").to_string();
+    let valor = |nome: &str| {
+        cabecalho.lines().find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            k.trim().eq_ignore_ascii_case(nome).then(|| v.trim().to_string())
+        })
+    };
+    let tamanho: usize = valor("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
+    if tamanho > 32 * 1024 * 1024 {
+        return Err("Pedido demasiado grande.".into());
+    }
+    let aceita_html = valor("accept").is_some_and(|a| a.contains("text/html"));
+    let aceita_gzip = valor("accept-encoding").is_some_and(|a| a.contains("gzip"));
     let mut corpo = dados[corte..].to_vec();
     while corpo.len() < tamanho {
         let n = fluxo.read(&mut tampao).map_err(|e| format!("Leitura interrompida: {e}"))?;
@@ -368,7 +402,7 @@ fn ler_pedido(fluxo: &mut TcpStream) -> Result<(String, String), String> {
         }
         corpo.extend_from_slice(&tampao[..n]);
     }
-    Ok((primeira, String::from_utf8_lossy(&corpo).to_string()))
+    Ok(PedidoHttp { metodo, caminho, aceita_html, aceita_gzip, corpo: String::from_utf8_lossy(&corpo).to_string() })
 }
 
 #[derive(Deserialize)]
@@ -396,14 +430,28 @@ fn atender(st: &AppState, seg: &Seguranca, mut fluxo: TcpStream) {
     let endereco = fluxo.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
     let saida = match ler_pedido(&mut fluxo) {
         Err(e) => resposta(400, &json!({ "ok": false, "erro": e })),
-        Ok((linha, _)) if linha.starts_with("GET") => {
-            // confirma, do outro lado, que há aqui um KanGest à escuta, e dá o sal para derivar a chave
-            resposta(200, &json!({ "ok": true, "app": "kigest", "versao": env!("CARGO_PKG_VERSION"), "protocolo": PROTOCOLO, "sal": seg.sal }))
+        Ok(p) if p.metodo == "GET" || p.metodo == "HEAD" => {
+            let web = config().web;
+            if p.caminho == "/rede/info" || (p.caminho == "/" && !p.aceita_html) {
+                // confirma, do outro lado, que há aqui um KanGest à escuta, e dá o sal para derivar a chave
+                resposta(
+                    200,
+                    &json!({ "ok": true, "app": "kigest", "versao": env!("CARGO_PKG_VERSION"), "protocolo": PROTOCOLO, "sal": seg.sal, "web": web }),
+                )
+            } else if !web {
+                crate::web::desligado()
+            } else {
+                // a aplicação para o browser (telemóvel, tablet, outro computador)
+                crate::web::responder(&p.caminho, p.aceita_gzip, p.metodo == "HEAD")
+            }
+        }
+        Ok(p) if p.metodo != "POST" || !(p.caminho == "/" || p.caminho == "/rpc") => {
+            resposta(400, &json!({ "ok": false, "erro": "Pedido inválido." }))
         }
         Ok(_) if bloqueado(&endereco) => {
             resposta(429, &json!({ "ok": false, "erro": "Demasiadas tentativas com a chave de rede errada a partir deste posto. Aguarde 10 minutos." }))
         }
-        Ok((_, corpo)) => match serde_json::from_str::<Value>(&corpo) {
+        Ok(PedidoHttp { corpo, .. }) => match serde_json::from_str::<Value>(&corpo) {
             Err(e) => resposta(400, &json!({ "ok": false, "erro": format!("Pedido inválido: {e}") })),
             // postos com o protocolo antigo (chave em claro): não se atendem
             Ok(v) if v.get("chave").is_some() => resposta(
@@ -440,6 +488,13 @@ fn atender(st: &AppState, seg: &Seguranca, mut fluxo: TcpStream) {
 }
 
 fn executar(st: &AppState, p: Pedido, endereco: &str) -> Value {
+    if SO_NA_MAQUINA.iter().any(|l| p.metodo.starts_with(l)) {
+        return json!({ "ok": false, "erro": "Esta função só se usa no próprio computador (na aplicação KanGest instalada), não a partir de outro posto." });
+    }
+    // o browser leva o ficheiro que acabou de gerar no servidor (SAF-T, cópia de segurança)
+    if p.metodo == "ficheiros.descarregar" {
+        return descarregar(&p.token, &p.params);
+    }
     // a sessão de cada posto vive no servidor, identificada pelo token do posto
     let sessao = {
         let mut l = ligacoes().lock().unwrap();
@@ -475,8 +530,52 @@ fn executar(st: &AppState, p: Pedido, endereco: &str) -> Value {
         }
     }
     match r {
-        Ok(v) => json!({ "ok": true, "dados": v }),
+        Ok(v) => {
+            if let Some(f) = v["ficheiro"].as_str() {
+                registar_exportado(&p.token, f);
+            }
+            json!({ "ok": true, "dados": v })
+        }
         Err(e) => json!({ "ok": false, "erro": e.to_string() }),
+    }
+}
+
+/// Ficheiros que cada posto gerou no servidor e pode levar (só esse posto, durante uma hora).
+fn exportados() -> &'static Mutex<HashMap<String, std::time::Instant>> {
+    static E: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
+    E.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+const EXPORTADO_VALIDO: Duration = Duration::from_secs(3600);
+/// Maior ficheiro que se entrega pela rede (vai em base64 dentro da resposta cifrada).
+const EXPORTADO_MAXIMO: u64 = 200 * 1024 * 1024;
+
+fn registar_exportado(token: &str, ficheiro: &str) {
+    let mut e = exportados().lock().unwrap();
+    e.retain(|_, t| t.elapsed() < EXPORTADO_VALIDO);
+    e.insert(format!("{token}\n{ficheiro}"), std::time::Instant::now());
+}
+
+fn descarregar(token: &str, params: &Value) -> Value {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let ficheiro = params["ficheiro"].as_str().unwrap_or("");
+    let valido = exportados().lock().unwrap().get(&format!("{token}\n{ficheiro}")).is_some_and(|t| t.elapsed() < EXPORTADO_VALIDO);
+    if !valido {
+        return json!({ "ok": false, "erro": "Ficheiro indisponível: gere-o de novo neste posto." });
+    }
+    let caminho = Path::new(ficheiro);
+    match std::fs::metadata(caminho) {
+        Ok(m) if m.len() > EXPORTADO_MAXIMO => {
+            json!({ "ok": false, "erro": format!("O ficheiro tem {} MB: é grande demais para levar pelo browser. Copie-o do servidor: {ficheiro}", m.len() / 1_048_576) })
+        }
+        Ok(_) => match std::fs::read(caminho) {
+            Ok(b) => {
+                let nome = caminho.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "ficheiro".into());
+                json!({ "ok": true, "dados": { "nome": nome, "base64": STANDARD.encode(b) } })
+            }
+            Err(e) => json!({ "ok": false, "erro": format!("Não foi possível ler o ficheiro: {e}") }),
+        },
+        Err(e) => json!({ "ok": false, "erro": format!("Não foi possível ler o ficheiro: {e}") }),
     }
 }
 
@@ -505,8 +604,10 @@ fn http(cfg: &Config, metodo: &str, corpo: Option<&str>) -> AppResult<Value> {
     fluxo.set_read_timeout(Some(Duration::from_secs(60))).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
     let corpo = corpo.unwrap_or("");
+    // servidores antigos respondem com a informação a qualquer GET; os novos servem a aplicação web em "/"
+    let caminho = if metodo == "GET" { "/rede/info" } else { "/" };
     let pedido = format!(
-        "{metodo} / HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}",
+        "{metodo} {caminho} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}",
         cfg.servidor.trim(),
         corpo.len()
     );
@@ -611,6 +712,13 @@ async fn despachar(st: &AppState, metodo: &str, params: Value) -> AppResult<Valu
     if let Some(s) = sessao_remota(metodo, &r) {
         st.definir_sessao(s);
     }
+    // o posto escolhido é desta máquina: fica gravado aqui, não no servidor
+    if metodo == "posto.selecionar" {
+        if let Some(id) = r["id"].as_i64() {
+            st.definir_posto(PostoAtual { id, ..st.posto() });
+            let _ = std::fs::write(st.pasta_dados.join("posto.json"), json!({ "posto_id": id }).to_string());
+        }
+    }
     // depois de entrar ou de mudar de posto, actualiza o posto que o servidor conhece
     if matches!(metodo, "auth.login" | "posto.selecionar" | "posto.guardar") {
         sincronizar_posto(st).await.ok();
@@ -706,6 +814,8 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
         "protocolo": PROTOCOLO,
         "servidor_activo": servidor_activo(),
         "enderecos": enderecos_locais(),
+        "web": c.web,
+        "web_disponivel": crate::web::disponivel(),
         "posto": st.posto(),
         "ligados": ligados,
     }))
@@ -720,6 +830,8 @@ pub struct GuardarIn {
     servidor: String,
     #[serde(default)]
     chave: String,
+    #[serde(default)]
+    web: Option<bool>,
 }
 
 /// Grava a configuração de rede desta máquina (só o administrador).
@@ -736,6 +848,7 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
         servidor: g.servidor.trim().to_string(),
         chave: g.chave.trim().to_string(),
         sal: antes.sal.clone(),
+        web: g.web.unwrap_or(antes.web),
     };
     // chave nova: pelo menos CHAVE_MINIMA caracteres; uma chave antiga mais curta pode manter-se
     if c.modo != "local" && c.chave.chars().count() < CHAVE_MINIMA && !(c.chave == antes.chave && c.chave.chars().count() >= 6) {

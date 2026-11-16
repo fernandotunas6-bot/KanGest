@@ -10,6 +10,7 @@ import type { Artigo, Componente } from "@/lib/types";
 import { ArtigoPicker } from "@/components/Pickers";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { atributosDe, ramoPorId, resumoAtributos, type Ramo } from "@/lib/ramos";
 import { InputData } from "@/components/InputData";
 
 export default function Artigos() {
@@ -19,6 +20,7 @@ export default function Artigos() {
   const [origem, setOrigem] = useState<number | undefined>();
   const dq = useDebounce(q);
   const tabelas = useTabelas();
+  const ramo = ramoPorId(tabelas.data?.ramo);
   const tem = useSession((s) => s.tem);
   const [sp, setSp] = useSearchParams();
   // ?id=… (pesquisa global, Ctrl+K): abre logo a ficha do artigo
@@ -59,7 +61,11 @@ export default function Artigos() {
               <Button
                 onClick={() => {
                   setOrigem(undefined);
-                  setEditar({ tipo: "P", taxa_iva_id: 1, unidade_id: 1, familia_id: 1, controla_stock: 1, ativo: 1 });
+                  // valores por omissão do ramo (serviços à hora, farmácia com lotes, restauração sem stock…)
+                  const n = ramo.novoArtigo ?? {};
+                  const tipo = n.tipo ?? "P";
+                  const unidade = tabelas.data?.unidades.find((u) => u.abreviatura === n.unidade)?.id ?? 1;
+                  setEditar({ tipo, taxa_iva_id: 1, unidade_id: unidade, familia_id: 1, controla_stock: tipo === "P" && n.controla_stock !== false ? 1 : 0, controla_lote: n.controla_lote ? 1 : 0, ativo: 1 });
                 }}
               >
                 <Plus className="size-4" /> Novo artigo
@@ -72,7 +78,12 @@ export default function Artigos() {
         <div className="flex gap-3 border-b border-line p-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
-            <Input className="pl-9" placeholder="Pesquisar por descrição, referência ou código de barras…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Input
+              className="pl-9"
+              placeholder={ramo.campos.length ? `Pesquisar por descrição, referência, código ou ${ramo.campos.slice(0, 2).map((c) => c.label.toLowerCase()).join(", ")}…` : "Pesquisar por descrição, referência ou código de barras…"}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
           </div>
           <Select className="w-56" value={familia} onChange={(e) => setFamilia(e.target.value)}>
             <option value="">Todas as famílias</option>
@@ -120,6 +131,7 @@ export default function Artigos() {
                       {!!a.composto && <Badge tone="brand" className="ml-2">Kit</Badge>}
                       {!!a.controla_lote && <Badge tone="accent" className="ml-2">Lotes</Badge>}
                     </div>
+                    {resumoAtributos(a, ramo) && <div className="text-[12px] text-ink-2">{resumoAtributos(a, ramo)}</div>}
                     {a.codigo_barras && <div className="font-mono text-[11.5px] text-ink-3">{a.codigo_barras}</div>}
                   </Td>
                   <Td className="text-ink-2">{a.familia}</Td>
@@ -184,8 +196,12 @@ function ArtigoForm({
   onClonar?: (a: Partial<Artigo>) => void;
 }) {
   const t = useTabelas().data;
+  const ramo = ramoPorId(t?.ramo);
   const qc = useQueryClient();
   const [a, setA] = useState<Partial<Artigo>>(inicial);
+  // dados do ramo (autor, tamanho, garantia…); os de outros ramos que o artigo já tenha mantêm-se
+  const [atrib, setAtrib] = useState<Record<string, string | number | boolean>>(() => atributosDe(inicial));
+  const [variantes, setVariantes] = useState(false);
   const taxa = t?.taxas.find((x) => x.id === a.taxa_iva_id)?.percentagem ?? 0;
   // PVP com IVA: o guardado quando bate com o preço sem IVA (é o valor mestre); senão, calculado
   const [pvp, setPvp] = useState(() =>
@@ -265,6 +281,7 @@ function ArtigoForm({
         componentes: a.composto ? comps.map((c) => ({ componente_id: c.componente_id, quantidade: c.quantidade })) : null,
         codigos: codigos ? codigos.filter((c) => c.codigo.trim()).map((c) => ({ codigo: c.codigo.trim(), descricao: c.descricao || null, quantidade: c.quantidade || 1 })) : undefined,
         codigo_balanca: a.codigo_balanca ?? "",
+        atributos: atrib,
       });
       toast.success("Artigo guardado.");
       qc.invalidateQueries({ queryKey: ["artigos"] });
@@ -312,7 +329,7 @@ function ArtigoForm({
         <Field label="Referência" hint={a.id ? undefined : "Vazio = automática"}>
           <Input value={a.referencia ?? ""} onChange={(e) => set("referencia", e.target.value)} />
         </Field>
-        <Field label="Código de barras">
+        <Field label={ramo.rotuloCodigo ?? "Código de barras"} hint={ramo.id === "livraria" ? "ISBN-10 ou 13, com ou sem hífenes" : undefined}>
           <Input value={a.codigo_barras ?? ""} onChange={(e) => set("codigo_barras", e.target.value)} />
         </Field>
         <Field label="Família">
@@ -356,6 +373,43 @@ function ArtigoForm({
           </Field>
         )}
       </div>
+
+      {ramo.campos.length > 0 && (
+        <div className="mt-6 rounded-xl border border-line p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-2 font-medium">
+              <ramo.icone className="size-4 text-brand" /> Dados de {ramo.nome.split(/[,/]/)[0].toLowerCase()}
+            </span>
+            {ramo.variantes && a.id && (
+              <Button variant="secondary" size="sm" onClick={() => setVariantes(true)} title="Criar um artigo por combinação (ex.: tamanho × cor), cada um com o seu stock">
+                <Layers className="size-4" /> Gerar variantes
+              </Button>
+            )}
+          </div>
+          <div className="grid grid-cols-4 gap-4">
+            {ramo.campos.map((c) =>
+              c.tipo === "sim" ? (
+                <label key={c.id} className="col-span-2 flex items-center gap-2 self-end pb-2 text-[13px]">
+                  <input type="checkbox" checked={!!atrib[c.id]} onChange={(e) => setAtrib({ ...atrib, [c.id]: e.target.checked })} />
+                  {c.label}
+                </label>
+              ) : (
+                <Field key={c.id} label={c.label} hint={c.dica} className={c.largo ? "col-span-4" : "col-span-2"}>
+                  <Input
+                    inputMode={c.tipo === "numero" ? "numeric" : undefined}
+                    value={atrib[c.id] === undefined || typeof atrib[c.id] === "boolean" ? "" : String(atrib[c.id])}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setAtrib({ ...atrib, [c.id]: c.tipo === "numero" ? (v.trim() === "" ? "" : Number(v.replace(",", ".")) || 0) : v });
+                    }}
+                  />
+                </Field>
+              ),
+            )}
+          </div>
+        </div>
+      )}
+      {variantes && a.id && <GerarVariantes artigo={a as Artigo} ramo={ramo} onClose={() => setVariantes(false)} />}
 
       <div className="mt-6 rounded-xl border border-line p-4">
         <div className="mb-3 flex items-center justify-between">
@@ -555,6 +609,83 @@ function ArtigoForm({
           <input type="checkbox" checked={a.ativo !== 0} onChange={(e) => set("ativo", e.target.checked ? 1 : 0)} /> Artigo activo
         </label>
       )}
+    </Modal>
+  );
+}
+
+/** Moda e calçado: um artigo por combinação (ex.: 6 tamanhos × 3 cores = 18), cada um com o seu stock. */
+function GerarVariantes({ artigo, ramo, onClose }: { artigo: Artigo; ramo: Ramo; onClose: () => void }) {
+  const qc = useQueryClient();
+  const eixos = ramo.variantes ?? [];
+  const [sel, setSel] = useState<Record<string, string[]>>(() => Object.fromEntries(eixos.map((e) => [e.nome, []])));
+  const [extra, setExtra] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const valores = (nome: string) => [...(sel[nome] ?? []), ...(extra[nome] ?? "").split(",").map((x) => x.trim()).filter(Boolean)];
+  const total = eixos.map((e) => valores(e.nome).length).filter((n) => n > 0).reduce((a, b) => a * b, 1);
+  const algum = eixos.some((e) => valores(e.nome).length > 0);
+
+  async function gerar() {
+    setBusy(true);
+    try {
+      const r = await call<{ criados: { referencia: string }[]; existentes: number }>("artigos.variantes", {
+        artigo_id: artigo.id,
+        eixos: eixos.map((e) => ({ nome: e.nome, valores: valores(e.nome) })),
+      });
+      toast.success(`${r.criados.length} ${r.criados.length === 1 ? "variante criada" : "variantes criadas"}${r.existentes ? ` (${r.existentes} já existiam)` : ""}.`, {
+        description: r.criados.slice(0, 4).map((c) => c.referencia).join(", ") + (r.criados.length > 4 ? "…" : ""),
+      });
+      qc.invalidateQueries({ queryKey: ["artigos"] });
+      qc.invalidateQueries({ queryKey: ["pos-artigos"] });
+      onClose();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Variantes de ${artigo.referencia}`}
+      width="max-w-xl"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button loading={busy} disabled={!algum} onClick={gerar}>
+            Criar {algum ? total : ""} {total === 1 ? "artigo" : "artigos"}
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-4 text-[13px] text-ink-2">
+        Cada combinação passa a ser um artigo (ex.: <b className="font-mono">{artigo.referencia}-M-AZUL</b>, «{artigo.descricao} M / Azul»), com o preço, o IVA e a família
+        deste e o seu próprio stock. As que já existem não se repetem.
+      </p>
+      {eixos.map((e) => (
+        <div key={e.nome} className="mb-4">
+          <div className="mb-2 text-[13px] font-medium">{e.label}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {e.sugestoes.map((v) => {
+              const on = sel[e.nome]?.includes(v);
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setSel({ ...sel, [e.nome]: on ? sel[e.nome].filter((x) => x !== v) : [...(sel[e.nome] ?? []), v] })}
+                  className={cn("min-w-11 rounded-lg border px-2.5 py-1.5 text-[13px]", on ? "border-brand bg-brand text-white" : "border-line-strong bg-surface hover:border-brand/50")}
+                >
+                  {v}
+                </button>
+              );
+            })}
+          </div>
+          <Input className="mt-2" placeholder="Outros, separados por vírgulas" value={extra[e.nome] ?? ""} onChange={(x) => setExtra({ ...extra, [e.nome]: x.target.value })} />
+        </div>
+      ))}
     </Modal>
   );
 }

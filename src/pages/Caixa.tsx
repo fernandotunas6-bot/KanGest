@@ -109,7 +109,7 @@ export default function Caixa() {
               icon={<Wallet className="size-4" />}
             />
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-4">
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
             <Card>
               <div className="px-5 pt-4 font-semibold">Recebimentos por modo de pagamento</div>
               <Table>

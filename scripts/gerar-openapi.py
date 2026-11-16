@@ -51,7 +51,8 @@ kz = {"type": "integer", "description": "Valor em cêntimos de Kz (1 Kz = 100)."
 schemas = {
     "Erro": {"type": "object", "properties": {"erro": {"type": "object", "properties": {
         "codigo": {"type": "string", "example": "sem_permissao", "description": "nao_autenticado, chave_invalida, chave_revogada, chave_inactiva, chave_expirada, ip_nao_autorizado, utilizador_inactivo, plano_sem_api, cloudflare_access, sem_permissao, nao_encontrado, metodo_nao_permitido, pedido_invalido, campo_desconhecido, validacao, limite_pedidos, demasiadas_falhas, pedido_grande, erro_interno, ocupado"},
-        "mensagem": {"type": "string", "example": "Sem permissão: «Emitir Factura (FT) e Guia de Transporte (GT)» (vendas.fatura)."}}}}},
+        "mensagem": {"type": "string", "example": "Sem permissão: «Emitir Factura (FT) e Guia de Transporte (GT)» (vendas.fatura)."},
+        "pedido": {"type": "integer", "example": 1234, "description": "Número do pedido no registo da API (o mesmo do cabeçalho X-KanGest-Pedido)."}}}}},
     "Pagina": {"type": "object", "properties": {
         "dados": {"type": "array", "items": {"type": "object"}},
         "mais": {"type": "boolean", "description": "Há mais registos depois desta página."},
@@ -72,6 +73,9 @@ schemas = {
         "qtd_minima": {"type": "number"}, "qtd_maxima": {"type": "number"},
         "controla_stock": {"type": "boolean"}, "permite_negativo": {"type": "boolean"}, "controla_lote": {"type": "boolean"},
         "composto": {"type": "boolean"}, "ativo": {"type": "boolean"},
+        "atributos": {"type": "object", "additionalProperties": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}]},
+            "description": "Dados do ramo de actividade (ex.: livraria {autor, editora, ano}; moda {tamanho, cor, modelo}; electrónica {marca, modelo, garantia_meses}).",
+            "example": {"autor": "Pepetela", "editora": "Dom Quixote", "ano": 1980}},
         "custo": dict(kz, description="Só com a permissão api.custos."), "custo_medio": dict(kz, description="Só com a permissão api.custos."),
         "armazem_id": {"type": "integer"}, "stock": {"type": "number", "description": "Existência no armazém indicado (por omissão, o do posto da chave)."},
         "criado_em": {"type": "string"}, "alterado_em": {"type": "string", "description": "Última alteração (AAAA-MM-DDTHH:MM:SS)."},
@@ -90,7 +94,10 @@ schemas = {
             "qtd_minima": {"type": "number"}, "qtd_maxima": {"type": "number"}, "controla_stock": {"type": "boolean"}, "permite_negativo": {"type": "boolean"},
             "ativo": {"type": "boolean"}, "controla_lote": {"type": "boolean"}, "aviso_validade_dias": {"type": "integer"}, "composto": {"type": "boolean"},
             "componentes": {"type": "array", "items": {"type": "object", "properties": {"componente_id": {"type": "integer"}, "quantidade": {"type": "number"}}}},
-            "promo_desconto": {"type": "number"}, "promo_inicio": {"type": "string", "format": "date"}, "promo_fim": {"type": "string", "format": "date"}},
+            "promo_desconto": {"type": "number"}, "promo_inicio": {"type": "string", "format": "date"}, "promo_fim": {"type": "string", "format": "date"},
+            "atributos": {"type": "object", "additionalProperties": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}]},
+            "description": "Dados do ramo de actividade (ex.: livraria {autor, editora, ano}; moda {tamanho, cor, modelo}; electrónica {marca, modelo, garantia_meses}).",
+            "example": {"autor": "Pepetela", "editora": "Dom Quixote", "ano": 1980}}},
         "additionalProperties": False},
     "Stock": {"type": "object", "properties": {
         "id": {"type": "integer", "description": "Id do artigo."}, "referencia": {"type": "string"}, "codigo_barras": {"type": "string", "nullable": True},

@@ -1711,34 +1711,48 @@ pub struct Filtro {
 
 pub async fn listar(st: &AppState, f: Filtro) -> AppResult<Value> {
     st.sessao()?;
-    let rows = sqlx::query(
+    // Só os filtros pedidos entram na consulta. Com «(? IS NULL OR …)» o SQLite não sabia, ao preparar, que filtro
+    // vinha preenchido e não usava os índices: a lista de um cliente lia os documentos todos por data.
+    let mut q = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
         "SELECT d.id, d.numero_doc, d.tipo_codigo, t.descricao AS tipo_desc, t.classe, t.grupo, d.data_emissao, d.data_hora,
                 d.data_vencimento, d.entidade_id, d.entidade_nome, d.entidade_nif, d.total_liquido, d.total_iva, d.total,
                 d.total_retencao, d.valor_pendente, d.estado, d.hash_controlo, d.doc_externo, d.importado, u.nome AS utilizador
          FROM documentos d
          JOIN tipos_documento t ON t.codigo = d.tipo_codigo
          JOIN utilizadores u ON u.id = d.utilizador_id
-         WHERE (?1 IS NULL OR d.tipo_codigo = ?1)
-           AND (?2 IS NULL OR t.classe = ?2)
-           AND (?3 IS NULL OR d.data_emissao >= ?3)
-           AND (?4 IS NULL OR d.data_emissao <= ?4)
-           AND (d.numero_doc LIKE ?5 OR d.entidade_nome LIKE ?5 OR d.entidade_nif LIKE ?5 OR IFNULL(d.doc_externo, '') LIKE ?5)
-           AND (?6 IS NULL OR d.entidade_id = ?6)
-           AND (?8 IS NULL OR d.estado = ?8)
-           AND (?9 IS NULL OR t.grupo = ?9)
-         ORDER BY d.data_hora DESC, d.id DESC LIMIT ?7",
-    )
-    .bind(f.tipo.filter(|s| !s.is_empty()))
-    .bind(f.classe.filter(|s| !s.is_empty()))
-    .bind(f.de.filter(|s| !s.is_empty()))
-    .bind(f.ate.filter(|s| !s.is_empty()))
-    .bind(format!("%{}%", f.q.unwrap_or_default().trim()))
-    .bind(f.entidade_id)
-    .bind(f.limite.unwrap_or(1000))
-    .bind(f.estado.filter(|s| !s.is_empty()))
-    .bind(f.grupo.filter(|s| !s.is_empty()))
-    .fetch_all(&st.pool)
-    .await?;
+         WHERE 1 = 1",
+    );
+    let texto = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if let Some(v) = texto(f.tipo) {
+        q.push(" AND d.tipo_codigo = ").push_bind(v);
+    }
+    if let Some(v) = texto(f.classe) {
+        q.push(" AND t.classe = ").push_bind(v);
+    }
+    if let Some(v) = texto(f.de) {
+        q.push(" AND d.data_emissao >= ").push_bind(v);
+    }
+    if let Some(v) = texto(f.ate) {
+        q.push(" AND d.data_emissao <= ").push_bind(v);
+    }
+    if let Some(v) = texto(f.q) {
+        let p = format!("%{v}%");
+        q.push(" AND (d.numero_doc LIKE ").push_bind(p.clone());
+        q.push(" OR d.entidade_nome LIKE ").push_bind(p.clone());
+        q.push(" OR d.entidade_nif LIKE ").push_bind(p.clone());
+        q.push(" OR IFNULL(d.doc_externo, '') LIKE ").push_bind(p).push(")");
+    }
+    if let Some(v) = f.entidade_id {
+        q.push(" AND d.entidade_id = ").push_bind(v);
+    }
+    if let Some(v) = texto(f.estado) {
+        q.push(" AND d.estado = ").push_bind(v);
+    }
+    if let Some(v) = texto(f.grupo) {
+        q.push(" AND t.grupo = ").push_bind(v);
+    }
+    q.push(" ORDER BY d.data_hora DESC, d.id DESC LIMIT ").push_bind(f.limite.unwrap_or(1000));
+    let rows = q.build().fetch_all(&st.pool).await?;
     Ok(db::rows_json(&rows))
 }
 

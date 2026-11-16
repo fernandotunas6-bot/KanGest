@@ -83,7 +83,7 @@ export function TecladoPin({ valor, onChange, onConfirmar, ocupado }: { valor: s
           Array.from({ length: valor.length }, (_, i) => <span key={i} className="size-3 rounded-full bg-ink" />)
         )}
       </div>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="kg-teclas grid grid-cols-3 gap-2">
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((k) => (
           <button key={k} type="button" className={base} onClick={() => tecla(k)}>
             {k}
@@ -307,8 +307,8 @@ export function MudarSenhaObrigatoria() {
 /** Painel de marca à esquerda e o formulário à direita (entrada, senha provisória). */
 export function Moldura({ children, empresa }: { children: ReactNode; empresa?: string | null }) {
   return (
-    <div className="grid h-full grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-      <div className="relative flex flex-col justify-between overflow-hidden bg-brand-700 p-12 text-white">
+    <div className="grid h-full md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+      <div className="relative hidden flex-col justify-between overflow-hidden bg-brand-700 p-12 text-white md:flex">
         <div className="absolute -right-32 -top-32 size-[480px] rounded-full bg-brand/60 blur-3xl" />
         <div className="absolute -bottom-40 -left-20 size-[420px] rounded-full bg-accent/25 blur-3xl" />
         <div className="relative flex items-center gap-3">
@@ -321,7 +321,15 @@ export function Moldura({ children, empresa }: { children: ReactNode; empresa?: 
         </div>
         <div className="relative text-[13px] text-white/50">{empresa ?? ""}</div>
       </div>
-      <div className="flex items-center justify-center overflow-y-auto p-10">{children}</div>
+      <div className="flex min-h-0 flex-col overflow-y-auto">
+        {/* ecrãs pequenos (telemóvel, terminal POS): só uma faixa com a marca */}
+        <div className="flex items-center gap-2.5 bg-brand-700 px-5 py-3 text-white md:hidden">
+          <Logo className="size-8 rounded-[22%] ring-1 ring-white/15" />
+          <span className="font-semibold">KanGest</span>
+          {empresa && <span className="ml-auto truncate text-[12px] text-white/60">{empresa}</span>}
+        </div>
+        <div className="flex flex-1 items-center justify-center p-6 md:p-10">{children}</div>
+      </div>
     </div>
   );
 }

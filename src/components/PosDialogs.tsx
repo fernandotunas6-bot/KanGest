@@ -73,7 +73,7 @@ export function TecladoModal({
         {sufixo && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-3">{sufixo}</span>}
       </div>
       {ajuda && <p className="mt-2 text-[12px] text-ink-3">{ajuda}</p>}
-      <div className="mt-4 grid grid-cols-3 gap-2">
+      <div className="kg-teclas mt-4 grid grid-cols-3 gap-2">
         {["7", "8", "9", "4", "5", "6", "1", "2", "3", ",", "0", "00"].map((t) => (
           <button key={t} onClick={() => tecla(t)} className="num h-14 rounded-xl border border-line bg-surface text-[20px] font-medium hover:bg-sunken active:bg-brand-50">
             {t}

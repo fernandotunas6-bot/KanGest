@@ -1339,7 +1339,7 @@ async fn rede_multiposto() {
     // ---- abre o servidor numa porta livre ----
     let porta = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let arc = std::sync::Arc::new(st);
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta, servidor: String::new(), chave: "segredo123".into(), sal: String::new() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta, servidor: String::new(), chave: "segredo123".into(), sal: String::new(), web: true };
     crate::rede::registar_estado(arc.clone());
     assert!(crate::rede::iniciar_servidor(arc.clone(), &crate::rede::Config { chave: "curta".into(), ..cfg.clone() }).is_err(), "a chave tem de ter 6 caracteres");
     assert_eq!(crate::rede::iniciar_servidor(arc.clone(), &cfg).unwrap(), porta);
@@ -1347,7 +1347,7 @@ async fn rede_multiposto() {
     assert!(!gravado.sal.is_empty(), "o servidor guarda o sal da derivação da chave");
 
     // posto cliente: fala com o servidor pelo protocolo cifrado
-    let cliente = crate::rede::Config { modo: "cliente".into(), porta, servidor: format!("127.0.0.1:{porta}"), chave: "segredo123".into(), sal: String::new() };
+    let cliente = crate::rede::Config { modo: "cliente".into(), porta, servidor: format!("127.0.0.1:{porta}"), chave: "segredo123".into(), sal: String::new(), web: true };
     let pedir_v2 = |token: &str, metodo: &str, params: Value| -> Result<Value, String> {
         crate::rede::pedir_com_token(&cliente, token, metodo, params, posto2, "Caixa 2").map_err(|e| e.to_string())
     };
@@ -1410,6 +1410,56 @@ async fn rede_multiposto() {
     assert_eq!(crate::rede::teste_abrir_resposta(&k, &bruto(&corpo))["ok"], true);
     let repetido = crate::rede::teste_abrir_resposta(&k, &bruto(&corpo));
     assert!(repetido["erro"].as_str().unwrap().contains("repetido"), "{repetido}");
+
+    // ---- modo web: o mesmo servidor entrega a aplicação ao browser (telemóvel, tablet, terminal) ----
+    let js = format!("console.log('{}');", "kangest ".repeat(400));
+    let js_c = js.clone();
+    crate::web::registar(Box::new(move |c: &str| match c {
+        "index.html" => Some((b"<!doctype html><div id=\"root\"></div>".to_vec(), "text/html".into())),
+        "assets/app-Ab12.js" => Some((js_c.clone().into_bytes(), "text/javascript".into())),
+        // como o Tauri: um caminho desconhecido devolve a página inicial
+        _ => Some((b"<!doctype html><div id=\"root\"></div>".to_vec(), "text/html".into())),
+    }));
+    let get = |caminho: &str, cabecalhos: &str| -> (String, Vec<u8>) {
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", porta)).unwrap();
+        s.write_all(format!("GET {caminho} HTTP/1.1\r\nHost: localhost\r\n{cabecalhos}Connection: close\r\n\r\n").as_bytes()).unwrap();
+        let mut r = Vec::new();
+        s.read_to_end(&mut r).unwrap();
+        let corte = r.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        (String::from_utf8_lossy(&r[..corte]).to_string(), r[corte..].to_vec())
+    };
+    let (cab, corpo) = get("/", "Accept: text/html,application/xhtml+xml\r\n");
+    assert!(cab.starts_with("HTTP/1.1 200") && String::from_utf8_lossy(&corpo).contains("id=\"root\""), "{cab}");
+    assert!(cab.contains("Content-Security-Policy: default-src 'self'") && cab.contains("Cache-Control: no-cache") && cab.contains("nosniff"), "{cab}");
+    let (cab, corpo) = get("/assets/app-Ab12.js", "Accept-Encoding: gzip, deflate\r\n");
+    assert!(cab.contains("Content-Encoding: gzip") && cab.contains("immutable") && cab.contains("text/javascript"), "{cab}");
+    let mut aberto = String::new();
+    flate2::read::GzDecoder::new(&corpo[..]).read_to_string(&mut aberto).unwrap();
+    assert_eq!(aberto, js, "o ficheiro comprimido abre igual ao original");
+    assert!(get("/assets/nao-existe.js", "").0.starts_with("HTTP/1.1 404"), "um .js que falta não pode vir como HTML");
+    assert!(get("/../rede.json", "Accept: text/html\r\n").0.starts_with("HTTP/1.1 400"));
+    let (cab, corpo) = get("/rede/info", "Accept: */*\r\n");
+    let info: Value = serde_json::from_slice(&corpo).unwrap();
+    assert!(cab.contains("application/json") && info["web"] == true && info["sal"].as_str().is_some_and(|s| !s.is_empty()), "{info}");
+    // o que mexe na máquina onde corre não se faz a partir de outro posto ou do browser
+    for m in ["rede.estado", "atualizacao.verificar", "sistema.exportar", "internet.estado", "partilha.abrir"] {
+        let e = pedir_v2("t1", m, json!({})).unwrap_err();
+        assert!(e.contains("só se usa no próprio computador"), "{m}: {e}");
+    }
+    // o browser leva o ficheiro que gerou no servidor (e só esse posto o pode levar)
+    pedir_v2("t5", "auth.login", json!({ "login": "admin", "senha": "1234" })).unwrap();
+    let copia = pedir_v2("t5", "sistema.backup", Value::Null).unwrap();
+    let ficheiro = copia["ficheiro"].as_str().unwrap().to_string();
+    let levado = pedir_v2("t5", "ficheiros.descarregar", json!({ "ficheiro": ficheiro })).unwrap();
+    let bytes = B64.decode(levado["base64"].as_str().unwrap()).unwrap();
+    assert_eq!(bytes, std::fs::read(&ficheiro).unwrap());
+    assert!(pedir_v2("t1", "ficheiros.descarregar", json!({ "ficheiro": ficheiro })).unwrap_err().contains("indisponível"), "outro posto não leva o ficheiro");
+    assert!(pedir_v2("t5", "ficheiros.descarregar", json!({ "ficheiro": "/etc/passwd" })).unwrap_err().contains("indisponível"));
+    // escolher o posto a partir de outro aparelho não muda o posto da máquina do servidor
+    let antes = std::fs::read_to_string(pasta.join("posto.json")).ok();
+    assert_eq!(pedir_v2("t5", "posto.selecionar", json!({ "id": posto2 })).unwrap()["id"], posto2);
+    assert_eq!(std::fs::read_to_string(pasta.join("posto.json")).ok(), antes, "o posto escolhido é do aparelho, não do servidor");
+    assert_eq!(arc.posto().id, 1);
 
     // ---- quem erra a chave muitas vezes fica bloqueado uns minutos ----
     for _ in 0..6 {
@@ -2078,7 +2128,7 @@ async fn servidor_demo() {
     // servidor de rede + posto da auditoria já autenticado
     let arc = std::sync::Arc::new(st);
     crate::rede::registar_estado(arc.clone());
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new(), web: true };
     crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
     let cliente = crate::rede::Config { modo: "cliente".into(), servidor: "127.0.0.1:7799".into(), ..cfg.clone() };
     crate::rede::pedir_com_token(&cliente, "auditoria", "auth.login", json!({ "login": "admin", "senha": "1234" }), 1, "Auditoria").expect("entrar");
@@ -2287,7 +2337,7 @@ async fn servidor_base() {
     st.carregar_posto(1).await.unwrap();
     let arc = std::sync::Arc::new(st);
     crate::rede::registar_estado(arc.clone());
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new(), web: true };
     crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
     let cliente = crate::rede::Config { modo: "cliente".into(), servidor: "127.0.0.1:7799".into(), ..cfg.clone() };
     crate::rede::pedir_com_token(&cliente, "auditoria", "auth.login", json!({ "login": "admin", "senha": "1234" }), 1, "Auditoria").expect("entrar");
@@ -3118,6 +3168,23 @@ async fn copias_externas_cifradas_e_restauro() {
     assert!(e.contains("não é uma cópia de segurança"), "{e}");
     // o restauro inicial só existe enquanto o KanGest não está configurado
     assert!(rpc_err(&st2, "setup.restaurar", json!({ "ficheiro": externa })).await.contains("já está configurado"));
+
+    // uma cópia feita por uma versão mais recente (com migrações que esta não conhece) não se restaura:
+    // depois da troca, a base deixaria de abrir e o programa não arrancava
+    let nova = pasta2.join("kangest-versao-nova.db");
+    super::sistema::copiar(&st2.pool, &nova).await.unwrap();
+    {
+        let p = sqlx::SqlitePool::connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&nova)).await.unwrap();
+        sqlx::query("INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (999999, 'de uma versão futura', 1, x'00', 0)")
+            .execute(&p)
+            .await
+            .unwrap();
+        p.close().await;
+    }
+    assert!(db::abrir(&nova).await.is_err(), "esta versão não abre uma base com migrações que não conhece");
+    let e = rpc_err(&st2, "sistema.restaurar", json!({ "ficheiro": nova.display().to_string() })).await;
+    assert!(e.contains("versão mais recente"), "{e}");
+    assert!(!pasta2.join("restaurar.json").exists(), "nada fica marcado para o arranque");
     let _ = std::fs::remove_dir_all(&pasta);
     let _ = std::fs::remove_dir_all(&pasta2);
 }
@@ -3615,6 +3682,12 @@ async fn api_integracao() {
     assert_eq!(http("GET", "/api/v1", Some(&falsa), None).2["erro"]["codigo"], "chave_invalida");
     assert_eq!(http("GET", "/api/v1/naoexiste", Some(&k1), None).0, 404);
     assert_eq!(http("DELETE", "/api/v1/artigos", Some(&k1), None).0, 405);
+    // cada resposta leva o número do pedido no registo; nos erros, também dentro de «erro»
+    let (_, cab, erro) = http("GET", "/api/v1/naoexiste", Some(&k1), None);
+    let numero: i64 = cab.lines().find_map(|l| l.strip_prefix("X-KanGest-Pedido: ")).expect("cabeçalho X-KanGest-Pedido").trim().parse().unwrap();
+    assert_eq!(erro["erro"]["pedido"], numero, "{erro}");
+    let registado: String = sqlx::query_scalar("SELECT caminho FROM api_pedidos WHERE id = ?").bind(numero).fetch_one(&arc.pool).await.unwrap();
+    assert_eq!(registado, "/api/v1/naoexiste");
     // a chave por X-API-Key também serve
     let (s, _, info) = api_http(porta, "GET", "/api/v1", None, None, &[("X-API-Key", &k1)]);
     assert_eq!(s, 200, "{info}");
@@ -4044,5 +4117,287 @@ async fn webhooks_api() {
     assert!(aud.as_array().unwrap().len() >= 4);
 
     st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Comissões de vendedores: taxa do vendedor, taxa própria da família, NC descontam (no vendedor da origem),
+/// anulados não contam, e o total do mês entra no processamento de salários (rubrica 019).
+#[tokio::test]
+async fn comissoes_de_vendedores() {
+    use chrono::Datelike;
+    let (st, pasta) = base_com_admin("comissoes").await;
+    let hoje = chrono::Local::now().date_naive();
+    let (ano, mes) = (hoje.year(), hoje.month());
+    let inicio = format!("{ano:04}-{mes:02}-01");
+    let servicos = rpc(&st, "tabela.guardar", json!({ "tabela": "familias", "descricao": "Serviços" })).await["id"].as_i64().unwrap();
+    let telemoveis = rpc(&st, "tabela.guardar", json!({ "tabela": "familias", "descricao": "Telemóveis" })).await["id"].as_i64().unwrap();
+    let artigo = |descricao: &'static str, preco: i64, familia: Option<i64>| {
+        let st = &st;
+        async move { rpc(st, "artigos.guardar", json!({ "descricao": descricao, "tipo": "S", "taxa_iva_id": 1, "preco1": preco, "familia_id": familia })).await["id"].as_i64().unwrap() }
+    };
+    let servico = artigo("Configuração", 1_000_000, Some(servicos)).await;
+    let telemovel = artigo("Telemóvel X", 10_000_000, Some(telemoveis)).await;
+    let capa = artigo("Capa", 200_000, None).await;
+    let func = |nome: &'static str| {
+        let st = &st;
+        async move { rpc(st, "rh.funcionarioGuardar", json!({ "nome": nome, "salario_base": 20000000, "desconta_inss": true, "desconta_irt": true })).await["id"].as_i64().unwrap() }
+    };
+    let (ana, beto, carla) = (func("Ana").await, func("Beto").await, func("Carla").await);
+    let cliente = rpc(&st, "entidades.guardar", json!({ "nome": "Cliente Comissões", "nif": "5417000000" })).await["id"].as_i64().unwrap();
+
+    // ---- taxas ----
+    assert!(rpc_err(&st, "comissoes.taxaGuardar", json!({ "tipo": "VENDEDOR", "id": ana, "pct": 150 })).await.contains("entre 0 e 100"));
+    assert!(rpc_err(&st, "comissoes.taxaGuardar", json!({ "tipo": "OUTRO", "id": ana, "pct": 1 })).await.contains("inválido"));
+    rpc(&st, "comissoes.taxaGuardar", json!({ "tipo": "VENDEDOR", "id": ana, "pct": 2 })).await;
+    rpc(&st, "comissoes.taxaGuardar", json!({ "tipo": "VENDEDOR", "id": beto, "pct": 3 })).await;
+    rpc(&st, "comissoes.taxaGuardar", json!({ "tipo": "FAMILIA", "id": servicos, "pct": 10 })).await;
+    let t = rpc(&st, "comissoes.taxas", Value::Null).await;
+    assert_eq!(t["vendedores"].as_array().unwrap().iter().find(|v| v["id"] == ana).unwrap()["pct"], 2.0);
+    assert_eq!(t["vendedores"].as_array().unwrap().iter().find(|v| v["id"] == carla).unwrap()["pct"], 0.0);
+    assert_eq!(t["familias"].as_array().unwrap().iter().find(|f| f["id"] == servicos).unwrap()["pct"], 10.0);
+
+    // ---- vendas do mês ----
+    let venda = |vendedor: i64, linhas: Value| {
+        let st = &st;
+        async move {
+            rpc(st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cliente, "vendedor_id": vendedor, "linhas": linhas })).await["documento"].clone()
+        }
+    };
+    let liquido = |id: i64, artigo: i64| {
+        let pool = st.pool.clone();
+        async move { sqlx::query_scalar::<_, i64>("SELECT SUM(valor_liquido) FROM documento_linhas WHERE documento_id = ? AND artigo_id = ?").bind(id).bind(artigo).fetch_one(&pool).await.unwrap() }
+    };
+    let ft1 = venda(ana, json!([{ "artigo_id": servico, "quantidade": 1 }, { "artigo_id": telemovel, "quantidade": 1 }])).await;
+    let ft2 = venda(beto, json!([{ "artigo_id": capa, "quantidade": 2 }])).await;
+    venda(carla, json!([{ "artigo_id": servico, "quantidade": 1 }])).await;
+    let anulada = venda(ana, json!([{ "artigo_id": telemovel, "quantidade": 3 }])).await;
+    rpc(&st, "documentos.anular", json!({ "id": anulada["id"], "motivo": "erro de digitação no documento" })).await;
+    // devolução do telemóvel, sem vendedor na NC: desconta à Ana (vendedora da factura)
+    rpc(&st, "documentos.emitir", json!({ "tipo": "NC", "entidade_id": cliente, "doc_origem_id": ft1["id"], "motivo": "Devolução", "linhas": [{ "artigo_id": telemovel, "quantidade": 1 }] })).await;
+
+    let (ft1_id, ft2_id) = (ft1["id"].as_i64().unwrap(), ft2["id"].as_i64().unwrap());
+    let servico_liq = liquido(ft1_id, servico).await;
+    let capa_liq = liquido(ft2_id, capa).await;
+    let r = rpc(&st, "comissoes.relatorio", json!({ "de": inicio, "ate": hoje.format("%Y-%m-%d").to_string() })).await;
+    let de = |id: i64| r["vendedores"].as_array().unwrap().iter().find(|v| v["vendedor_id"] == id).cloned().unwrap_or(Value::Null);
+    // Ana: serviços a 10 % (taxa da família); telemóvel vendido e devolvido (base 0); a factura anulada não conta
+    assert_eq!(de(ana)["base"], servico_liq, "{r}");
+    assert_eq!(de(ana)["comissao"], (servico_liq as f64 * 0.10).round() as i64, "{r}");
+    let tel = de(ana)["familias"].as_array().unwrap().iter().find(|f| f["familia"] == "Telemóveis").cloned().unwrap();
+    assert_eq!((tel["base"].as_i64(), tel["comissao"].as_i64()), (Some(0), Some(0)));
+    // Beto: artigo sem família, à sua taxa
+    assert_eq!(de(beto)["comissao"], (capa_liq as f64 * 0.03).round() as i64);
+    // Carla: vende, mas sem comissão (a taxa da família só vale para quem tem comissão)
+    assert_eq!(de(carla)["comissao"], 0);
+
+    // ---- lançar no salário do mês (duas vezes: substitui, não duplica) ----
+    let l = rpc(&st, "comissoes.lancar", json!({ "ano": ano, "mes": mes })).await;
+    assert_eq!(l["lancados"], 2, "{l}");
+    rpc(&st, "comissoes.lancar", json!({ "ano": ano, "mes": mes })).await;
+    let alts = rpc(&st, "rh.alteracoes", json!({ "ano": ano, "mes": mes })).await;
+    let comissoes: Vec<&Value> = alts.as_array().unwrap().iter().filter(|a| a["rubrica"] == "019").collect();
+    assert_eq!(comissoes.len(), 2, "{alts}");
+    let sim = rpc(&st, "rh.simular", json!({ "ano": ano, "mes": mes })).await;
+    let recibo_ana = sim.as_array().unwrap().iter().find(|x| x["funcionario_id"] == ana).unwrap();
+    let linha = recibo_ana["linhas"].as_array().unwrap().iter().find(|x| x["rubrica"] == "019").cloned().expect("linha de comissões no recibo");
+    assert_eq!(linha["valor"], de(ana)["comissao"]);
+    assert_eq!(recibo_ana["total_remuneracoes"], 20000000 + de(ana)["comissao"].as_i64().unwrap(), "a comissão é remuneração");
+    // mês processado: as comissões já não mudam
+    rpc(&st, "rh.processar", json!({ "ano": ano, "mes": mes })).await;
+    assert!(rpc_err(&st, "comissoes.lancar", json!({ "ano": ano, "mes": mes })).await.contains("já foram processados"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Tempos das consultas mais usadas numa base com volume (para afinar os índices). Corre-se à mão sobre uma cópia:
+///   KANGEST_BASE=/caminho/kigest.db cargo test --release --lib volume_tempos -- --ignored --nocapture
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn volume_tempos() {
+    use chrono::Datelike;
+    let Ok(base) = std::env::var("KANGEST_BASE") else { return };
+    let caminho = std::path::PathBuf::from(&base);
+    let pool = db::abrir(&caminho).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = caminho.parent().unwrap().to_path_buf();
+    st.pasta_exportacao = st.pasta_dados.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let hoje = chrono::Local::now().date_naive();
+    let (mes, ano) = (format!("{}-{:02}-01", hoje.year(), hoje.month()), format!("{}-01-01", hoje.year()));
+    let h = hoje.format("%Y-%m-%d").to_string();
+    let cliente: i64 = sqlx::query_scalar("SELECT entidade_id FROM documentos WHERE entidade_id <> 1 GROUP BY entidade_id ORDER BY COUNT(*) DESC LIMIT 1").fetch_one(&st.pool).await.unwrap();
+    let artigo: i64 = sqlx::query_scalar("SELECT artigo_id FROM movimentos_stock GROUP BY artigo_id ORDER BY COUNT(*) DESC LIMIT 1").fetch_one(&st.pool).await.unwrap();
+    let casos: Vec<(&str, &str, Value)> = vec![
+        ("Painel", "dashboard", Value::Null),
+        ("Documentos do mês", "documentos.listar", json!({ "de": mes, "ate": h })),
+        ("Documentos: pesquisa", "documentos.listar", json!({ "q": "Cliente Volume 12" })),
+        ("Documentos de um cliente", "documentos.listar", json!({ "entidade_id": cliente })),
+        ("Vendas por dia (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "dia" })),
+        ("Vendas por artigo (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "artigo" })),
+        ("Vendas por família (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "familia" })),
+        ("Vendas por operador (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "operador" })),
+        ("Vendas por vendedor (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "vendedor" })),
+        ("Vendas por pagamento (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "pagamento" })),
+        ("Vendas por cliente (ano)", "relatorios.vendas", json!({ "de": ano, "ate": h, "agrupar": "cliente" })),
+        ("Síntese do ano", "relatorios.sintese", json!({ "ano": hoje.year() })),
+        ("Tesouraria: contas e saldos", "tesouraria.contas", Value::Null),
+        ("Tesouraria: fluxo do mês", "tesouraria.fluxo", json!({ "de": mes, "ate": h })),
+        ("Tesouraria: resumo mensal", "tesouraria.resumoMensal", json!({ "ano": hoje.year().to_string() })),
+        ("Contas correntes: pendentes", "contas.pendentes", json!({ "tipo": "C" })),
+        ("Conta corrente de um cliente", "contas.extrato", json!({ "entidade_id": cliente })),
+        ("Vencidos", "contas.vencidos", json!({ "tipo": "C" })),
+        ("Clientes", "entidades.listar", json!({ "tipo": "C" })),
+        ("Clientes: pesquisa", "entidades.listar", json!({ "q": "Volume 21" })),
+        ("Stock", "stock.listar", json!({})),
+        ("Movimentos de um artigo", "stock.movimentos", json!({ "artigo_id": artigo })),
+        ("Stock parado", "relatorios.stock", json!({ "situacao": "parado", "dias": 90 })),
+        ("Caixa: estado", "caixa.estado", Value::Null),
+    ];
+    let mut total = 0.0;
+    for (nome, metodo, params) in casos {
+        let mut melhor = f64::MAX;
+        let mut tamanho = 0;
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            let r = dispatch(&st, metodo, params.clone()).await;
+            melhor = melhor.min(t.elapsed().as_secs_f64() * 1000.0);
+            tamanho = r.map(|v| v.to_string().len()).unwrap_or_else(|e| { eprintln!("  {metodo}: {e}"); 0 });
+        }
+        total += melhor;
+        eprintln!("{nome:<32} {melhor:>9.1} ms  {:>9} bytes", tamanho);
+    }
+    eprintln!("{:<32} {total:>9.1} ms", "TOTAL");
+}
+
+/// Ramos de actividade: dados de ramo nos artigos (pesquisáveis), ISBN na livraria e variantes na moda.
+#[tokio::test]
+async fn ramos_de_actividade() {
+    let (st, pasta) = base_com_admin("ramos").await;
+    assert_eq!(rpc(&st, "ramo.obter", Value::Null).await["ramo"], "comercio", "sem escolha, é comércio geral");
+    assert!(rpc_err(&st, "ramo.definir", json!({ "ramo": "nave-espacial" })).await.contains("desconhecido"));
+
+    // ---- livraria: ISBN-10 passa a ISBN-13, o autor e a editora encontram o livro ----
+    rpc(&st, "ramo.definir", json!({ "ramo": "livraria" })).await;
+    assert_eq!(rpc(&st, "tabelas", Value::Null).await["ramo"], "livraria");
+    let livro = rpc(
+        &st,
+        "artigos.guardar",
+        json!({ "descricao": "Mayombe", "taxa_iva_id": 1, "preco1": 450000, "codigo_barras": "972-20-1290-8",
+                "atributos": { "autor": "Pepetela", "editora": "Dom Quixote", "ano": 1980, "vazio": "" } }),
+    )
+    .await["id"]
+        .as_i64()
+        .unwrap();
+    let a = rpc(&st, "artigos.obter", json!({ "id": livro })).await;
+    assert_eq!(a["codigo_barras"], "9789722012904");
+    let at: Value = serde_json::from_str(a["atributos"].as_str().unwrap()).unwrap();
+    assert_eq!(at, json!({ "autor": "Pepetela", "editora": "Dom Quixote", "ano": 1980 }));
+    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Livro errado", "taxa_iva_id": 1, "preco1": 1, "codigo_barras": "978-989-52-7385-9" })).await.contains("ISBN"));
+    assert!(
+        rpc_err(&st, "artigos.guardar", json!({ "descricao": "Mayombe (outro)", "taxa_iva_id": 1, "preco1": 1, "codigo_barras": "9789722012904" })).await.contains("já é do artigo"),
+        "o mesmo ISBN não pode ficar em dois artigos"
+    );
+    let achados = rpc(&st, "artigos.listar", json!({ "q": "pepetela" })).await;
+    assert_eq!(achados.as_array().unwrap().len(), 1, "o autor encontra o livro");
+    assert!(rpc(&st, "artigos.listar", json!({ "q": "autor" })).await.as_array().unwrap().is_empty(), "o nome do campo não conta como texto");
+    assert_eq!(rpc(&st, "artigos.codigo", json!({ "codigo": "9789722012904" })).await["id"], livro, "o leitor lê o ISBN");
+    // gravar sem "atributos" mantém os que existem
+    rpc(&st, "artigos.guardar", json!({ "id": livro, "descricao": "Mayombe (bolso)", "taxa_iva_id": 1, "preco1": 450000, "codigo_barras": "9789722012904" })).await;
+    assert!(rpc(&st, "artigos.obter", json!({ "id": livro })).await["atributos"].as_str().unwrap().contains("Pepetela"));
+    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "X", "taxa_iva_id": 1, "preco1": 1, "atributos": { "Autor": "x" } })).await.contains("inválido"));
+
+    // ---- moda: uma camisa em 3 tamanhos × 2 cores = 6 artigos, cada um com o seu stock ----
+    rpc(&st, "ramo.definir", json!({ "ramo": "moda" })).await;
+    let camisa = rpc(&st, "artigos.guardar", json!({ "referencia": "CAM01", "descricao": "Camisa Polo", "taxa_iva_id": 1, "preco1": 1200000, "atributos": { "marca": "Kianda" } }))
+        .await["id"]
+        .as_i64()
+        .unwrap();
+    let eixos = json!([{ "nome": "tamanho", "valores": ["S", "M", "L"] }, { "nome": "cor", "valores": ["Azul marinho", " Branco ", ""] }]);
+    let r = rpc(&st, "artigos.variantes", json!({ "artigo_id": camisa, "eixos": eixos })).await;
+    let criados = r["criados"].as_array().unwrap();
+    assert_eq!(criados.len(), 6);
+    assert_eq!(criados[0]["referencia"], "CAM01-S-AZULMA");
+    assert_eq!(criados[0]["descricao"], "Camisa Polo S / Azul marinho");
+    let v = rpc(&st, "artigos.obter", json!({ "id": criados[5]["id"] })).await;
+    assert_eq!(v["preco1"], 1200000, "a variante herda o preço");
+    let at: Value = serde_json::from_str(v["atributos"].as_str().unwrap()).unwrap();
+    assert_eq!(at, json!({ "marca": "Kianda", "modelo": "CAM01", "tamanho": "L", "cor": "Branco" }));
+    assert_eq!(rpc(&st, "artigos.listar", json!({ "q": "Azul marinho" })).await.as_array().unwrap().len(), 3);
+    let outra = rpc(&st, "artigos.variantes", json!({ "artigo_id": camisa, "eixos": eixos })).await;
+    assert_eq!((outra["criados"].as_array().unwrap().len(), outra["existentes"].as_i64()), (0, Some(6)), "não se repetem");
+    assert!(rpc_err(&st, "artigos.variantes", json!({ "artigo_id": camisa, "eixos": [] })).await.contains("Indique"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Avenças: contratos facturados periodicamente; os períodos em atraso saem um a um e nunca em duplicado.
+#[tokio::test]
+async fn avencas_facturacao_periodica() {
+    use chrono::{Datelike, Months};
+    let (st, pasta) = base_com_admin("avencas").await;
+    let hoje = chrono::Local::now().date_naive();
+    let inicio = hoje.with_day(1).unwrap().checked_sub_months(Months::new(2)).unwrap();
+    let servico = rpc(&st, "artigos.guardar", json!({ "descricao": "Contabilidade organizada", "tipo": "S", "taxa_iva_id": 1, "preco1": 15_000_000 })).await["id"].as_i64().unwrap();
+    let cliente = rpc(&st, "entidades.guardar", json!({ "nome": "Padaria Kianda", "nif": "5417111111" })).await["id"].as_i64().unwrap();
+
+    assert!(rpc_err(&st, "avencas.guardar", json!({ "entidade_id": 1, "descricao": "X", "periodicidade": "MENSAL", "proxima": inicio.to_string(), "linhas": [{ "artigo_id": servico, "quantidade": 1 }] }))
+        .await
+        .contains("cliente identificado"));
+    assert!(rpc_err(&st, "avencas.guardar", json!({ "entidade_id": cliente, "descricao": "X", "periodicidade": "SEMANAL", "proxima": inicio.to_string(), "linhas": [{ "artigo_id": servico, "quantidade": 1 }] }))
+        .await
+        .contains("Periodicidade"));
+    assert!(rpc_err(&st, "avencas.guardar", json!({ "entidade_id": cliente, "descricao": "X", "periodicidade": "MENSAL", "proxima": inicio.to_string(), "linhas": [] })).await.contains("serviço"));
+
+    let id = rpc(
+        &st,
+        "avencas.guardar",
+        json!({ "entidade_id": cliente, "descricao": "Contabilidade mensal", "periodicidade": "MENSAL", "proxima": inicio.to_string(),
+                "linhas": [{ "artigo_id": servico, "quantidade": 1, "descricao": "Contabilidade — {periodo}", "desconto": 10 }] }),
+    )
+    .await["id"]
+        .as_i64()
+        .unwrap();
+    let lista = rpc(&st, "avencas.listar", Value::Null).await;
+    let a = &lista.as_array().unwrap()[0];
+    assert_eq!(a["por_facturar"], true);
+    assert_eq!(a["valor"], 15_390_000, "15 000 000 − 10% + IVA 14%");
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["alertas"]["avencas_por_facturar"], 1);
+
+    // três meses em atraso (o de há dois meses, o passado e o actual): três facturas, uma por mês
+    let r = rpc(&st, "avencas.emitir", json!({})).await;
+    let emitidos = r["emitidos"].as_array().unwrap();
+    assert_eq!(emitidos.len(), 3, "{r}");
+    assert!(r["erros"].as_array().unwrap().is_empty());
+    let doc = rpc(&st, "documentos.obter", json!({ "id": emitidos[0]["documento_id"] })).await;
+    assert_eq!(doc["documento"]["tipo_codigo"], "FT");
+    assert_eq!(doc["documento"]["entidade_id"], cliente);
+    let rotulo = emitidos[0]["periodo"].as_str().unwrap().to_string();
+    assert!(doc["linhas"][0]["descricao"].as_str().unwrap().ends_with(&rotulo), "o período vai na linha: {}", doc["linhas"][0]["descricao"]);
+    assert!(doc["documento"]["observacoes"].as_str().unwrap().contains("Contabilidade mensal"));
+    let proxima = rpc(&st, "avencas.listar", Value::Null).await[0]["proxima"].as_str().unwrap().to_string();
+    assert_eq!(proxima, inicio.checked_add_months(Months::new(3)).unwrap().to_string());
+
+    // de novo: nada por facturar (nem em duplicado)
+    let r2 = rpc(&st, "avencas.emitir", json!({ "ids": [id] })).await;
+    assert!(r2["emitidos"].as_array().unwrap().is_empty());
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["alertas"]["avencas_por_facturar"], 0);
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM avenca_emissoes WHERE avenca_id = ? AND documento_id IS NOT NULL").bind(id).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(n, 3);
+
+    // com facturas emitidas, «apagar» só desactiva (fica o histórico)
+    assert_eq!(rpc(&st, "avencas.apagar", json!({ "id": id })).await["desactivada"], true);
+    assert_eq!(rpc(&st, "avencas.listar", Value::Null).await[0]["ativo"], 0);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn tamanho_do_despachante_temp() {
+    let (st, pasta) = base_com_admin("tamanho").await;
+    let f = super::dispatch(&st, "x", Value::Null);
+    eprintln!("TAMANHO dispatch = {}", std::mem::size_of_val(&f));
+    let g = super::avencas::emitir(&st, serde_json::from_value(json!({})).unwrap());
+    eprintln!("TAMANHO avencas::emitir = {}", std::mem::size_of_val(&g));
+    let h = super::documentos::emitir(&st, serde_json::from_value(json!({"tipo":"FT"})).unwrap());
+    eprintln!("TAMANHO documentos::emitir = {}", std::mem::size_of_val(&h));
+    drop((f, g, h));
     let _ = std::fs::remove_dir_all(&pasta);
 }

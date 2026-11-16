@@ -28,6 +28,12 @@ pub async fn transacao(pool: &SqlitePool) -> AppResult<sqlx::Transaction<'static
     Ok(pool.begin_with("BEGIN IMMEDIATE").await?)
 }
 
+/// Número da migração mais recente que esta versão conhece. Uma base com migrações mais novas é de uma versão
+/// posterior e não abre aqui (o `migrate` recusa migrações aplicadas que não conhece).
+pub fn ultima_migracao() -> i64 {
+    sqlx::migrate!("./migrations").migrations.iter().map(|m| m.version).max().unwrap_or(0)
+}
+
 /// Converte uma linha SQLite num objecto JSON (para leituras genéricas).
 pub fn row_json(row: &SqliteRow) -> Value {
     let mut obj = Map::new();

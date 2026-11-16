@@ -56,7 +56,7 @@ export default function Etiquetas() {
           </Button>
         }
       />
-      <div className="grid grid-cols-[minmax(0,1fr)_320px] gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card>
           <div className="border-b border-line p-4">
             <ArtigoPicker onPick={juntar} placeholder="Adicionar artigo (pesquisa ou código de barras)…" />

@@ -873,20 +873,40 @@ fn atender(st: &AppState, mut fluxo: TcpStream) {
             (r, (!publico).then(|| (ip, p.metodo.clone(), p.alvo.clone(), chave, autenticado)))
         }
     };
-    let _ = fluxo.write_all(&resposta.bytes());
-    let _ = fluxo.flush();
+    // regista antes de responder: o número do registo vai na resposta (X-KanGest-Pedido e, nos erros, «pedido»), para
+    // quem integra poder citar o pedido e o administrador o encontrar em Sistema → API e Integrações
+    let mut resposta = resposta;
     if let Some((ip, metodo, alvo, chave, autenticado)) = registo {
         let ms = inicio.elapsed().as_millis() as i64;
-        tauri::async_runtime::block_on(registar(&st.pool, chave, autenticado, ip, &metodo, &alvo, &resposta, ms));
+        if let Some(id) = tauri::async_runtime::block_on(registar(&st.pool, chave, autenticado, ip, &metodo, &alvo, &resposta, ms)) {
+            resposta = com_numero(resposta, id);
+        }
     }
+    let _ = fluxo.write_all(&resposta.bytes());
+    let _ = fluxo.flush();
+    tauri::async_runtime::block_on(limpar_registo(&st.pool));
+}
+
+/// Junta o número do registo à resposta: no cabeçalho e, nas respostas de erro, dentro de «erro».
+fn com_numero(mut r: Resposta, id: i64) -> Resposta {
+    if r.estado >= 400 {
+        if let Ok(mut v) = serde_json::from_slice::<Value>(&r.corpo) {
+            if let Some(e) = v.get_mut("erro").and_then(Value::as_object_mut) {
+                e.insert("pedido".into(), json!(id));
+                r.corpo = v.to_string().into_bytes();
+            }
+        }
+    }
+    r.com("X-KanGest-Pedido", id.to_string())
 }
 
 static ULTIMA_LIMPEZA: AtomicI64 = AtomicI64::new(0);
 
+/// Grava o pedido no registo e devolve o número dele.
 #[allow(clippy::too_many_arguments)]
-async fn registar(p: &SqlitePool, chave: Option<i64>, autenticado: bool, ip: IpAddr, metodo: &str, alvo: &str, r: &Resposta, ms: i64) {
+async fn registar(p: &SqlitePool, chave: Option<i64>, autenticado: bool, ip: IpAddr, metodo: &str, alvo: &str, r: &Resposta, ms: i64) -> Option<i64> {
     let agora = db::agora();
-    let _ = sqlx::query("INSERT INTO api_pedidos (data_hora, chave_id, ip, metodo, caminho, estado, duracao_ms, erro) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    let id = sqlx::query("INSERT INTO api_pedidos (data_hora, chave_id, ip, metodo, caminho, estado, duracao_ms, erro) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&agora)
         .bind(chave)
         .bind(ip.to_string())
@@ -896,7 +916,9 @@ async fn registar(p: &SqlitePool, chave: Option<i64>, autenticado: bool, ip: IpA
         .bind(ms)
         .bind(r.erro.as_deref().map(|e| e.chars().take(500).collect::<String>()))
         .execute(p)
-        .await;
+        .await
+        .ok()
+        .map(|x| x.last_insert_rowid());
     if autenticado {
         let _ = sqlx::query("UPDATE api_chaves SET ultimo_uso = ?, ultimo_ip = ?, pedidos = pedidos + 1 WHERE id = ?")
             .bind(&agora)
@@ -905,7 +927,11 @@ async fn registar(p: &SqlitePool, chave: Option<i64>, autenticado: bool, ip: IpA
             .execute(p)
             .await;
     }
-    // registo e idempotência guardam-se 90 dias (limpeza no máximo uma vez por hora)
+    id
+}
+
+/// Registo e idempotência guardam-se 90 dias (limpeza no máximo uma vez por hora, depois de responder).
+async fn limpar_registo(p: &SqlitePool) {
     let s = agora_s() as i64;
     if s - ULTIMA_LIMPEZA.load(Ordering::SeqCst) >= 3600 {
         ULTIMA_LIMPEZA.store(s, Ordering::SeqCst);
@@ -915,24 +941,49 @@ async fn registar(p: &SqlitePool, chave: Option<i64>, autenticado: bool, ip: IpA
     }
 }
 
+/// Todas as rotas da API (método e caminho depois de /api/v1; «{x}» é um segmento qualquer). É esta a lista que o
+/// docs/openapi.json descreve: o teste `openapi_igual_as_rotas` falha se as duas se afastarem.
+pub(crate) const ROTAS: &[(&str, &str)] = &[
+    ("GET", "/saude"),
+    ("GET", "/openapi.json"),
+    ("GET", "/"),
+    ("GET", "/tabelas"),
+    ("GET", "/artigos"),
+    ("POST", "/artigos"),
+    ("GET", "/artigos/codigo/{codigo}"),
+    ("GET", "/artigos/{id}"),
+    ("PUT", "/artigos/{id}"),
+    ("PATCH", "/artigos/{id}"),
+    ("GET", "/stock"),
+    ("GET", "/stock/movimentos"),
+    ("GET", "/clientes"),
+    ("POST", "/clientes"),
+    ("GET", "/clientes/{id}"),
+    ("PUT", "/clientes/{id}"),
+    ("PATCH", "/clientes/{id}"),
+    ("GET", "/clientes/{id}/pendentes"),
+    ("GET", "/fornecedores"),
+    ("POST", "/fornecedores"),
+    ("GET", "/fornecedores/{id}"),
+    ("PUT", "/fornecedores/{id}"),
+    ("PATCH", "/fornecedores/{id}"),
+    ("GET", "/fornecedores/{id}/pendentes"),
+    ("GET", "/documentos"),
+    ("POST", "/documentos"),
+    ("GET", "/documentos/{id}"),
+    ("POST", "/documentos/{id}/anular"),
+    ("GET", "/relatorios/vendas"),
+    ("GET", "/saft"),
+];
+
+/// O caminho (em segmentos) encaixa no modelo da rota?
+fn encaixa(modelo: &str, segs: &[&str]) -> bool {
+    let partes: Vec<&str> = modelo.split('/').filter(|s| !s.is_empty()).collect();
+    partes.len() == segs.len() && partes.iter().zip(segs).all(|(m, s)| (m.starts_with('{') && m.ends_with('}')) || m == s)
+}
+
 fn rota_existe(s: &[&str]) -> bool {
-    matches!(
-        s,
-        [] | ["tabelas"]
-            | ["artigos"]
-            | ["artigos", _]
-            | ["artigos", "codigo", _]
-            | ["stock"]
-            | ["stock", "movimentos"]
-            | ["clientes" | "fornecedores"]
-            | ["clientes" | "fornecedores", _]
-            | ["clientes" | "fornecedores", _, "pendentes"]
-            | ["documentos"]
-            | ["documentos", _]
-            | ["documentos", _, "anular"]
-            | ["relatorios", "vendas"]
-            | ["saft"]
-    )
+    ROTAS.iter().any(|(_, modelo)| encaixa(modelo, s))
 }
 
 /// Trata um pedido: (resposta, chave usada, se a chave foi aceite).
@@ -1284,7 +1335,7 @@ const ARTIGO_SQL: &str = "
                 THEN a.promo_desconto ELSE 0 END AS promo_atual,
            a.qtd_minima, a.qtd_maxima, a.controla_stock, a.permite_negativo, a.controla_lote, a.composto, a.ativo,
            a.custo, a.custo_medio, ?1 AS armazem_id, COALESCE(s.quantidade, 0) AS stock,
-           a.criado_em, a.alterado_em
+           a.atributos, a.criado_em, a.alterado_em
     FROM artigos a
     JOIN taxas_iva t ON t.id = a.taxa_iva_id
     LEFT JOIN unidades u ON u.id = a.unidade_id
@@ -1298,6 +1349,8 @@ fn artigo_json(row: &sqlx::sqlite::SqliteRow, c: &Chave) -> Value {
     let mut v = db::row_json(row);
     booleanos(&mut v, BOOL_ARTIGO);
     custos(&mut v, c);
+    // dados do ramo (ISBN/autor, tamanho/cor, marca/modelo…): objecto, não texto
+    v["atributos"] = v["atributos"].as_str().and_then(|s| serde_json::from_str::<Value>(s).ok()).unwrap_or_else(|| json!({}));
     v
 }
 
@@ -1388,6 +1441,7 @@ const CAMPOS_ARTIGO: &[&str] = &[
     "promo_desconto",
     "promo_inicio",
     "promo_fim",
+    "atributos",
 ];
 
 /// Preço sem IVA (cêntimos) a partir do preço com IVA.
@@ -2429,6 +2483,32 @@ pub mod teste_cf {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// A documentação (docs/openapi.json, gerada por scripts/gerar-openapi.py) e o código têm as mesmas rotas.
+    #[test]
+    fn openapi_igual_as_rotas() {
+        let v: Value = serde_json::from_str(OPENAPI).unwrap();
+        // os nomes dos parâmetros podem ser outros: compara-se a forma do caminho
+        let forma = |c: &str| c.split('/').map(|s| if s.starts_with('{') { "{}" } else { s }).collect::<Vec<_>>().join("/");
+        let mut doc: Vec<(String, String)> = v["paths"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .flat_map(|(c, ops)| {
+                ops.as_object().unwrap().keys().filter(|m| ["get", "post", "put", "patch", "delete"].contains(&m.as_str())).map(move |m| (m.to_uppercase(), forma(c)))
+            })
+            .collect();
+        let mut codigo: Vec<(String, String)> = ROTAS.iter().map(|(m, c)| (m.to_string(), forma(c))).collect();
+        doc.sort();
+        codigo.sort();
+        assert_eq!(doc, codigo, "docs/openapi.json e api::ROTAS não descrevem as mesmas rotas (actualize scripts/gerar-openapi.py)");
+        // e o encaminhamento reconhece cada uma
+        for (_, c) in ROTAS {
+            let segs: Vec<&str> = c.split('/').filter(|s| !s.is_empty()).map(|s| if s.starts_with('{') { "1" } else { s }).collect();
+            assert!(rota_existe(&segs), "{c}");
+        }
+        assert!(!rota_existe(&["artigos", "1", "outra"]) && !rota_existe(&["naoexiste"]));
+    }
 
     #[test]
     fn jwt_do_cloudflare_access() {

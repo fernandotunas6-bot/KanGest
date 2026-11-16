@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Ban, BellRing, Copy, FileJson, KeyRound, Monitor, Network, Pencil, Plug, Plus, RefreshCw, Send, ShieldCheck, Trash2 } from "lucide-react";
-import { call } from "@/lib/api";
+import { call, copiarTexto } from "@/lib/api";
 import { dataHora } from "@/lib/format";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 
@@ -103,7 +103,7 @@ const ESTADOS: Record<ChaveApi["estado"], { label: string; tom: "ok" | "neutral"
 
 async function copiar(texto: string, o_que = "Copiado") {
   try {
-    await navigator.clipboard.writeText(texto);
+    await copiarTexto(texto);
     toast.success(`${o_que}.`);
   } catch {
     toast.error("Não foi possível copiar. Seleccione o texto e copie à mão.");
@@ -934,6 +934,7 @@ function Pedidos({ chaves }: { chaves: ChaveApi[] }) {
         <Table className="max-h-[420px]">
           <thead>
             <tr>
+              <Th>N.º</Th>
               <Th>Data e hora</Th>
               <Th>Chave</Th>
               <Th>IP</Th>
@@ -946,6 +947,7 @@ function Pedidos({ chaves }: { chaves: ChaveApi[] }) {
           <tbody>
             {pedidos.data.map((p) => (
               <tr key={p.id}>
+                <Td className="num text-[12px] text-ink-3" title="Número do pedido (cabeçalho X-KanGest-Pedido na resposta)">{p.id}</Td>
                 <Td className="whitespace-nowrap text-ink-2">{dataHora(p.data_hora)}</Td>
                 <Td>{p.chave ?? <span className="text-ink-3">—</span>}</Td>
                 <Td className="font-mono text-[12px]">{p.ip}</Td>

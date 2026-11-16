@@ -1,6 +1,6 @@
 # Build e instalação do KanGest
 
-Versão actual: **1.0.0**. O logótipo está em `src/assets/kigest-icone.svg`. Com um Chrome de depuração aberto (ver `scripts/auditoria/README.md`):
+Versão actual: **1.2.0**. Guia para quem instala (requisitos, qual instalador, rede, actualizações): [INSTALACAO.md](INSTALACAO.md). O logótipo está em `src/assets/kigest-icone.svg`. Com um Chrome de depuração aberto (ver `scripts/auditoria/README.md`):
 
 - ícones da aplicação: `node scripts/icone.mjs` e depois `npx tauri icon src-tauri/icons/app-icon.png -o src-tauri/icons`;
 - imagens do instalador de Windows (cabeçalho 150×57 e lateral 164×314, BMP de 24 bits): `node scripts/instalador-imagens.mjs`.
@@ -28,7 +28,13 @@ A primeira compilação demora (descarrega e compila as bibliotecas); as seguint
 
 ### Opção B — GitHub Actions
 
-Com o projecto num repositório GitHub, o workflow `.github/workflows/build.yml` gera o instalador de Windows e os `.dmg` de macOS (Apple Silicon e Intel) ao publicar uma etiqueta `v1.0.0`, ou manualmente em *Actions → Build → Run workflow*. Os ficheiros ficam nos «Artifacts» da execução e num rascunho de *Release*.
+Com o projecto num repositório GitHub, o workflow `.github/workflows/build.yml` gera o instalador de Windows e os `.dmg` de macOS (Apple Silicon e Intel) ao publicar uma etiqueta `v1.2.0`, ou manualmente em *Actions → Build → Run workflow*. Numa etiqueta:
+
+1. confirma primeiro que a etiqueta é a versão de `package.json`, `src-tauri/tauri.conf.json` e `src-tauri/Cargo.toml` (senão pára antes de compilar);
+2. compila, assina (se houver certificados) e publica a *Release* com as notas de `docs/versoes/<etiqueta>.md` e o quadro «Qual instalador escolher» (`docs/versoes/_instaladores.md`);
+3. no fim, assina os instaladores para as actualizações (`TAURI_SIGNING_PRIVATE_KEY`) e anexa à release o `kangest-atualizacao.json` e o `SHA256SUMS.txt` (`scripts/manifesto-atualizacao.py`).
+
+Fora das etiquetas, os ficheiros ficam só nos «Artifacts» da execução.
 
 ## macOS
 

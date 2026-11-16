@@ -1,6 +1,8 @@
 mod atualizacao;
+mod avencas;
 mod auth;
 mod caixa;
+mod comissoes;
 pub(crate) mod catalogo;
 mod contas;
 mod documentos;
@@ -27,7 +29,9 @@ pub mod sistema;
 mod suspensos;
 mod ficheiros;
 mod inventario;
+mod ligacao;
 mod quadro;
+mod ramos;
 #[cfg(test)]
 mod tests;
 
@@ -58,6 +62,11 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
                 return Err(AppError::msg("Mude a sua senha provisória antes de continuar."));
             }
         }
+    }
+    // Módulos com despachante próprio, num futuro em caixa: o `match` abaixo já é muito grande e cada caso
+    // novo aumenta a pilha que ele usa (nas compilações de desenvolvimento chegava ao limite da pilha).
+    if let Some(resto) = metodo.strip_prefix("avencas.") {
+        return Box::pin(avencas::despachar(st, resto, params)).await;
     }
     match metodo {
         // ---- públicos ----
@@ -182,6 +191,9 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "stock.listar" => catalogo::stock_listar(st, p(params)?).await,
         "stock.movimentos" => catalogo::stock_movimentos(st, p(params)?).await,
         "stock.recalcular" => catalogo::stock_recalcular(st, p(params)?).await,
+        "artigos.variantes" => ramos::variantes(st, p(params)?).await,
+        "ramo.obter" => ramos::obter(st).await,
+        "ramo.definir" => ramos::definir(st, p(params)?).await,
         "artigos.componentes" => catalogo::artigos_componentes(st, p(params)?).await,
         "lotes.listar" => catalogo::lotes_listar(st, p(params)?).await,
         "moedas.listar" => catalogo::moedas(st).await,
@@ -269,6 +281,13 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "rh.ferias" => rh::ferias(st, p(params)?).await,
         "rh.feriasGuardar" => rh::ferias_guardar(st, p(params)?).await,
         "rh.vendedores" => rh::vendedores(st).await,
+        "internet.estado" => ligacao::estado(st).await,
+        "internet.guardar" => ligacao::guardar(st, p(params)?).await,
+        "internet.diagnostico" => ligacao::diagnostico(st).await,
+        "comissoes.taxas" => comissoes::taxas(st).await,
+        "comissoes.taxaGuardar" => comissoes::taxa_guardar(st, p(params)?).await,
+        "comissoes.relatorio" => comissoes::relatorio(st, p(params)?).await,
+        "comissoes.lancar" => comissoes::lancar(st, p(params)?).await,
         "rh.honorarios" => rh::honorarios(st, p(params)?).await,
         "rh.honorarioProcessar" => rh::honorario_processar(st, p(params)?).await,
         "rh.honorarioAnular" => rh::honorario_anular(st, p(params)?).await,

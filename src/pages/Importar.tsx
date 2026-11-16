@@ -248,7 +248,7 @@ export default function Importar() {
     <>
       <PageHeader title="Importar dados do KIGEST" subtitle="Copia todos os dados do KIGEST GC/POS: empresa, artigos, stock, entidades, documentos, tesouraria, recursos humanos e oficina" />
 
-      <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
           <div className="inline-flex rounded-xl border border-line bg-surface p-1">
             {(

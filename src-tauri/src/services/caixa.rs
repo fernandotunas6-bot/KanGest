@@ -25,11 +25,13 @@ async fn resumo(st: &AppState, sid: i64) -> AppResult<Value> {
     .await?
     .ok_or(AppError::NaoEncontrado)?;
     let por_modo = sqlx::query(
-        "SELECT m.codigo, m.descricao, COALESCE(SUM(dp.valor), 0) AS total
+        // parte dos documentos da sessão (índice por sessão); ao contrário, o SQLite indexava todos os pagamentos
+        "SELECT m.codigo, m.descricao, COALESCE(x.total, 0) AS total
          FROM modos_pagamento m
-         LEFT JOIN documento_pagamentos dp ON dp.modo_codigo = m.codigo
-           AND dp.documento_id IN (SELECT id FROM documentos WHERE caixa_sessao_id = ?1 AND estado = 'N')
-         GROUP BY m.codigo ORDER BY m.ordem",
+         LEFT JOIN (SELECT dp.modo_codigo, SUM(dp.valor) AS total
+                    FROM documentos d JOIN documento_pagamentos dp ON dp.documento_id = d.id
+                    WHERE d.caixa_sessao_id = ?1 AND d.estado = 'N' GROUP BY dp.modo_codigo) x ON x.modo_codigo = m.codigo
+         ORDER BY m.ordem",
     )
     .bind(sid)
     .fetch_all(p)

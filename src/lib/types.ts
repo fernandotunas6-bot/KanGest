@@ -79,6 +79,8 @@ export interface Artigo {
   codigo_barras: string | null;
   descricao: string;
   descricao_curta: string | null;
+  /** dados do ramo (ISBN/autor, tamanho/cor, marca/modelo…): texto JSON vindo da base, ou objecto ao gravar */
+  atributos?: string | Record<string, string | number | boolean> | null;
   tipo: "P" | "S";
   familia_id: number | null;
   subfamilia_id: number | null;
@@ -194,6 +196,8 @@ export interface Tabelas {
   precos_com_iva?: boolean;
   /** Fidelização de clientes (cartão de pontos). */
   fidelizacao?: FidelizacaoCfg;
+  /** ramo de actividade da empresa (src/lib/ramos.ts) */
+  ramo?: string;
 }
 
 export interface FidelizacaoCfg {

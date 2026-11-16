@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Link, useSearchParams } from "react-router-dom";
 import { BookOpen, Database, Download, Info, Keyboard, RefreshCw } from "lucide-react";
-import { call } from "@/lib/api";
+import { call, MODO_WEB } from "@/lib/api";
 import { numero } from "@/lib/format";
 import { MENU } from "@/lib/menu";
 import { Button, Card, Field, Input, PageHeader, cn } from "@/components/ui";
@@ -40,6 +40,8 @@ const ATALHOS_POS: [string, string][] = [
   ["Del", "Apagar linha (permissão ou PIN)"],
   ["↑ / ↓", "Mudar de linha"],
   ["Ctrl+G", "Abrir a gaveta (impressora térmica)"],
+  ["Alt+N", "Abrir outra venda em paralelo (a actual fica à espera)"],
+  ["Alt+← / Alt+→", "Passar para a venda anterior / seguinte"],
 ];
 
 const ATALHOS_GESTAO: [string, string][] = [
@@ -129,10 +131,17 @@ export default function Sobre() {
               </dd>
             </dl>
           </Card>
-          <Atualizacoes />
+          {MODO_WEB ? (
+            <Card className="p-5 text-[13px] text-ink-2">
+              No browser, o KanGest é sempre o do servidor da loja: as actualizações instalam-se no computador servidor (Sobre → Actualizações, lá) e este aparelho
+              recebe-as ao recarregar a página.
+            </Card>
+          ) : (
+            <Atualizacoes />
+          )}
         </div>
       ) : (
-        <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
           <Card className="p-6">
             <div className="mb-4 flex items-center gap-2 font-medium">
               <BookOpen className="size-4 text-brand" /> Manual rápido
@@ -271,7 +280,7 @@ function Atualizacoes() {
       <div className="mb-4 flex items-center gap-2 font-medium">
         <RefreshCw className="size-4 text-brand" /> Actualizações
       </div>
-      <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <div className="space-y-3">
           <Field label="Origem (endereço ou pasta partilhada na rede)" hint="Onde está o ficheiro kangest-atualizacao.json, ex.: https://… ou \\SERVIDOR\KanGest">
             <Input disabled={!admin} value={fonte ?? estado?.fonte ?? ""} onChange={(e) => setFonte(e.target.value)} placeholder="https://… ou \\SERVIDOR\KanGest" />

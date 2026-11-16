@@ -42,6 +42,9 @@ pub struct AdminIn {
 pub struct InicializarIn {
     empresa: EmpresaIn,
     admin: AdminIn,
+    /// Ramo de actividade escolhido no primeiro arranque (livraria, farmácia, serviços…).
+    #[serde(default)]
+    ramo: Option<String>,
 }
 
 async fn gravar_empresa(st: &AppState, e: &EmpresaIn) -> AppResult<()> {
@@ -86,6 +89,9 @@ pub async fn inicializar(st: &AppState, i: InicializarIn) -> AppResult<Value> {
         return Err(AppError::msg("A senha deve ter pelo menos 4 caracteres."));
     }
     gravar_empresa(st, &i.empresa).await?;
+    if let Some(r) = i.ramo.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        super::ramos::gravar_ramo(&st.pool, r).await?;
+    }
     sqlx::query("INSERT INTO utilizadores (nome, login, senha_hash, perfil) VALUES (?, ?, ?, 'ADMIN')")
         .bind(i.admin.nome.trim())
         .bind(i.admin.login.trim())

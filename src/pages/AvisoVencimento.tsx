@@ -95,7 +95,7 @@ export default function AvisoVencimento() {
           Total vencido: <b className="num text-ink">{kz(total)}</b>
         </span>
       </div>
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         <Card>
           {!lista.length ? (
             <Empty icon={<BellRing className="size-6" />} title="Sem documentos vencidos" />

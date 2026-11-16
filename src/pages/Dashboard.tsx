@@ -1,26 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import {
-  CalendarClock,
-  CalendarX2,
-  CheckCircle2,
-  ChevronRight,
-  CircleDollarSign,
-  FileClock,
-  FilePlus2,
-  HandCoins,
-  Hourglass,
-  PackageMinus,
-  Receipt,
-  Send,
-  ShieldAlert,
-  ShoppingCart,
-  Table2,
-  TrendingUp,
-  Truck,
-  type LucideIcon,
-} from "lucide-react";
+import { CalendarClock, CalendarX2, CheckCircle2, ChevronRight, CircleDollarSign, FileClock, FilePlus2, HandCoins, Hourglass, PackageMinus, Receipt, Repeat, Send, ShieldAlert, ShoppingCart, Table2, TrendingUp, Truck, type LucideIcon } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, dataHora, hojeISO, kz, qtd } from "@/lib/format";
 import { Badge, Button, Card, Delta, PageHeader, Stat, Table, Td, Th, cn } from "@/components/ui";
@@ -44,6 +25,7 @@ interface Alertas {
   fe_rejeitadas: number;
   compras_vencidas: number;
   valor_compras_vencidas: number;
+  avencas_por_facturar?: number;
 }
 
 interface Dash {
@@ -100,6 +82,7 @@ export default function Dashboard() {
           { n: al?.fe_rejeitadas ?? 0, texto: ["factura rejeitada pela AGT", "facturas rejeitadas pela AGT"], to: "/facturacao-electronica", tom: "danger", icon: ShieldAlert },
           { n: al?.lotes_expirados ?? 0, texto: ["lote expirado ainda com stock", "lotes expirados ainda com stock"], to: "/relatorios/stock?situacao=validade", tom: "danger", icon: CalendarX2 },
           { n: al?.fe_pendentes ?? 0, texto: ["factura por validar na AGT", "facturas por validar na AGT"], to: "/facturacao-electronica", tom: "accent", icon: Send },
+          { n: al?.avencas_por_facturar ?? 0, texto: ["avença por facturar", "avenças por facturar"], to: "/avencas", tom: "accent", icon: Repeat },
           { n: d.stock_baixo, texto: ["artigo no mínimo ou abaixo", "artigos no mínimo ou abaixo"], to: "/stock", tom: "accent", icon: PackageMinus },
           { n: al?.lotes_a_expirar ?? 0, texto: ["lote perto da validade", "lotes perto da validade"], to: "/relatorios/stock?situacao=validade", tom: "accent", icon: Hourglass },
           { n: al?.proformas_a_expirar ?? 0, texto: ["proforma ou orçamento expira em 7 dias", "proformas e orçamentos expiram em 7 dias"], to: "/documentos?grupo=VENDAS", tom: "neutral", icon: FileClock },
@@ -137,7 +120,7 @@ export default function Dashboard() {
         }
       />
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat
           label="Vendas de hoje"
           value={v(d?.vendas_hoje)}
@@ -188,7 +171,7 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="mt-4 grid grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] gap-4">
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <Card className="p-5">
           <div className="mb-3 flex items-center justify-between">
             <div>
@@ -264,7 +247,7 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-4">
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card className="p-5">
           <div className="mb-1 flex items-baseline justify-between gap-3">
             <div className="font-semibold">Antiguidade de saldos</div>
