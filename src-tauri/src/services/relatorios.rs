@@ -132,6 +132,8 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
     .fetch_one(p)
     .await?;
 
+    let avencas_por_facturar = super::avencas::por_facturar(p).await?;
+
     // Recebimentos do mês por meio de pagamento (facturas/recibo, recibos e adiantamentos)
     let por_modo = sqlx::query(
         "SELECT m.descricao, SUM(dp.valor) AS total FROM documento_pagamentos dp
@@ -154,6 +156,7 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
             "proformas_a_expirar": proformas_a_expirar, "lotes_expirados": lotes_expirados, "lotes_a_expirar": lotes_a_expirar,
             "fe_pendentes": fe_pendentes, "fe_rejeitadas": fe_rejeitadas,
             "compras_vencidas": compras_vencidas, "valor_compras_vencidas": valor_compras_vencidas,
+            "avencas_por_facturar": avencas_por_facturar,
         },
         "por_modo": db::rows_json(&por_modo),
         "serie": db::rows_json(&serie), "top_artigos": db::rows_json(&top), "ultimos": db::rows_json(&ultimos),

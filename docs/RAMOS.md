@@ -30,3 +30,18 @@ pesquisa encontra-os. Mudar de ramo não apaga nada: os dados já guardados fica
   procura nos **valores** (não nos nomes dos campos) com `json_each`.
 - O mesmo código de barras (ou ISBN) não pode ficar em dois artigos.
 - A API de integração devolve e aceita `atributos` ([API.md](API.md)).
+
+## Avenças (prestação de serviços)
+
+**Vendas → Avenças (facturação periódica)**: contratos de clientes com serviço contínuo — contabilidade, segurança,
+limpeza, manutenção, mensalidades de escolas e ginásios, aluguer de equipamento.
+
+- Cada avença tem o cliente, os serviços (artigos) com quantidade, preço (vazio = o do artigo) e desconto, a
+  periodicidade (mensal, trimestral, semestral, anual), a **próxima factura** e, se quiser, a data em que termina.
+- O painel avisa «N avenças por facturar» quando chega a data. **Facturar** emite uma factura (FT) por período
+  chegado — com a data do dia (as facturas certificadas não se emitem com datas passadas) e o período na descrição
+  da linha e nas observações (`{periodo}` → «Novembro 2026», «Novembro 2026 a Janeiro 2027»…). Se houver vários
+  períodos em atraso, saem todos, um a um (até 12 de cada vez).
+- Um período **nunca se factura duas vezes**: antes de cada factura fica reservado (`avenca_emissoes`, único por avença
+  e período); se a factura falhar, a reserva sai e o período fica por facturar.
+- O ecrã mostra a **receita recorrente** por mês. Apagar uma avença já facturada só a desactiva (o histórico fica).

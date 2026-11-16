@@ -49,6 +49,7 @@ import FeriasFaltas from "@/pages/rh/Ferias";
 import ConfigRH from "@/pages/rh/ConfigRH";
 import Honorarios from "@/pages/rh/Honorarios";
 import Comissoes from "@/pages/rh/Comissoes";
+import Avencas from "@/pages/Avencas";
 import Viaturas from "@/pages/oficina/Viaturas";
 import Ordens from "@/pages/oficina/Ordens";
 import Utilizadores from "@/pages/Utilizadores";
@@ -168,6 +169,7 @@ function Principal() {
         <Route path="/rh/configuracao" element={<ConfigRH />} />
         <Route path="/rh/honorarios" element={<Honorarios />} />
         <Route path="/rh/comissoes" element={<Comissoes />} />
+        <Route path="/avencas" element={<Avencas />} />
         <Route path="/oficina/viaturas" element={<Viaturas />} />
         <Route path="/oficina/ordens" element={<Ordens />} />
         <Route path="/utilizadores" element={<Utilizadores />} />

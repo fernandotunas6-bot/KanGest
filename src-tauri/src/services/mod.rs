@@ -1,4 +1,5 @@
 mod atualizacao;
+mod avencas;
 mod auth;
 mod caixa;
 mod comissoes;
@@ -61,6 +62,11 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
                 return Err(AppError::msg("Mude a sua senha provisória antes de continuar."));
             }
         }
+    }
+    // Módulos com despachante próprio, num futuro em caixa: o `match` abaixo já é muito grande e cada caso
+    // novo aumenta a pilha que ele usa (nas compilações de desenvolvimento chegava ao limite da pilha).
+    if let Some(resto) = metodo.strip_prefix("avencas.") {
+        return Box::pin(avencas::despachar(st, resto, params)).await;
     }
     match metodo {
         // ---- públicos ----

@@ -4328,3 +4328,76 @@ async fn ramos_de_actividade() {
     assert!(rpc_err(&st, "artigos.variantes", json!({ "artigo_id": camisa, "eixos": [] })).await.contains("Indique"));
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Avenças: contratos facturados periodicamente; os períodos em atraso saem um a um e nunca em duplicado.
+#[tokio::test]
+async fn avencas_facturacao_periodica() {
+    use chrono::{Datelike, Months};
+    let (st, pasta) = base_com_admin("avencas").await;
+    let hoje = chrono::Local::now().date_naive();
+    let inicio = hoje.with_day(1).unwrap().checked_sub_months(Months::new(2)).unwrap();
+    let servico = rpc(&st, "artigos.guardar", json!({ "descricao": "Contabilidade organizada", "tipo": "S", "taxa_iva_id": 1, "preco1": 15_000_000 })).await["id"].as_i64().unwrap();
+    let cliente = rpc(&st, "entidades.guardar", json!({ "nome": "Padaria Kianda", "nif": "5417111111" })).await["id"].as_i64().unwrap();
+
+    assert!(rpc_err(&st, "avencas.guardar", json!({ "entidade_id": 1, "descricao": "X", "periodicidade": "MENSAL", "proxima": inicio.to_string(), "linhas": [{ "artigo_id": servico, "quantidade": 1 }] }))
+        .await
+        .contains("cliente identificado"));
+    assert!(rpc_err(&st, "avencas.guardar", json!({ "entidade_id": cliente, "descricao": "X", "periodicidade": "SEMANAL", "proxima": inicio.to_string(), "linhas": [{ "artigo_id": servico, "quantidade": 1 }] }))
+        .await
+        .contains("Periodicidade"));
+    assert!(rpc_err(&st, "avencas.guardar", json!({ "entidade_id": cliente, "descricao": "X", "periodicidade": "MENSAL", "proxima": inicio.to_string(), "linhas": [] })).await.contains("serviço"));
+
+    let id = rpc(
+        &st,
+        "avencas.guardar",
+        json!({ "entidade_id": cliente, "descricao": "Contabilidade mensal", "periodicidade": "MENSAL", "proxima": inicio.to_string(),
+                "linhas": [{ "artigo_id": servico, "quantidade": 1, "descricao": "Contabilidade — {periodo}", "desconto": 10 }] }),
+    )
+    .await["id"]
+        .as_i64()
+        .unwrap();
+    let lista = rpc(&st, "avencas.listar", Value::Null).await;
+    let a = &lista.as_array().unwrap()[0];
+    assert_eq!(a["por_facturar"], true);
+    assert_eq!(a["valor"], 15_390_000, "15 000 000 − 10% + IVA 14%");
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["alertas"]["avencas_por_facturar"], 1);
+
+    // três meses em atraso (o de há dois meses, o passado e o actual): três facturas, uma por mês
+    let r = rpc(&st, "avencas.emitir", json!({})).await;
+    let emitidos = r["emitidos"].as_array().unwrap();
+    assert_eq!(emitidos.len(), 3, "{r}");
+    assert!(r["erros"].as_array().unwrap().is_empty());
+    let doc = rpc(&st, "documentos.obter", json!({ "id": emitidos[0]["documento_id"] })).await;
+    assert_eq!(doc["documento"]["tipo_codigo"], "FT");
+    assert_eq!(doc["documento"]["entidade_id"], cliente);
+    let rotulo = emitidos[0]["periodo"].as_str().unwrap().to_string();
+    assert!(doc["linhas"][0]["descricao"].as_str().unwrap().ends_with(&rotulo), "o período vai na linha: {}", doc["linhas"][0]["descricao"]);
+    assert!(doc["documento"]["observacoes"].as_str().unwrap().contains("Contabilidade mensal"));
+    let proxima = rpc(&st, "avencas.listar", Value::Null).await[0]["proxima"].as_str().unwrap().to_string();
+    assert_eq!(proxima, inicio.checked_add_months(Months::new(3)).unwrap().to_string());
+
+    // de novo: nada por facturar (nem em duplicado)
+    let r2 = rpc(&st, "avencas.emitir", json!({ "ids": [id] })).await;
+    assert!(r2["emitidos"].as_array().unwrap().is_empty());
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["alertas"]["avencas_por_facturar"], 0);
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM avenca_emissoes WHERE avenca_id = ? AND documento_id IS NOT NULL").bind(id).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(n, 3);
+
+    // com facturas emitidas, «apagar» só desactiva (fica o histórico)
+    assert_eq!(rpc(&st, "avencas.apagar", json!({ "id": id })).await["desactivada"], true);
+    assert_eq!(rpc(&st, "avencas.listar", Value::Null).await[0]["ativo"], 0);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+#[tokio::test]
+async fn tamanho_do_despachante_temp() {
+    let (st, pasta) = base_com_admin("tamanho").await;
+    let f = super::dispatch(&st, "x", Value::Null);
+    eprintln!("TAMANHO dispatch = {}", std::mem::size_of_val(&f));
+    let g = super::avencas::emitir(&st, serde_json::from_value(json!({})).unwrap());
+    eprintln!("TAMANHO avencas::emitir = {}", std::mem::size_of_val(&g));
+    let h = super::documentos::emitir(&st, serde_json::from_value(json!({"tipo":"FT"})).unwrap());
+    eprintln!("TAMANHO documentos::emitir = {}", std::mem::size_of_val(&h));
+    drop((f, g, h));
+    let _ = std::fs::remove_dir_all(&pasta);
+}

@@ -65,6 +65,7 @@ export const MENU: GrupoMenu[] = [
       { label: "Nota de Encomenda", to: "/documentos/novo/NE", perm: "vendas.proforma" },
       { label: "Orçamento", to: "/documentos/novo/OR", perm: "vendas.proforma" },
       { label: "Guia de Transporte", to: "/documentos/novo/GT", perm: "vendas.fatura" },
+      { label: "Avenças (facturação periódica)", to: "/avencas", perm: "vendas.fatura" },
       { label: "Recibo de Cliente", to: "/recibos/novo", perm: "tesouraria.recibo" },
       { label: "Adiantamento de Cliente", to: "/adiantamentos/novo", perm: "tesouraria.recibo" },
       { label: "Estorno de Recibo", to: "/recibos/estorno", perm: "tesouraria.recibo" },
