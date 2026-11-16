@@ -1335,7 +1335,7 @@ const ARTIGO_SQL: &str = "
                 THEN a.promo_desconto ELSE 0 END AS promo_atual,
            a.qtd_minima, a.qtd_maxima, a.controla_stock, a.permite_negativo, a.controla_lote, a.composto, a.ativo,
            a.custo, a.custo_medio, ?1 AS armazem_id, COALESCE(s.quantidade, 0) AS stock,
-           a.criado_em, a.alterado_em
+           a.atributos, a.criado_em, a.alterado_em
     FROM artigos a
     JOIN taxas_iva t ON t.id = a.taxa_iva_id
     LEFT JOIN unidades u ON u.id = a.unidade_id
@@ -1349,6 +1349,8 @@ fn artigo_json(row: &sqlx::sqlite::SqliteRow, c: &Chave) -> Value {
     let mut v = db::row_json(row);
     booleanos(&mut v, BOOL_ARTIGO);
     custos(&mut v, c);
+    // dados do ramo (ISBN/autor, tamanho/cor, marca/modelo…): objecto, não texto
+    v["atributos"] = v["atributos"].as_str().and_then(|s| serde_json::from_str::<Value>(s).ok()).unwrap_or_else(|| json!({}));
     v
 }
 
@@ -1439,6 +1441,7 @@ const CAMPOS_ARTIGO: &[&str] = &[
     "promo_desconto",
     "promo_inicio",
     "promo_fim",
+    "atributos",
 ];
 
 /// Preço sem IVA (cêntimos) a partir do preço com IVA.

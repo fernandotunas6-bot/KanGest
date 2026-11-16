@@ -83,7 +83,7 @@ export function TecladoPin({ valor, onChange, onConfirmar, ocupado }: { valor: s
           Array.from({ length: valor.length }, (_, i) => <span key={i} className="size-3 rounded-full bg-ink" />)
         )}
       </div>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="kg-teclas grid grid-cols-3 gap-2">
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((k) => (
           <button key={k} type="button" className={base} onClick={() => tecla(k)}>
             {k}

@@ -50,14 +50,14 @@
 }
 /*
  * Telemóveis (< 640 px): as grelhas de 3+ colunas dos ecrãs de gestão passam a 2 colunas e os campos
- * largos (col-span-3+) ocupam a linha inteira. Só dentro da área de conteúdo (<main>): os teclados
- * numéricos e de PIN, que precisam das suas colunas, ficam como estão.
+ * largos (col-span-3+) ocupam a linha inteira — na área de conteúdo (<main>) e nas janelas. Os teclados
+ * numéricos e de PIN (.kg-teclas), que precisam das suas colunas, ficam como estão.
  */
 @media (max-width: 639px) {
-  main :is(.grid-cols-3, .grid-cols-4, .grid-cols-5, .grid-cols-6, .grid-cols-8, .grid-cols-12) {
+  :is(main, [role="dialog"]) :is(.grid-cols-3, .grid-cols-4, .grid-cols-5, .grid-cols-6, .grid-cols-8, .grid-cols-12):not(.kg-teclas) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  main :is(.col-span-3, .col-span-4, .col-span-5, .col-span-6, .col-span-8, .col-span-12) {
+  :is(main, [role="dialog"]) :is(.grid-cols-3, .grid-cols-4, .grid-cols-5, .grid-cols-6, .grid-cols-8, .grid-cols-12):not(.kg-teclas) > :is(.col-span-3, .col-span-4, .col-span-5, .col-span-6, .col-span-8, .col-span-12) {
     grid-column: 1 / -1;
   }
 }

@@ -11,6 +11,8 @@ import { imprimir } from "@/lib/print";
 import { call, descricaoDispositivo, esquecerLigacao, levarFicheiro, ligacaoWeb, MODO_WEB, reiniciar } from "@/lib/api";
 import { instalarPwa, usePwa } from "@/lib/pwa";
 import { qrcode, qrSvgPath } from "@/lib/qrcode";
+import { ramoPorId } from "@/lib/ramos";
+import { EscolherRamo } from "@/components/EscolherRamo";
 import { useTabelas } from "@/lib/hooks";
 import { dataHora, parseKz, toInputKz } from "@/lib/format";
 import type { Empresa, EscPos, Posto, PostoOpcoes, VisorOpcoes } from "@/lib/types";
@@ -60,7 +62,12 @@ export default function Configuracoes() {
           </button>
         ))}
       </div>
-      {aba === "Empresa" && <EmpresaForm />}
+      {aba === "Empresa" && (
+        <div className="space-y-5">
+          <EmpresaForm />
+          <RamoActividade />
+        </div>
+      )}
       {aba === "Postos e impressão" && <Postos />}
       {aba === "Rede" && (MODO_WEB ? <RedeNoBrowser /> : <Rede />)}
       {aba === "Email" && <EmailConfig />}
@@ -1191,6 +1198,62 @@ function gerarChaveRede() {
   const b = crypto.getRandomValues(new Uint8Array(20));
   const c = Array.from(b, (x) => alfabeto[x % alfabeto.length]).join("");
   return c.match(/.{5}/g)!.join("-");
+}
+
+/** Ramo de actividade: muda os dados pedidos nos artigos e alguns comportamentos do POS. */
+function RamoActividade() {
+  const qc = useQueryClient();
+  const tabelas = useTabelas();
+  const pode = useSession((s) => s.tem)("sistema.configuracoes");
+  const [busy, setBusy] = useState(false);
+  const ramo = ramoPorId(tabelas.data?.ramo);
+  const faltam = ramo.familias.filter((f) => !tabelas.data?.familias.some((x) => x.descricao.toLowerCase() === f.toLowerCase()));
+
+  async function escolher(r: string) {
+    if (!pode || r === ramo.id) return;
+    try {
+      await call("ramo.definir", { ramo: r });
+      await qc.invalidateQueries({ queryKey: ["tabelas"] });
+      toast.success(`Ramo de actividade: ${ramoPorId(r).nome}.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+
+  async function criarFamilias() {
+    setBusy(true);
+    try {
+      for (const f of faltam) await call("tabela.guardar", { tabela: "familias", descricao: f });
+      await qc.invalidateQueries({ queryKey: ["tabelas"] });
+      toast.success(`${faltam.length} ${faltam.length === 1 ? "família criada" : "famílias criadas"}.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="max-w-3xl p-6">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-2 font-medium">
+          <ramo.icone className="size-4 text-brand" /> Ramo de actividade
+        </span>
+        {pode && faltam.length > 0 && (
+          <Button size="sm" variant="secondary" loading={busy} onClick={criarFamilias} title={faltam.join(", ")}>
+            <Plus className="size-4" /> Criar famílias sugeridas ({faltam.length})
+          </Button>
+        )}
+      </div>
+      <p className="mb-4 text-[13px] text-ink-3">
+        O ramo decide os dados pedidos em cada artigo (ex.: ISBN e autor numa livraria, tamanho e cor na moda), o que se mostra no POS e as sugestões ao criar artigos.
+        Os dados já guardados nos artigos não se perdem ao mudar de ramo.
+      </p>
+      <fieldset disabled={!pode}>
+        <EscolherRamo valor={ramo.id} onChange={escolher} />
+      </fieldset>
+    </Card>
+  );
 }
 
 /** Endereço para abrir no browser dos telemóveis e tablets, com o código QR para não ter de o escrever. */

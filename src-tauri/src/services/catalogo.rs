@@ -26,6 +26,8 @@ pub async fn tabelas(st: &AppState) -> AppResult<Value> {
         // vendas calculadas a partir do PVP com IVA (Parametrização → Opções de venda)
         "precos_com_iva": super::documentos::precos_com_iva(p).await?,
         "fidelizacao": super::fidelizacao::cfg(p).await?,
+        // ramo de actividade: decide os dados de ramo dos artigos e alguns comportamentos do POS
+        "ramo": super::ramos::ramo(p).await?,
     }))
 }
 
@@ -93,7 +95,8 @@ pub async fn artigos_listar(st: &AppState, f: ArtigosFiltro) -> AppResult<Value>
     let q = format!("%{}%", f.q.unwrap_or_default().trim());
     let sql = format!(
         "{ARTIGO_SELECT}
-         WHERE (a.descricao LIKE ?1 OR a.referencia LIKE ?1 OR IFNULL(a.codigo_barras,'') LIKE ?1)
+         WHERE (a.descricao LIKE ?1 OR a.referencia LIKE ?1 OR IFNULL(a.codigo_barras,'') LIKE ?1
+                OR (a.atributos IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(a.atributos) j WHERE j.type = 'text' AND j.value LIKE ?1)))
            AND (?2 IS NULL OR a.familia_id = ?2)
            AND (?3 = 1 OR a.ativo = 1)
          ORDER BY a.descricao LIMIT ?4"
@@ -361,6 +364,9 @@ pub struct ArtigoIn {
     promo_fim: Option<String>,
     /// Composição do kit: [{componente_id, quantidade}]
     componentes: Option<Vec<ComponenteIn>>,
+    /// Dados do ramo (ISBN/autor, tamanho/cor, marca/modelo…): objecto JSON; `None` mantém os que existem.
+    #[serde(default)]
+    atributos: Option<Value>,
     /// Outros códigos de barras (ex.: embalagens); `None` mantém os que existem.
     #[serde(default)]
     codigos: Option<Vec<CodigoExtraIn>>,
@@ -415,6 +421,17 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
     let tipo = a.tipo.unwrap_or_else(|| "P".into());
     let controla = a.controla_stock.unwrap_or(tipo == "P") && tipo == "P";
     let cobar = a.codigo_barras.filter(|c| !c.trim().is_empty());
+    let atributos = match &a.atributos {
+        Some(v) => Some(super::ramos::validar_atributos(v)?),
+        None => None,
+    };
+    // livraria: o ISBN é o código de barras do livro — confere-se e guarda-se em ISBN-13 (o ISBN-10 antigo converte-se)
+    let cobar = match cobar {
+        Some(c) if super::ramos::parece_isbn(&c) && super::ramos::ramo(&st.pool).await? == "livraria" => {
+            Some(super::ramos::isbn13(&c).ok_or_else(|| AppError::msg(format!("O ISBN {} não é válido (confira os algarismos).", c.trim())))?)
+        }
+        outro => outro,
+    };
 
     let mut tx = crate::db::transacao(&st.pool).await?;
     if let Some(c) = &cobar {
@@ -425,6 +442,15 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
             .await?;
         if let Some(d) = outro {
             return Err(AppError::msg(format!("O código de barras {} já é um código de \"{d}\".", c.trim())));
+        }
+        // o mesmo código de barras (ou ISBN) em dois artigos: o leitor só encontraria um deles
+        let dono: Option<String> = sqlx::query_scalar("SELECT descricao FROM artigos WHERE codigo_barras = ? AND id <> ? LIMIT 1")
+            .bind(c.trim())
+            .bind(a.id.unwrap_or(0))
+            .fetch_optional(&mut *tx)
+            .await?;
+        if let Some(d) = dono {
+            return Err(AppError::msg(format!("O código de barras {} já é do artigo \"{d}\".", c.trim())));
         }
     }
     let referencia = match (a.referencia.filter(|r| !r.trim().is_empty()), a.id) {
@@ -527,6 +553,9 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
                 .execute(&mut *tx)
                 .await?;
         }
+    }
+    if let Some(at) = &atributos {
+        sqlx::query("UPDATE artigos SET atributos = ? WHERE id = ?").bind(at).bind(id).execute(&mut *tx).await?;
     }
     sqlx::query("UPDATE artigos SET pvp1 = ?, pvp2 = ?, pvp3 = ?, pvp4 = ? WHERE id = ?")
         .bind(niveis[0].1)

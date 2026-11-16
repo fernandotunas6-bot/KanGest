@@ -85,7 +85,8 @@ fn comprimivel(tipo: &str) -> bool {
 /// mesmo caminho muda de conteúdo a cada compilação; os embutidos nunca mudam).
 fn gzip(caminho: &str, bytes: &[u8]) -> Arc<Vec<u8>> {
     use std::hash::{Hash, Hasher};
-    static CACHE: OnceLock<Mutex<HashMap<(String, u64), Arc<Vec<u8>>>>> = OnceLock::new();
+    type Cache = Mutex<HashMap<(String, u64), Arc<Vec<u8>>>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut h = std::collections::hash_map::DefaultHasher::new();
     bytes.hash(&mut h);

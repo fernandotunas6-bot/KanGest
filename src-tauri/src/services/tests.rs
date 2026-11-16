@@ -4268,3 +4268,63 @@ async fn volume_tempos() {
     }
     eprintln!("{:<32} {total:>9.1} ms", "TOTAL");
 }
+
+/// Ramos de actividade: dados de ramo nos artigos (pesquisáveis), ISBN na livraria e variantes na moda.
+#[tokio::test]
+async fn ramos_de_actividade() {
+    let (st, pasta) = base_com_admin("ramos").await;
+    assert_eq!(rpc(&st, "ramo.obter", Value::Null).await["ramo"], "comercio", "sem escolha, é comércio geral");
+    assert!(rpc_err(&st, "ramo.definir", json!({ "ramo": "nave-espacial" })).await.contains("desconhecido"));
+
+    // ---- livraria: ISBN-10 passa a ISBN-13, o autor e a editora encontram o livro ----
+    rpc(&st, "ramo.definir", json!({ "ramo": "livraria" })).await;
+    assert_eq!(rpc(&st, "tabelas", Value::Null).await["ramo"], "livraria");
+    let livro = rpc(
+        &st,
+        "artigos.guardar",
+        json!({ "descricao": "Mayombe", "taxa_iva_id": 1, "preco1": 450000, "codigo_barras": "972-20-1290-8",
+                "atributos": { "autor": "Pepetela", "editora": "Dom Quixote", "ano": 1980, "vazio": "" } }),
+    )
+    .await["id"]
+        .as_i64()
+        .unwrap();
+    let a = rpc(&st, "artigos.obter", json!({ "id": livro })).await;
+    assert_eq!(a["codigo_barras"], "9789722012904");
+    let at: Value = serde_json::from_str(a["atributos"].as_str().unwrap()).unwrap();
+    assert_eq!(at, json!({ "autor": "Pepetela", "editora": "Dom Quixote", "ano": 1980 }));
+    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "Livro errado", "taxa_iva_id": 1, "preco1": 1, "codigo_barras": "978-989-52-7385-9" })).await.contains("ISBN"));
+    assert!(
+        rpc_err(&st, "artigos.guardar", json!({ "descricao": "Mayombe (outro)", "taxa_iva_id": 1, "preco1": 1, "codigo_barras": "9789722012904" })).await.contains("já é do artigo"),
+        "o mesmo ISBN não pode ficar em dois artigos"
+    );
+    let achados = rpc(&st, "artigos.listar", json!({ "q": "pepetela" })).await;
+    assert_eq!(achados.as_array().unwrap().len(), 1, "o autor encontra o livro");
+    assert!(rpc(&st, "artigos.listar", json!({ "q": "autor" })).await.as_array().unwrap().is_empty(), "o nome do campo não conta como texto");
+    assert_eq!(rpc(&st, "artigos.codigo", json!({ "codigo": "9789722012904" })).await["id"], livro, "o leitor lê o ISBN");
+    // gravar sem "atributos" mantém os que existem
+    rpc(&st, "artigos.guardar", json!({ "id": livro, "descricao": "Mayombe (bolso)", "taxa_iva_id": 1, "preco1": 450000, "codigo_barras": "9789722012904" })).await;
+    assert!(rpc(&st, "artigos.obter", json!({ "id": livro })).await["atributos"].as_str().unwrap().contains("Pepetela"));
+    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "X", "taxa_iva_id": 1, "preco1": 1, "atributos": { "Autor": "x" } })).await.contains("inválido"));
+
+    // ---- moda: uma camisa em 3 tamanhos × 2 cores = 6 artigos, cada um com o seu stock ----
+    rpc(&st, "ramo.definir", json!({ "ramo": "moda" })).await;
+    let camisa = rpc(&st, "artigos.guardar", json!({ "referencia": "CAM01", "descricao": "Camisa Polo", "taxa_iva_id": 1, "preco1": 1200000, "atributos": { "marca": "Kianda" } }))
+        .await["id"]
+        .as_i64()
+        .unwrap();
+    let eixos = json!([{ "nome": "tamanho", "valores": ["S", "M", "L"] }, { "nome": "cor", "valores": ["Azul marinho", " Branco ", ""] }]);
+    let r = rpc(&st, "artigos.variantes", json!({ "artigo_id": camisa, "eixos": eixos })).await;
+    let criados = r["criados"].as_array().unwrap();
+    assert_eq!(criados.len(), 6);
+    assert_eq!(criados[0]["referencia"], "CAM01-S-AZULMA");
+    assert_eq!(criados[0]["descricao"], "Camisa Polo S / Azul marinho");
+    let v = rpc(&st, "artigos.obter", json!({ "id": criados[5]["id"] })).await;
+    assert_eq!(v["preco1"], 1200000, "a variante herda o preço");
+    let at: Value = serde_json::from_str(v["atributos"].as_str().unwrap()).unwrap();
+    assert_eq!(at, json!({ "marca": "Kianda", "modelo": "CAM01", "tamanho": "L", "cor": "Branco" }));
+    assert_eq!(rpc(&st, "artigos.listar", json!({ "q": "Azul marinho" })).await.as_array().unwrap().len(), 3);
+    let outra = rpc(&st, "artigos.variantes", json!({ "artigo_id": camisa, "eixos": eixos })).await;
+    assert_eq!((outra["criados"].as_array().unwrap().len(), outra["existentes"].as_i64()), (0, Some(6)), "não se repetem");
+    assert!(rpc_err(&st, "artigos.variantes", json!({ "artigo_id": camisa, "eixos": [] })).await.contains("Indique"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}

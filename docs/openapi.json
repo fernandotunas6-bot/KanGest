@@ -241,6 +241,28 @@
           "ativo": {
             "type": "boolean"
           },
+          "atributos": {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "Dados do ramo de actividade (ex.: livraria {autor, editora, ano}; moda {tamanho, cor, modelo}; electrónica {marca, modelo, garantia_meses}).",
+            "example": {
+              "autor": "Pepetela",
+              "editora": "Dom Quixote",
+              "ano": 1980
+            }
+          },
           "custo": {
             "type": "integer",
             "description": "Só com a permissão api.custos."
@@ -421,6 +443,28 @@
           "promo_fim": {
             "type": "string",
             "format": "date"
+          },
+          "atributos": {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "Dados do ramo de actividade (ex.: livraria {autor, editora, ano}; moda {tamanho, cor, modelo}; electrónica {marca, modelo, garantia_meses}).",
+            "example": {
+              "autor": "Pepetela",
+              "editora": "Dom Quixote",
+              "ano": 1980
+            }
           }
         },
         "additionalProperties": false

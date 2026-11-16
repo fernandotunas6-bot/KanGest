@@ -30,6 +30,7 @@ mod ficheiros;
 mod inventario;
 mod ligacao;
 mod quadro;
+mod ramos;
 #[cfg(test)]
 mod tests;
 
@@ -184,6 +185,9 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "stock.listar" => catalogo::stock_listar(st, p(params)?).await,
         "stock.movimentos" => catalogo::stock_movimentos(st, p(params)?).await,
         "stock.recalcular" => catalogo::stock_recalcular(st, p(params)?).await,
+        "artigos.variantes" => ramos::variantes(st, p(params)?).await,
+        "ramo.obter" => ramos::obter(st).await,
+        "ramo.definir" => ramos::definir(st, p(params)?).await,
         "artigos.componentes" => catalogo::artigos_componentes(st, p(params)?).await,
         "lotes.listar" => catalogo::lotes_listar(st, p(params)?).await,
         "moedas.listar" => catalogo::moedas(st).await,

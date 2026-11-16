@@ -4,12 +4,15 @@ import { Building2, DatabaseBackup, ShieldCheck } from "lucide-react";
 import { call } from "@/lib/api";
 import { Button, Card, Field, Input, Select } from "@/components/ui";
 import { Logo } from "@/components/Logo";
+import { EscolherRamo } from "@/components/EscolherRamo";
+import { Store } from "lucide-react";
 import { RestaurarCopia } from "@/pages/Configuracoes";
 
 export default function Setup({ onDone }: { onDone: () => void }) {
   const [e, setE] = useState({ nome: "", nif: "", endereco: "", localidade: "Luanda", provincia: "Luanda", telefone: "", email: "", regime_iva: "GERAL" });
   const [a, setA] = useState({ nome: "Administrador", login: "admin", senha: "", confirmar: "" });
   const [busy, setBusy] = useState(false);
+  const [ramo, setRamo] = useState<string>("comercio");
   // computador novo: restaurar uma cópia de segurança em vez de configurar do zero
   const [copia, setCopia] = useState("");
   const [restaurar, setRestaurar] = useState(false);
@@ -19,7 +22,7 @@ export default function Setup({ onDone }: { onDone: () => void }) {
     if (a.senha !== a.confirmar) return toast.error("As senhas não coincidem.");
     setBusy(true);
     try {
-      await call("setup.inicializar", { empresa: e, admin: { nome: a.nome, login: a.login, senha: a.senha } });
+      await call("setup.inicializar", { empresa: e, admin: { nome: a.nome, login: a.login, senha: a.senha }, ramo });
       toast.success("Sistema configurado. Inicie sessão.");
       onDone();
     } catch (err) {
@@ -72,6 +75,14 @@ export default function Setup({ onDone }: { onDone: () => void }) {
               <Input type="email" value={e.email} onChange={(x) => setE({ ...e, email: x.target.value })} />
             </Field>
           </div>
+        </Card>
+
+        <Card className="mt-5 p-6">
+          <div className="mb-1 flex items-center gap-2 font-semibold">
+            <Store className="size-5 text-brand" /> Ramo de actividade
+          </div>
+          <p className="mb-4 text-[13px] text-ink-3">O KanGest adapta os artigos e o POS ao seu negócio. Pode mudar depois em Configurações → Empresa.</p>
+          <EscolherRamo valor={ramo} onChange={setRamo} />
         </Card>
 
         <Card className="mt-5 p-6">

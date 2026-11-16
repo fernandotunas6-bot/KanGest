@@ -50,6 +50,7 @@ import { AvisoLicenca } from "@/components/AvisoLicenca";
 import { useLicenca } from "@/lib/licenca";
 import { useEmpresa } from "@/components/PrintCabecalho";
 import { useAparencia } from "@/lib/aparencia";
+import { atributosDe, notaDaLinha, ramoPorId, resumoAtributos } from "@/lib/ramos";
 import { abrirVisorEcra, ecraInteiro, linhasVisorColuna, ouvirVisorPronto, publicarVisor, type EstadoVisor } from "@/lib/equipamento";
 
 interface Linha {
@@ -180,6 +181,8 @@ type VendaAberta = {
   origem: { id: number; numero: string } | null;
   pin: string | null;
   cupao: Cupao | null;
+  /** nome dado à venda (ex.: «Mesa 4», «Sr. João») */
+  nome?: string | null;
 };
 const MAX_VENDAS = 12;
 
@@ -234,6 +237,11 @@ export default function Pos() {
   const tactil = useAparencia((a) => a.tactil);
   const [tecladoSistema, setTecladoSistema] = useState(false);
   const [vista, setVista] = useState<"artigos" | "venda">("artigos");
+  // ramo de actividade: dados do artigo no botão, receita médica, n.º de série, mesas com nome
+  const ramo = ramoPorId(tabelas.data?.ramo);
+  const [pedirSerie, setPedirSerie] = useState<{ artigo: Artigo; quantidade: number } | null>(null);
+  const [nomeVenda, setNomeVenda] = useState<string | null>(null);
+  const [renomear, setRenomear] = useState(false);
 
   const caixa = useQuery({ queryKey: ["caixa"], queryFn: () => call<CaixaResumo | null>("caixa.estado") });
   const artigos = useQuery({
@@ -253,7 +261,7 @@ export default function Pos() {
   const totais = useMemo(() => calcular(linhas, descGlobal, comIva), [linhas, descGlobal, comIva]);
   const idx = sel ?? (linhas.length ? linhas.length - 1 : null); // linha activa (seleccionada ou a última)
   const linhaAtiva = idx !== null ? linhas[idx] : null;
-  const algumModal = pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido || pedirCupao;
+  const algumModal = !!pedirSerie || renomear || pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido || pedirCupao;
 
   /** Executa a acção se o operador tiver permissão (e limite de desconto); caso contrário pede o PIN de um supervisor. */
   function comPermissao(permissao: string, descricao: string, acao: () => void, desconto?: number) {
@@ -264,9 +272,9 @@ export default function Pos() {
   }
 
   const adicionar = useCallback(
-    (a: Artigo, quantidade = 1) => {
+    (a: Artigo, quantidade = 1, descricao: string | null = null, separada = false) => {
       setLinhas((ls) => {
-        const i = opcoes.repetir_linhas ? -1 : ls.findIndex((l) => l.artigo.id === a.id && !l.manual);
+        const i = opcoes.repetir_linhas || separada ? -1 : ls.findIndex((l) => l.artigo.id === a.id && !l.manual && l.descricao === descricao);
         if (i >= 0) {
           const n = [...ls];
           n[i] = { ...n[i], quantidade: +(n[i].quantidade + quantidade).toFixed(3) };
@@ -276,12 +284,24 @@ export default function Pos() {
         setSel(ls.length);
         return [
           ...ls,
-          { key: uid(), artigo: a, quantidade, preco: precoNivel(a, cliente.nivel_preco), pvp: pvpNivel(a, cliente.nivel_preco), desconto: Math.max(cliente.desconto || 0, a.promo_atual || 0), descricao: null },
+          { key: uid(), artigo: a, quantidade, preco: precoNivel(a, cliente.nivel_preco), pvp: pvpNivel(a, cliente.nivel_preco), desconto: Math.max(cliente.desconto || 0, a.promo_atual || 0), descricao },
         ];
       });
     },
     [cliente, opcoes.repetir_linhas],
   );
+
+  /** Lança o artigo com as regras do ramo: aviso de receita, n.º de série (uma linha por unidade) e garantia na descrição. */
+  function vender(a: Artigo, quantidade = 1) {
+    const at = atributosDe(a);
+    if (at.receita) toast.warning(`${a.descricao}: sujeito a receita médica — confirme a receita.`, { duration: 7000 });
+    if (at.pede_serie) {
+      setPedirSerie({ artigo: a, quantidade: Math.max(1, Math.round(quantidade)) });
+      return;
+    }
+    const nota = notaDaLinha(a);
+    adicionar(a, quantidade, nota ? `${a.descricao} · ${nota}` : null);
+  }
 
   // Enter no campo de pesquisa: leitor de código de barras / referência. Suporta "3*codigo".
   async function onEnter() {
@@ -294,11 +314,11 @@ export default function Pos() {
       const a = await call<Artigo | null>("artigos.codigo", { codigo });
       if (a) {
         // embalagem (ex.: pack de 12) ou etiqueta de balança: a quantidade vem no código
-        adicionar(a, a.quantidade_lida ? +(quantidade * a.quantidade_lida).toFixed(6) : quantidade);
+        vender(a, a.quantidade_lida ? +(quantidade * a.quantidade_lida).toFixed(6) : quantidade);
         if (a.etiqueta) toast.info(`${a.descricao}: ${a.etiqueta.tipo === "PESO" ? `${qtd(a.etiqueta.valor)} kg` : kz(a.etiqueta.valor)} (etiqueta da balança)`);
         setBusca("");
       } else if (artigos.data?.length === 1) {
-        adicionar(artigos.data[0], quantidade);
+        vender(artigos.data[0], quantidade);
         setBusca("");
       } else {
         toast.warning(`Artigo "${codigo}" não encontrado.`);
@@ -324,13 +344,14 @@ export default function Pos() {
     setCupao(null);
     setOrigem(null);
     setPin(null);
+    setNomeVenda(null);
     focar();
   }
 
   // ---------------- vendas em paralelo (a actual vive nos estados acima; as outras ficam em `abertas`) ----------------
   const [abertas, setAbertas] = useState<(VendaAberta | null)[]>([null]);
   const [atual, setAtual] = useState(0);
-  const fotografia = (): VendaAberta => ({ linhas, sel, cliente, descGlobal, origem, pin, cupao });
+  const fotografia = (): VendaAberta => ({ linhas, sel, cliente, descGlobal, origem, pin, cupao, nome: nomeVenda });
 
   function carregarVenda(v: VendaAberta | null) {
     setLinhas(v?.linhas ?? []);
@@ -340,6 +361,7 @@ export default function Pos() {
     setOrigem(v?.origem ?? null);
     setPin(v?.pin ?? null);
     setCupao(v?.cupao ?? null);
+    setNomeVenda(v?.nome ?? null);
     focar();
   }
 
@@ -361,7 +383,8 @@ export default function Pos() {
   }
 
   function novaVenda() {
-    if (!linhas.length) return toast.info("Esta venda ainda está vazia: use-a.");
+    if (!linhas.length && !ramo.vendasComNome) return toast.info("Esta venda ainda está vazia: use-a.");
+    if (!linhas.length) return setRenomear(true);
     if (abertas.length >= MAX_VENDAS) return toast.error(`No máximo ${MAX_VENDAS} vendas abertas ao mesmo tempo.`);
     const lista = [...abertas];
     lista[atual] = fotografia();
@@ -370,6 +393,11 @@ export default function Pos() {
     setAtual(lista.length - 1);
     carregarVenda(null);
     setVista("artigos");
+    // restauração, salão: cada venda em paralelo é uma mesa / um cliente com nome
+    if (ramo.vendasComNome) {
+      setNomeVenda(`${ramo.vendasComNome} ${lista.length}`);
+      setRenomear(true);
+    }
   }
 
   /** A venda actual acabou (emitida, suspensa ou cancelada): fica uma venda nova no fim; as outras continuam abertas. */
@@ -591,7 +619,13 @@ export default function Pos() {
   useEffect(() => {
     if (recuperado.current || !tabelas.data) return;
     recuperado.current = true;
-    let guardado: { linhas: (LinhaGuardada & { lote?: string | null; manual?: boolean })[]; cliente: number | null; desc_global: DescGlobal; origem: { id: number; numero: string } | null } | null = null;
+    let guardado: {
+      linhas: (LinhaGuardada & { lote?: string | null; manual?: boolean })[];
+      cliente: number | null;
+      desc_global: DescGlobal;
+      origem: { id: number; numero: string } | null;
+      nome?: string | null;
+    } | null = null;
     try {
       guardado = JSON.parse(localStorage.getItem(chaveCarrinho) ?? "null");
     } catch {
@@ -608,6 +642,7 @@ export default function Pos() {
       );
       setDescGlobal(guardado.desc_global ?? { tipo: "pct", valor: 0 });
       setOrigem(guardado.origem ?? null);
+      setNomeVenda(guardado.nome ?? null);
       await carregarCliente(guardado.cliente);
       toast.info(`Recuperada a venda que estava em curso (${guardado.linhas.length} linha(s)).`);
     })().catch(() => undefined);
@@ -625,12 +660,13 @@ export default function Pos() {
             cliente: cliente.id === 1 ? null : cliente.id,
             desc_global: descGlobal,
             origem,
+            nome: nomeVenda,
           }),
         );
     } catch {
       // armazenamento indisponível: a venda continua só em memória
     }
-  }, [linhas, cliente, descGlobal, origem, chaveCarrinho]);
+  }, [linhas, cliente, descGlobal, origem, nomeVenda, chaveCarrinho]);
 
   // ---------------- pagamento ----------------
   function abrirPagamento() {
@@ -993,7 +1029,7 @@ export default function Pos() {
                     <button
                       key={a.id}
                       onClick={() => {
-                        adicionar(a);
+                        vender(a);
                         focar();
                       }}
                       disabled={semStock}
@@ -1001,8 +1037,8 @@ export default function Pos() {
                     >
                       {semStock && <span className="absolute right-2 top-2 rounded-md bg-danger-50 px-1.5 py-0.5 text-[10.5px] font-medium text-danger">Sem stock</span>}
                       <span className="line-clamp-2 text-[13.5px] font-medium leading-snug">{a.descricao}</span>
-                      <span className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink-3">
-                        {a.referencia}
+                      <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] text-ink-3">
+                        <span className="truncate">{resumoAtributos(a, ramo) || a.referencia}</span>
                         {!!a.promo_atual && <span className="rounded bg-accent-50 px-1.5 py-px font-medium text-accent-ink">−{numero(a.promo_atual, 2)}%</span>}
                       </span>
                       <div className="mt-auto flex items-end justify-between gap-2">
@@ -1056,8 +1092,8 @@ export default function Pos() {
                 )}
               </span>
               <span className="min-w-0 leading-tight">
-                <span className="block text-[12px] text-ink-3">
-                  Venda {atual + 1}/{abertas.length} · {qtd(totais.itens)} {totais.itens === 1 ? "item" : "itens"}
+                <span className="block truncate text-[12px] text-ink-3">
+                  {nomeVenda ?? "Venda"} {atual + 1}/{abertas.length} · {qtd(totais.itens)} {totais.itens === 1 ? "item" : "itens"}
                 </span>
                 <span className="num block truncate text-[17px] font-semibold">{kz(totais.total)}</span>
               </span>
@@ -1089,9 +1125,14 @@ export default function Pos() {
             >
               <ChevronLeft className="size-5" />
             </button>
-            <span className="num min-w-[86px] text-center text-[13px] font-medium" aria-live="polite">
-              Venda {atual + 1}/{abertas.length}
-            </span>
+            <button
+              className="num min-w-[86px] max-w-44 truncate rounded-md px-1.5 py-1 text-center text-[13px] font-medium hover:bg-sunken"
+              aria-live="polite"
+              onClick={() => setRenomear(true)}
+              title="Dar um nome a esta venda (mesa, cliente…)"
+            >
+              {nomeVenda ? `${nomeVenda} · ${atual + 1}/${abertas.length}` : `Venda ${atual + 1}/${abertas.length}`}
+            </button>
             <button
               className="grid size-9 place-items-center rounded-lg text-ink-2 hover:bg-sunken disabled:opacity-30"
               disabled={atual >= abertas.length - 1}
@@ -1187,7 +1228,7 @@ export default function Pos() {
                       {idx === i && <span className="absolute inset-y-0 left-0 w-1 bg-brand" />}
                       <div className="flex items-start gap-3">
                         <div className="min-w-0 flex-1">
-                          <div className="truncate font-medium">
+                          <div className="line-clamp-2 break-words font-medium">
                             <span className="num mr-1.5 text-[12px] font-normal text-ink-3">{i + 1}.</span>
                             {l.descricao || l.artigo.descricao}
                           </div>
@@ -1434,10 +1475,46 @@ export default function Pos() {
       />
 
       <TextoModal
+        open={!!pedirSerie}
+        titulo="N.º de série / IMEI"
+        label={pedirSerie ? `${pedirSerie.artigo.descricao}${pedirSerie.quantidade > 1 ? ` (faltam ${pedirSerie.quantidade})` : ""}` : ""}
+        valorInicial=""
+        onConfirm={(v) => {
+          if (!pedirSerie) return;
+          if (!v.trim()) return toast.error("Leia ou escreva o n.º de série (fica na factura).");
+          const { artigo, quantidade } = pedirSerie;
+          adicionar(artigo, 1, `${artigo.descricao} · ${notaDaLinha(artigo, v)}`, true);
+          // uma linha por unidade: cada uma com o seu número
+          setPedirSerie(quantidade > 1 ? { artigo, quantidade: quantidade - 1 } : null);
+          if (quantidade <= 1) focar();
+        }}
+        onClose={() => {
+          setPedirSerie(null);
+          focar();
+        }}
+      />
+
+      <TextoModal
+        open={renomear}
+        titulo={ramo.vendasComNome ? `${ramo.vendasComNome} / nome da venda` : "Nome da venda"}
+        label="Ex.: Mesa 4, Balcão, Sr. João (vazio = sem nome)"
+        valorInicial={nomeVenda ?? ""}
+        onConfirm={(v) => {
+          setNomeVenda(v.trim() || null);
+          setRenomear(false);
+          focar();
+        }}
+        onClose={() => {
+          setRenomear(false);
+          focar();
+        }}
+      />
+
+      <TextoModal
         open={suspender}
         titulo="Suspender documento"
         label="Identificação (cliente, mesa, observação)"
-        valorInicial={cliente.id === 1 ? "" : cliente.nome}
+        valorInicial={nomeVenda ?? (cliente.id === 1 ? "" : cliente.nome)}
         onConfirm={gravarSuspenso}
         onClose={() => { setSuspender(false); focar(); }}
       />
