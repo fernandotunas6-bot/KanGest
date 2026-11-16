@@ -85,7 +85,7 @@ export default function Contabilidade() {
           </div>
         )}
       </Card>
-      <div className="grid grid-cols-[2fr_1fr] gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
         <Card>
           <div className="px-5 pt-4 font-semibold">Lançamentos {isFetching && <span className="text-ink-3">…</span>}</div>
           <Table className="max-h-[60vh]">

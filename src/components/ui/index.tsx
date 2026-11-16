@@ -26,7 +26,8 @@ export const Button = forwardRef<
     disabled={disabled || loading}
     className={cn(
       // os ícones não encolhem quando o botão é estreito (o texto é que se ajusta)
-      "inline-flex items-center justify-center rounded-lg font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap [&>svg]:shrink-0",
+      "kg-btn inline-flex items-center justify-center rounded-lg font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap [&>svg]:shrink-0",
+      size === "sm" && "kg-btn-sm",
       variants[variant],
       sizes[size],
       className,
@@ -40,7 +41,7 @@ export const Button = forwardRef<
 
 // ---------------- Inputs ----------------
 const inputBase =
-  "h-10 w-full rounded-lg border border-line-strong bg-surface px-3 text-ink placeholder:text-ink-3 outline-none transition focus:border-brand focus:ring-3 focus:ring-brand/15 disabled:bg-sunken";
+  "kg-campo h-10 w-full rounded-lg border border-line-strong bg-surface px-3 text-ink placeholder:text-ink-3 outline-none transition focus:border-brand focus:ring-3 focus:ring-brand/15 disabled:bg-sunken";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(({ className, ...p }, ref) => (
   <input ref={ref} className={cn(inputBase, className)} {...p} />
@@ -83,10 +84,10 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
   return (
     <div className="flex flex-wrap items-end justify-between gap-4 pb-5">
       <div>
-        <h1 className="text-[22px] font-semibold tracking-tight text-ink">{title}</h1>
+        <h1 className="text-[20px] font-semibold tracking-tight text-ink sm:text-[22px]">{title}</h1>
         {subtitle && <p className="mt-0.5 text-ink-3">{subtitle}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
@@ -115,16 +116,16 @@ export function Modal({
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim p-6 pt-[6vh] backdrop-blur-[2px]" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim p-2 pt-3 backdrop-blur-[2px] sm:p-6 sm:pt-[6vh]" onMouseDown={onClose}>
       <div role="dialog" aria-modal="true" aria-label={title} className={cn("w-full rounded-2xl border border-line bg-surface shadow-pop", width)} onMouseDown={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-line px-6 py-4">
-          <h2 className="text-[17px] font-semibold">{title}</h2>
+        <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-6 sm:py-4">
+          <h2 className="min-w-0 text-[17px] font-semibold">{title}</h2>
           <button onClick={onClose} className="rounded-md p-1 text-ink-3 hover:bg-sunken hover:text-ink" aria-label="Fechar">
             <X className="size-5" />
           </button>
         </div>
-        <div className="px-6 py-5">{children}</div>
-        {footer && <div className="flex justify-end gap-2 border-t border-line bg-bg/60 px-6 py-4 rounded-b-2xl">{footer}</div>}
+        <div className="px-4 py-4 sm:px-6 sm:py-5">{children}</div>
+        {footer && <div className="flex flex-wrap justify-end gap-2 rounded-b-2xl border-t border-line bg-bg/60 px-4 py-3.5 sm:px-6 sm:py-4">{footer}</div>}
       </div>
     </div>
   );
@@ -238,13 +239,13 @@ export function Stat({
 }) {
   const t = { brand: "bg-brand-50 text-brand", accent: "bg-accent-50 text-accent-ink", danger: "bg-danger-50 text-danger", ok: "bg-ok-50 text-ok" }[tone];
   return (
-    <Card className="p-5">
-      <div className="flex items-start justify-between">
+    <Card className="min-w-0 p-3.5 sm:p-5">
+      <div className="flex items-start justify-between gap-2">
         <span className="text-[13px] text-ink-2">{label}</span>
         {icon && <span className={cn("rounded-lg p-1.5", t)}>{icon}</span>}
       </div>
       <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="text-[24px] font-semibold tracking-tight">{value}</span>
+        <span className="break-words text-[18px] font-semibold tracking-tight sm:text-[24px]">{value}</span>
         {delta}
       </div>
       {hint && <div className="mt-1 text-[12px] text-ink-3">{hint}</div>}

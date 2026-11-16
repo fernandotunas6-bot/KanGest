@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   Banknote,
+  ChevronLeft,
+  ChevronRight,
   CreditCard,
   FileStack,
   FolderOpen,
@@ -12,6 +14,7 @@ import {
   Hash,
   Inbox,
   Keyboard,
+  LayoutGrid,
   Lock,
   LogOut,
   Maximize2,
@@ -24,6 +27,7 @@ import {
   Percent,
   Plus,
   ScanBarcode,
+  ShoppingBasket,
   Star,
   Tag,
   Trash2,
@@ -45,6 +49,7 @@ import { bloquearSessao } from "@/components/Sessao";
 import { AvisoLicenca } from "@/components/AvisoLicenca";
 import { useLicenca } from "@/lib/licenca";
 import { useEmpresa } from "@/components/PrintCabecalho";
+import { useAparencia } from "@/lib/aparencia";
 import { abrirVisorEcra, ecraInteiro, linhasVisorColuna, ouvirVisorPronto, publicarVisor, type EstadoVisor } from "@/lib/equipamento";
 
 interface Linha {
@@ -164,6 +169,20 @@ function calcular(linhas: Linha[], g: DescGlobal, comIva = false) {
 type Teclado = { modo: "qtd" | "preco" | "desc" | "global" } | null;
 type PedidoPin = { permissao: string; descricao: string; desconto?: number; acao: () => void } | null;
 
+type Cupao = { codigo: string; tipo: "PCT" | "VALOR"; valor: number; descricao: string | null };
+
+/** Uma venda em curso (há várias em paralelo: «Venda 2/3», como nos terminais com fila). */
+type VendaAberta = {
+  linhas: Linha[];
+  sel: number | null;
+  cliente: Entidade;
+  descGlobal: DescGlobal;
+  origem: { id: number; numero: string } | null;
+  pin: string | null;
+  cupao: Cupao | null;
+};
+const MAX_VENDAS = 12;
+
 export default function Pos() {
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -199,7 +218,7 @@ export default function Pos() {
   const [verSuspensos, setVerSuspensos] = useState(false);
   const [verProformas, setVerProformas] = useState(false);
   const [pedidoPin, setPedidoPin] = useState<PedidoPin>(null);
-  const [cupao, setCupao] = useState<{ codigo: string; tipo: "PCT" | "VALOR"; valor: number; descricao: string | null } | null>(null);
+  const [cupao, setCupao] = useState<Cupao | null>(null);
   const [pedirCupao, setPedirCupao] = useState(false);
   const [docEmitido, setDocEmitido] = useState<number | null>(null);
   const [impressaoAuto, setImpressaoAuto] = useState<number | null>(null);
@@ -210,6 +229,11 @@ export default function Pos() {
   const [cheio, setCheio] = useState(false);
   const [tecladoEcra, setTecladoEcra] = useState(false);
   const empresa = useEmpresa();
+  // ecrã táctil: a pesquisa fica com o foco (o leitor de códigos escreve nela) sem abrir o teclado do
+  // sistema; abre-se ao tocar no campo. No telemóvel, artigos e venda são dois separadores.
+  const tactil = useAparencia((a) => a.tactil);
+  const [tecladoSistema, setTecladoSistema] = useState(false);
+  const [vista, setVista] = useState<"artigos" | "venda">("artigos");
 
   const caixa = useQuery({ queryKey: ["caixa"], queryFn: () => call<CaixaResumo | null>("caixa.estado") });
   const artigos = useQuery({
@@ -302,6 +326,107 @@ export default function Pos() {
     setPin(null);
     focar();
   }
+
+  // ---------------- vendas em paralelo (a actual vive nos estados acima; as outras ficam em `abertas`) ----------------
+  const [abertas, setAbertas] = useState<(VendaAberta | null)[]>([null]);
+  const [atual, setAtual] = useState(0);
+  const fotografia = (): VendaAberta => ({ linhas, sel, cliente, descGlobal, origem, pin, cupao });
+
+  function carregarVenda(v: VendaAberta | null) {
+    setLinhas(v?.linhas ?? []);
+    setSel(v?.sel ?? null);
+    setCliente(v?.cliente ?? CONSUMIDOR);
+    setDescGlobal(v?.descGlobal ?? { tipo: "pct", valor: 0 });
+    setOrigem(v?.origem ?? null);
+    setPin(v?.pin ?? null);
+    setCupao(v?.cupao ?? null);
+    focar();
+  }
+
+  function irParaVenda(destino: number) {
+    if (destino === atual || destino < 0 || destino >= abertas.length) return;
+    const lista = [...abertas];
+    const v = lista[destino];
+    lista[destino] = null;
+    let alvo = destino;
+    // uma venda vazia não fica à espera
+    if (linhas.length) lista[atual] = fotografia();
+    else {
+      lista.splice(atual, 1);
+      if (alvo > atual) alvo--;
+    }
+    setAbertas(lista);
+    setAtual(alvo);
+    carregarVenda(v);
+  }
+
+  function novaVenda() {
+    if (!linhas.length) return toast.info("Esta venda ainda está vazia: use-a.");
+    if (abertas.length >= MAX_VENDAS) return toast.error(`No máximo ${MAX_VENDAS} vendas abertas ao mesmo tempo.`);
+    const lista = [...abertas];
+    lista[atual] = fotografia();
+    lista.push(null);
+    setAbertas(lista);
+    setAtual(lista.length - 1);
+    carregarVenda(null);
+    setVista("artigos");
+  }
+
+  /** A venda actual acabou (emitida, suspensa ou cancelada): fica uma venda nova no fim; as outras continuam abertas. */
+  function terminarVenda() {
+    limpar();
+    if (abertas.length > 1) {
+      const lista = abertas.filter((_, i) => i !== atual);
+      lista.push(null);
+      setAbertas(lista);
+      setAtual(lista.length - 1);
+      toast.info(`${lista.length - 1} ${lista.length === 2 ? "venda continua aberta" : "vendas continuam abertas"} — use ‹ › para voltar.`);
+    }
+  }
+
+  // As outras vendas abertas ficam guardadas neste aparelho (a actual já se guarda em «venda em curso
+  // gravada», mais abaixo): recarregar a página ou fechar o browser por engano não as perde.
+  const chaveVendas = tabelas.data?.posto ? `kangest.pos.vendas.${tabelas.data.posto.id}.${sessao?.login ?? ""}` : null;
+  const restaurado = useRef<string | null>(null);
+  const abertasRef = useRef(abertas);
+  abertasRef.current = abertas;
+  useEffect(() => {
+    if (!chaveVendas || restaurado.current === chaveVendas) return;
+    restaurado.current = chaveVendas;
+    let g: { abertas: (VendaAberta | null)[]; atual: number } | null = null;
+    try {
+      g = JSON.parse(localStorage.getItem(chaveVendas) ?? "null");
+    } catch {
+      g = null;
+    }
+    if (!g?.abertas?.length) return;
+    const a = Math.min(Math.max(0, g.atual), g.abertas.length - 1);
+    const outras = g.abertas.map((x, i) => (i === a ? null : x));
+    if (!outras.some((v) => v?.linhas.length)) return;
+    (async () => {
+      // os artigos vêm frescos do servidor (stock, lotes); preço, desconto e quantidade ficam os da venda
+      const ids = [...new Set(outras.flatMap((v) => v?.linhas.map((l) => l.artigo.id) ?? []))];
+      const arts = await call<Artigo[]>("artigos.porIds", { ids });
+      const mapa = new Map(arts.map((x) => [x.id, x]));
+      if (abertasRef.current.length !== 1) return; // entretanto já se abriram vendas novas
+      const frescas = outras.map((v) => (v ? { ...v, pin: null, linhas: v.linhas.filter((l) => mapa.has(l.artigo.id)).map((l) => ({ ...l, artigo: mapa.get(l.artigo.id)! })) } : v));
+      setAbertas(frescas);
+      setAtual(a);
+      const n = frescas.filter((v) => v?.linhas.length).length;
+      toast.info(n === 1 ? "Há outra venda aberta à espera (‹ ›)." : `Há ${n} vendas abertas à espera (‹ ›).`);
+    })().catch(() => undefined);
+  }, [chaveVendas]);
+  useEffect(() => {
+    if (!chaveVendas || restaurado.current !== chaveVendas) return;
+    // a autorização do supervisor (PIN) nunca fica gravada
+    const outras = abertas.map((v, i) => (i === atual || !v ? null : { ...v, pin: null }));
+    try {
+      if (outras.some((v) => v?.linhas.length)) localStorage.setItem(chaveVendas, JSON.stringify({ abertas: outras, atual }));
+      else localStorage.removeItem(chaveVendas);
+    } catch {
+      /* armazenamento cheio ou indisponível */
+    }
+  }, [chaveVendas, abertas, atual]);
 
   // ---------------- promoções por regras (o servidor calcula; aplicam-se às linhas não alteradas à mão) ----------------
   const chavePromo = linhas.map((l) => `${l.artigo.id}:${l.quantidade}:${l.manual ? 1 : 0}`).join("|");
@@ -420,7 +545,7 @@ export default function Pos() {
       });
       toast.success("Documento suspenso.");
       setSuspender(false);
-      limpar();
+      terminarVenda();
     } catch (e) {
       toast.error((e as Error).message);
     }
@@ -518,7 +643,8 @@ export default function Pos() {
 
   function aposEmissao(d: DocCompleto) {
     setPagar(false);
-    limpar();
+    terminarVenda();
+    setVista("artigos");
     // o visor mostra o total, o valor recebido e o troco durante uns segundos
     setFimVenda({ documento: d.documento.numero_doc, total: d.documento.total, pago: d.documento.valor_entregue || d.documento.total, troco: d.documento.troco });
     qc.invalidateQueries({ queryKey: ["caixa"] });
@@ -667,6 +793,16 @@ export default function Pos() {
         acoes[e.key]();
         return;
       }
+      if (e.altKey && !e.ctrlKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        e.preventDefault();
+        irParaVenda(atual + (e.key === "ArrowLeft" ? -1 : 1));
+        return;
+      }
+      if (e.altKey && !e.ctrlKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        novaVenda();
+        return;
+      }
       if (termica && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
         e.preventDefault();
         abrirGaveta();
@@ -714,31 +850,33 @@ export default function Pos() {
   return (
     <div className="flex h-full flex-col bg-bg">
       {/* Barra superior */}
-      <header className="flex h-14 shrink-0 items-center gap-4 border-b border-line bg-surface px-4">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface px-2 sm:gap-4 sm:px-4">
         {pode("GESTOR") ? (
-          <Button variant="ghost" size="sm" onClick={() => nav("/")}>
-            <ArrowLeft className="size-4" /> Gestão
+          <Button variant="ghost" size="sm" onClick={() => nav("/")} title="Voltar à gestão" className="max-sm:px-2">
+            <ArrowLeft className="size-4" /> <span className="max-sm:hidden">Gestão</span>
           </Button>
         ) : (
           <Button variant="ghost" size="sm" onClick={() => nav("/documentos")}>
             Documentos
           </Button>
         )}
-        <div className="flex items-center gap-2">
-          <Logo className="size-8" />
+        <div className="flex min-w-0 items-center gap-2">
+          <Logo className="size-8 max-sm:hidden" />
           <span className="hidden whitespace-nowrap font-semibold xl:inline">Ponto de Venda</span>
-          <Badge tone="neutral">{tabelas.data?.posto?.descricao ?? "Posto"}</Badge>
+          <Badge tone="neutral" className="max-w-32 shrink-0 truncate">
+            {tabelas.data?.posto?.descricao ?? "Posto"}
+          </Badge>
         </div>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-1 sm:gap-3">
           {caixa.data ? (
-            <Badge tone="ok">
+            <Badge tone="ok" className="max-sm:hidden">
               <Wallet className="mr-1 size-3.5" /> Caixa aberto · {caixa.data.documentos} vendas
             </Badge>
           ) : (
             <Badge tone="danger">Caixa fechado</Badge>
           )}
-          <Button variant="secondary" size="sm" onClick={() => nav("/caixa")}>
-            Caixa
+          <Button variant="secondary" size="sm" onClick={() => nav("/caixa")} title="Caixa">
+            <Wallet className="size-4 sm:hidden" /> <span className="max-sm:hidden">Caixa</span>
           </Button>
           {modoVisor === "ecra" && (
             <Button
@@ -750,14 +888,14 @@ export default function Pos() {
               <MonitorSmartphone className="size-4" />
             </Button>
           )}
-          <Button variant="ghost" size="sm" onClick={alternarEcraInteiro} title={cheio ? "Sair do ecrã inteiro" : "Ecrã inteiro"}>
+          <Button variant="ghost" size="sm" onClick={alternarEcraInteiro} title={cheio ? "Sair do ecrã inteiro" : "Ecrã inteiro"} className="max-sm:hidden">
             {cheio ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
           </Button>
-          <span className="num hidden text-[13px] text-ink-2 md:inline" title={agora.toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long" })}>
+          <span className="num hidden text-[13px] text-ink-2 lg:inline" title={agora.toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long" })}>
             {agora.toLocaleDateString("pt-PT", { weekday: "short", day: "2-digit", month: "2-digit" })} · <b className="font-semibold text-ink">{agora.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</b>
           </span>
           <span className="flex items-center gap-2 text-[13px] text-ink-2">
-            <span className="grid size-7 place-items-center rounded-full bg-brand text-[12px] font-semibold text-white" title={sessao?.nome}>{sessao?.nome.slice(0, 1).toUpperCase()}</span>
+            <span className="grid size-7 place-items-center rounded-full bg-brand text-[12px] font-semibold text-white max-sm:hidden" title={sessao?.nome}>{sessao?.nome.slice(0, 1).toUpperCase()}</span>
             <span className="hidden max-w-40 truncate xl:inline">{sessao?.nome}</span>
           </span>
           <Button variant="ghost" size="sm" onClick={bloquearSessao} title="Bloquear o posto (retoma-se com a senha ou o PIN; a venda fica como está)">
@@ -772,12 +910,17 @@ export default function Pos() {
 
       <div className="flex min-h-0 flex-1">
         {/* Catálogo */}
-        <section className="flex min-w-0 flex-1 flex-col p-4">
+        <section className={cn("flex min-w-0 flex-1 flex-col p-3 sm:p-4", vista === "venda" && "max-md:hidden")}>
           <div className="relative">
             <ScanBarcode className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-ink-3" />
             <input
               ref={buscaRef}
               autoFocus
+              // no ecrã táctil o teclado do sistema só abre quando se toca no campo
+              inputMode={tactil && !tecladoSistema ? "none" : "search"}
+              enterKeyHint="search"
+              onPointerDown={() => tactil && setTecladoSistema(true)}
+              onBlur={() => setTecladoSistema(false)}
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
               onKeyDown={(e) => {
@@ -788,7 +931,7 @@ export default function Pos() {
                 }
               }}
               placeholder="Ler código de barras ou pesquisar artigo…"
-              className="h-14 w-full rounded-xl border border-line-strong bg-surface pl-12 pr-14 text-[16px] shadow-card outline-none focus:border-brand focus:ring-4 focus:ring-brand/15"
+              className="h-12 w-full rounded-xl border border-line-strong bg-surface pl-12 pr-14 text-[16px] shadow-card outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 sm:h-14"
             />
             <button
               type="button"
@@ -843,7 +986,7 @@ export default function Pos() {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(170px,1fr))]">
                 {artigos.data?.map((a) => {
                   const semStock = a.controla_stock === 1 && a.stock <= 0 && a.permite_negativo !== 1;
                   return (
@@ -854,7 +997,7 @@ export default function Pos() {
                         focar();
                       }}
                       disabled={semStock}
-                      className="group relative flex h-[118px] flex-col rounded-xl border border-line bg-surface p-3 text-left shadow-card transition hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:bg-sunken/60 disabled:hover:translate-y-0 disabled:hover:border-line disabled:hover:shadow-card"
+                      className="group relative flex h-[104px] flex-col rounded-xl border border-line bg-surface p-2.5 text-left sm:h-[118px] sm:p-3 shadow-card transition hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:bg-sunken/60 disabled:hover:translate-y-0 disabled:hover:border-line disabled:hover:shadow-card"
                     >
                       {semStock && <span className="absolute right-2 top-2 rounded-md bg-danger-50 px-1.5 py-0.5 text-[10.5px] font-medium text-danger">Sem stock</span>}
                       <span className="line-clamp-2 text-[13.5px] font-medium leading-snug">{a.descricao}</span>
@@ -886,7 +1029,7 @@ export default function Pos() {
           </div>
 
           {/* Barra de funções (teclas do KIGEST POS) */}
-          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(68px,1fr))] gap-2 [@media(max-height:760px)]:mt-2 [@media(max-height:760px)]:gap-1.5">
+          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(68px,1fr))] gap-2 max-md:hidden [@media(max-height:760px)]:mt-2 [@media(max-height:760px)]:gap-1.5">
             {teclas.map((t) => (
               <button
                 key={t.label}
@@ -900,11 +1043,69 @@ export default function Pos() {
               </button>
             ))}
           </div>
+          {/* telemóvel: a venda em curso fica numa barra em baixo */}
+          <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2 md:hidden">
+            <button
+              onClick={() => setVista("venda")}
+              className="flex min-w-0 items-center gap-2.5 rounded-xl border border-line bg-surface px-3 py-2.5 text-left shadow-card active:scale-[0.99]"
+            >
+              <span className="relative grid size-9 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand">
+                <ShoppingBasket className="size-5" />
+                {linhas.length > 0 && (
+                  <span className="num absolute -right-1.5 -top-1.5 grid min-w-5 place-items-center rounded-full bg-accent px-1 text-[11px] font-semibold text-on-accent">{linhas.length}</span>
+                )}
+              </span>
+              <span className="min-w-0 leading-tight">
+                <span className="block text-[12px] text-ink-3">
+                  Venda {atual + 1}/{abertas.length} · {qtd(totais.itens)} {totais.itens === 1 ? "item" : "itens"}
+                </span>
+                <span className="num block truncate text-[17px] font-semibold">{kz(totais.total)}</span>
+              </span>
+            </button>
+            <Button size="lg" variant="accent" className="h-auto px-5 text-[16px]" onClick={abrirPagamento} disabled={!linhas.length || caixaFechado}>
+              <Banknote className="size-5" /> Pagar
+            </Button>
+          </div>
         </section>
 
         {/* Carrinho */}
-        <aside className="flex w-[420px] shrink-0 flex-col border-l border-line bg-surface">
-          <div className="flex items-center gap-3 border-b border-line px-5 py-3.5">
+        <aside
+          className={cn(
+            "flex w-full shrink-0 flex-col border-line bg-surface md:w-[340px] md:border-l lg:w-[380px] xl:w-[420px]",
+            vista === "artigos" && "max-md:hidden",
+          )}
+        >
+          {/* vendas em paralelo: ‹ Venda 2/3 › e + para abrir outra (Alt+← / Alt+→ / Alt+N) */}
+          <div className="flex items-center gap-1 border-b border-line px-2 py-1.5 sm:px-3">
+            <Button variant="ghost" size="sm" className="px-2 md:hidden" onClick={() => setVista("artigos")} title="Voltar aos artigos">
+              <LayoutGrid className="size-4" /> Artigos
+            </Button>
+            <button
+              className="grid size-9 place-items-center rounded-lg text-ink-2 hover:bg-sunken disabled:opacity-30"
+              disabled={atual === 0}
+              onClick={() => irParaVenda(atual - 1)}
+              aria-label="Venda anterior"
+              title="Venda anterior (Alt+←)"
+            >
+              <ChevronLeft className="size-5" />
+            </button>
+            <span className="num min-w-[86px] text-center text-[13px] font-medium" aria-live="polite">
+              Venda {atual + 1}/{abertas.length}
+            </span>
+            <button
+              className="grid size-9 place-items-center rounded-lg text-ink-2 hover:bg-sunken disabled:opacity-30"
+              disabled={atual >= abertas.length - 1}
+              onClick={() => irParaVenda(atual + 1)}
+              aria-label="Venda seguinte"
+              title="Venda seguinte (Alt+→)"
+            >
+              <ChevronRight className="size-5" />
+            </button>
+            <Button variant="secondary" size="sm" className="ml-auto" onClick={novaVenda} title="Abrir outra venda em paralelo (Alt+N): esta fica à espera">
+              <Plus className="size-4" /> Nova
+            </Button>
+          </div>
+          <div className="flex items-center gap-3 border-b border-line px-3 py-3 sm:px-5 sm:py-3.5">
             <button onClick={() => setEscolherCliente("lista")} className="flex min-w-0 flex-1 items-center gap-3 text-left">
               <div className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-50 text-brand">
                 <UserRound className="size-[18px]" />
@@ -961,7 +1162,7 @@ export default function Pos() {
                     <ScanBarcode className="size-6" />
                   </div>
                   <p className="font-medium text-ink-2">Leia um código de barras ou toque num artigo.</p>
-                  <ul className="mx-auto mt-4 w-fit space-y-1.5 text-left text-[12.5px]">
+                  <ul className={cn("mx-auto mt-4 w-fit space-y-1.5 text-left text-[12.5px]", tactil && "hidden")}>
                     {(
                       [
                         ["Enter", "ler o código (3*código = 3 unidades)"],
@@ -982,7 +1183,7 @@ export default function Pos() {
                 {linhas.map((l, i) => {
                   const c = totais.linhas[i];
                   return (
-                    <li key={l.key} onClick={() => setSel(i)} className={cn("relative cursor-pointer border-b border-line/70 px-5 py-2.5", idx === i && "bg-brand-50/60")}>
+                    <li key={l.key} onClick={() => setSel(i)} className={cn("relative cursor-pointer border-b border-line/70 px-3 py-2.5 sm:px-5", idx === i && "bg-brand-50/60")}>
                       {idx === i && <span className="absolute inset-y-0 left-0 w-1 bg-brand" />}
                       <div className="flex items-start gap-3">
                         <div className="min-w-0 flex-1">
@@ -1068,7 +1269,19 @@ export default function Pos() {
             )}
           </div>
 
-          <div className="border-t border-line bg-bg/50 px-5 py-4">
+          <div className="flex gap-1.5 overflow-x-auto border-t border-line px-2 py-2 md:hidden">
+            {teclas.map((t) => (
+              <button
+                key={t.label}
+                onClick={t.on}
+                className="flex min-w-[72px] shrink-0 flex-col items-center gap-1 rounded-lg border border-line bg-surface px-2 py-2 text-[11px] text-ink-2 active:scale-95"
+              >
+                {t.icon}
+                <span className="whitespace-nowrap leading-tight">{t.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="border-t border-line bg-bg/50 px-3 py-3 sm:px-5 sm:py-4">
             <div className="space-y-1 text-[13px] text-ink-2">
               <Linha2 k={`Subtotal (${qtd(totais.itens)} ${totais.itens === 1 ? "item" : "itens"})`} v={kz(totais.bruto)} />
               {totais.desc > 0 && <Linha2 k="Descontos" v={`\u2212${kz(totais.desc)}`} />}
@@ -1089,7 +1302,7 @@ export default function Pos() {
               <span className="num text-[30px] font-semibold tracking-tight">{kz(totais.total)}</span>
             </div>
             <div className="mt-3 grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-2">
-              <Button variant="secondary" size="lg" className="px-3" onClick={limpar} disabled={!linhas.length} title="Cancelar a venda em curso">
+              <Button variant="secondary" size="lg" className="px-3" onClick={terminarVenda} disabled={!linhas.length} title="Cancelar a venda em curso">
                 <XCircle className="size-4" /> Cancelar
               </Button>
               <Button size="lg" variant="accent" className="text-[16px]" onClick={abrirPagamento} disabled={!linhas.length || caixaFechado} title="Pagamento (F12)">
@@ -1305,7 +1518,7 @@ function TecladoEcra({ onTecla, onEnter, onFechar }: { onTecla: (k: string) => v
 
 function Linha2({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex justify-between">
+    <div className="flex justify-between gap-3">
       <span>{k}</span>
       <span className="num">{v}</span>
     </div>
@@ -1442,10 +1655,10 @@ function Pagamento({
           emitir();
         }}
       >
-        <div className="mb-5 flex items-center justify-between rounded-xl bg-brand-700 px-5 py-4 text-white">
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-brand-700 px-4 py-3 text-white sm:mb-5 sm:px-5 sm:py-4">
           <div>
             <div className="text-[13px] text-white/70">Total a pagar</div>
-            <div className="num text-[32px] font-semibold tracking-tight">{kz(total)}</div>
+            <div className="num text-[26px] font-semibold tracking-tight sm:text-[32px]">{kz(total)}</div>
           </div>
           <div className="text-right text-[13px] text-white/80">
             {cliente.nome}
@@ -1464,14 +1677,14 @@ function Pagamento({
         />
 
         {tipo === "FR" ? (
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid gap-4 sm:grid-cols-2 sm:gap-6">
             {/* uma linha por forma de pagamento: cabe no ecrã sem rolar até ao botão de emitir */}
             <div className="space-y-2">
               {modos
                 // compensação de saldo: só para o cliente identificado que tem crédito (adiantamentos, notas de crédito)
                 .filter((m) => m.codigo !== "CS" || (cliente.id !== 1 && (cliente.credito ?? 0) > 0))
                 .map((m) => (
-                  <label key={m.codigo} className="grid grid-cols-[minmax(0,1fr)_150px] items-center gap-3">
+                  <label key={m.codigo} className="grid grid-cols-[minmax(0,1fr)_minmax(110px,150px)] items-center gap-3">
                     <span className="flex min-w-0 items-center gap-2 text-[13px] text-ink-2">
                       {m.codigo === "NU" ? <Banknote className="size-4 shrink-0 text-ink-3" /> : <CreditCard className="size-4 shrink-0 text-ink-3" />}
                       <span className="line-clamp-2 leading-tight" title={m.descricao}>
@@ -1481,6 +1694,7 @@ function Pagamento({
                     <Input
                       ref={m.codigo === "NU" ? nuRef : undefined}
                       className={cn("num h-9 text-right", m.codigo === "NU" && "font-medium")}
+                      inputMode="decimal"
                       value={valores[m.codigo] ?? ""}
                       placeholder="0,00"
                       onChange={(e) => setValores({ ...valores, [m.codigo]: e.target.value })}

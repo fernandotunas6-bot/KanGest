@@ -48,6 +48,27 @@
   --kg-cab-y: 0.625rem;
   color-scheme: light;
 }
+/*
+ * Telemóveis (< 640 px): as grelhas de 3+ colunas dos ecrãs de gestão passam a 2 colunas e os campos
+ * largos (col-span-3+) ocupam a linha inteira. Só dentro da área de conteúdo (<main>): os teclados
+ * numéricos e de PIN, que precisam das suas colunas, ficam como estão.
+ */
+@media (max-width: 639px) {
+  main :is(.grid-cols-3, .grid-cols-4, .grid-cols-5, .grid-cols-6, .grid-cols-8, .grid-cols-12) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  main :is(.col-span-3, .col-span-4, .col-span-5, .col-span-6, .col-span-8, .col-span-12) {
+    grid-column: 1 / -1;
+  }
+}
+/* Modo táctil (telemóveis, tablets, terminais POS): linhas e alvos com altura para o dedo (≥ 44 px) */
+:root[data-toque="1"] {
+  --kg-celula-y: 0.8rem;
+  --kg-cab-y: 0.7rem;
+}
+:root[data-toque="1"] .kg-btn { min-height: 2.75rem; }
+:root[data-toque="1"] .kg-btn.kg-btn-sm { min-height: 2.5rem; }
+:root[data-toque="1"] .kg-campo { min-height: 2.75rem; }
 :root[data-densidade="compacta"] {
   --kg-celula-y: 0.3125rem;
   --kg-cab-y: 0.4375rem;
@@ -97,6 +118,9 @@
 }
 
 html, body, #root { height: 100%; }
+/* aplicação, não página: sem «puxar para recarregar» (perdia a venda em curso) nem zoom com toque duplo */
+html, body { overscroll-behavior: none; }
+html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 /* iPhone/iPad: campos com letra abaixo de 16px fazem o Safari ampliar a página ao tocar-lhes */
 @supports (-webkit-touch-callout: none) {
   input, select, textarea { font-size: max(16px, 1em) !important; }

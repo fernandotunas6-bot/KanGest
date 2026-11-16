@@ -5,6 +5,17 @@ O KanGest trabalha com o equipamento habitual de um posto de facturação: termi
 ## Terminal táctil
 
 - O POS está desenhado para ecrãs a partir de 1024 × 768 (15″) e funciona também em 1280 × 1024 e 1920 × 1080. Os botões têm pelo menos 44 px, o tamanho de um dedo.
+- **Telemóveis, tablets e terminais Android/iOS** (no browser, [WEB-PWA.md](WEB-PWA.md)): o POS adapta-se ao ecrã. Num
+  telemóvel, os artigos ocupam o ecrã e a venda fica numa barra em baixo («Venda 1/2 · 3 itens · total» e **Pagar**);
+  toca-se na barra para ver e alterar as linhas. Num tablet ou terminal deitado (ex.: Sunmi 1366 × 768) fica como no
+  computador. Em ecrãs estreitos o menu da gestão abre como gaveta (☰).
+- **Modo táctil** (menu do utilizador → *Ecrã táctil*: Automático, Ligado, Desligado): em ecrãs tácteis, botões,
+  campos e linhas das tabelas ficam com altura para o dedo; o campo de pesquisa do POS fica pronto para o leitor
+  de códigos **sem abrir o teclado do sistema** — o teclado só aparece ao tocar no campo.
+- **Vendas em paralelo**: **+ Nova** (Alt+N) abre outra venda e deixa a actual à espera; **‹ ›** (Alt+← / Alt+→)
+  passa de uma para a outra — «Venda 2/3». Quando uma venda é emitida, suspensa ou cancelada, as outras continuam
+  abertas. Ficam guardadas no aparelho: recarregar a página ou fechar o programa por engano não as perde (a
+  autorização do supervisor não fica guardada).
 - **Teclado no ecrã:** o botão do teclado no campo de pesquisa abre um teclado para procurar artigos sem teclado físico. «Adicionar» lança o artigo encontrado.
 - **Ecrã inteiro:** o botão no topo do POS alterna o ecrã inteiro. Para os terminais dedicados, active «Abrir o POS em ecrã inteiro» em **Venda**.
 - Os operadores de caixa entram directamente no POS.

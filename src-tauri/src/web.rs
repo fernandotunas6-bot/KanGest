@@ -81,17 +81,25 @@ fn comprimivel(tipo: &str) -> bool {
     tipo.starts_with("text/") || tipo.contains("json") || tipo.contains("javascript") || tipo.starts_with("image/svg")
 }
 
-/// Versões comprimidas já feitas (os ficheiros não mudam enquanto o programa corre).
+/// Versões comprimidas já feitas, pela impressão digital do conteúdo (numa pasta de desenvolvimento o
+/// mesmo caminho muda de conteúdo a cada compilação; os embutidos nunca mudam).
 fn gzip(caminho: &str, bytes: &[u8]) -> Arc<Vec<u8>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Arc<Vec<u8>>>>> = OnceLock::new();
+    use std::hash::{Hash, Hasher};
+    static CACHE: OnceLock<Mutex<HashMap<(String, u64), Arc<Vec<u8>>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(v) = cache.lock().unwrap().get(caminho) {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    let chave = (caminho.to_string(), h.finish());
+    if let Some(v) = cache.lock().unwrap().get(&chave) {
         return v.clone();
     }
     let mut e = flate2::write::GzEncoder::new(Vec::with_capacity(bytes.len() / 3), flate2::Compression::default());
     let _ = e.write_all(bytes);
     let v = Arc::new(e.finish().unwrap_or_default());
-    cache.lock().unwrap().insert(caminho.to_string(), v.clone());
+    let mut c = cache.lock().unwrap();
+    // versões antigas do mesmo caminho saem (só acontece em desenvolvimento)
+    c.retain(|(k, _), _| k != caminho);
+    c.insert(chave, v.clone());
     v
 }
 

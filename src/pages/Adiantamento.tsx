@@ -63,7 +63,7 @@ export default function Adiantamento() {
           </Button>
         }
       />
-      <div className="grid grid-cols-[minmax(0,1fr)_330px] gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_330px]">
         <Card className="p-5">
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">

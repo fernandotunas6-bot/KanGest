@@ -121,7 +121,7 @@ export default function ConfigRH() {
         </div>
       </div>
 
-      <div className="grid grid-cols-[280px_minmax(0,1fr)] gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
         <Card className="h-fit p-5">
           <div className="mb-4 font-medium">Parâmetros</div>
           <div className="grid grid-cols-1 gap-4">

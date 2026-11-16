@@ -40,6 +40,8 @@ const ATALHOS_POS: [string, string][] = [
   ["Del", "Apagar linha (permissão ou PIN)"],
   ["↑ / ↓", "Mudar de linha"],
   ["Ctrl+G", "Abrir a gaveta (impressora térmica)"],
+  ["Alt+N", "Abrir outra venda em paralelo (a actual fica à espera)"],
+  ["Alt+← / Alt+→", "Passar para a venda anterior / seguinte"],
 ];
 
 const ATALHOS_GESTAO: [string, string][] = [
@@ -139,7 +141,7 @@ export default function Sobre() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
           <Card className="p-6">
             <div className="mb-4 flex items-center gap-2 font-medium">
               <BookOpen className="size-4 text-brand" /> Manual rápido
@@ -278,7 +280,7 @@ function Atualizacoes() {
       <div className="mb-4 flex items-center gap-2 font-medium">
         <RefreshCw className="size-4 text-brand" /> Actualizações
       </div>
-      <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <div className="space-y-3">
           <Field label="Origem (endereço ou pasta partilhada na rede)" hint="Onde está o ficheiro kangest-atualizacao.json, ex.: https://… ou \\SERVIDOR\KanGest">
             <Input disabled={!admin} value={fonte ?? estado?.fonte ?? ""} onChange={(e) => setFonte(e.target.value)} placeholder="https://… ou \\SERVIDOR\KanGest" />

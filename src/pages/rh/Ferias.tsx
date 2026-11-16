@@ -68,7 +68,7 @@ export default function FeriasFaltas() {
           </>
         }
       />
-      <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <Card>
           <div className="border-b border-line px-5 py-3 font-medium">Férias de {ano}</div>
           {!ferias.data?.length ? (

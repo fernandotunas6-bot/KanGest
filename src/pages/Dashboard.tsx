@@ -137,7 +137,7 @@ export default function Dashboard() {
         }
       />
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat
           label="Vendas de hoje"
           value={v(d?.vendas_hoje)}
@@ -188,7 +188,7 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="mt-4 grid grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] gap-4">
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <Card className="p-5">
           <div className="mb-3 flex items-center justify-between">
             <div>
@@ -264,7 +264,7 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-4">
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card className="p-5">
           <div className="mb-1 flex items-baseline justify-between gap-3">
             <div className="font-semibold">Antiguidade de saldos</div>

@@ -136,7 +136,7 @@ export default function FacturacaoElectronica() {
           ))}
         </div>
       )}
-      <div className="grid grid-cols-[minmax(0,1fr)_380px] gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <Card>
           <div className="flex items-center justify-between border-b border-line px-5 py-3">
             <div className="font-medium">Documentos comunicados {filtro && `· ${ESTADOS[filtro as Envio["estado"]].label}`}</div>

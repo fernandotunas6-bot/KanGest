@@ -1553,7 +1553,7 @@ function LigacaoInternet() {
         </p>
       )}
       {f && (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field label="Proxy (opcional)" hint="Ex.: http://10.0.0.1:3128. Vazio: sem proxy próprio">
             <Input value={f.proxy} placeholder="http://endereço:porta" onChange={(x) => setF({ ...f, proxy: x.target.value })} />
           </Field>
