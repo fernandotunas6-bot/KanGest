@@ -1339,7 +1339,7 @@ async fn rede_multiposto() {
     // ---- abre o servidor numa porta livre ----
     let porta = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let arc = std::sync::Arc::new(st);
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta, servidor: String::new(), chave: "segredo123".into(), sal: String::new() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta, servidor: String::new(), chave: "segredo123".into(), sal: String::new(), web: true };
     crate::rede::registar_estado(arc.clone());
     assert!(crate::rede::iniciar_servidor(arc.clone(), &crate::rede::Config { chave: "curta".into(), ..cfg.clone() }).is_err(), "a chave tem de ter 6 caracteres");
     assert_eq!(crate::rede::iniciar_servidor(arc.clone(), &cfg).unwrap(), porta);
@@ -1347,7 +1347,7 @@ async fn rede_multiposto() {
     assert!(!gravado.sal.is_empty(), "o servidor guarda o sal da derivação da chave");
 
     // posto cliente: fala com o servidor pelo protocolo cifrado
-    let cliente = crate::rede::Config { modo: "cliente".into(), porta, servidor: format!("127.0.0.1:{porta}"), chave: "segredo123".into(), sal: String::new() };
+    let cliente = crate::rede::Config { modo: "cliente".into(), porta, servidor: format!("127.0.0.1:{porta}"), chave: "segredo123".into(), sal: String::new(), web: true };
     let pedir_v2 = |token: &str, metodo: &str, params: Value| -> Result<Value, String> {
         crate::rede::pedir_com_token(&cliente, token, metodo, params, posto2, "Caixa 2").map_err(|e| e.to_string())
     };
@@ -1410,6 +1410,56 @@ async fn rede_multiposto() {
     assert_eq!(crate::rede::teste_abrir_resposta(&k, &bruto(&corpo))["ok"], true);
     let repetido = crate::rede::teste_abrir_resposta(&k, &bruto(&corpo));
     assert!(repetido["erro"].as_str().unwrap().contains("repetido"), "{repetido}");
+
+    // ---- modo web: o mesmo servidor entrega a aplicação ao browser (telemóvel, tablet, terminal) ----
+    let js = format!("console.log('{}');", "kangest ".repeat(400));
+    let js_c = js.clone();
+    crate::web::registar(Box::new(move |c: &str| match c {
+        "index.html" => Some((b"<!doctype html><div id=\"root\"></div>".to_vec(), "text/html".into())),
+        "assets/app-Ab12.js" => Some((js_c.clone().into_bytes(), "text/javascript".into())),
+        // como o Tauri: um caminho desconhecido devolve a página inicial
+        _ => Some((b"<!doctype html><div id=\"root\"></div>".to_vec(), "text/html".into())),
+    }));
+    let get = |caminho: &str, cabecalhos: &str| -> (String, Vec<u8>) {
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", porta)).unwrap();
+        s.write_all(format!("GET {caminho} HTTP/1.1\r\nHost: localhost\r\n{cabecalhos}Connection: close\r\n\r\n").as_bytes()).unwrap();
+        let mut r = Vec::new();
+        s.read_to_end(&mut r).unwrap();
+        let corte = r.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        (String::from_utf8_lossy(&r[..corte]).to_string(), r[corte..].to_vec())
+    };
+    let (cab, corpo) = get("/", "Accept: text/html,application/xhtml+xml\r\n");
+    assert!(cab.starts_with("HTTP/1.1 200") && String::from_utf8_lossy(&corpo).contains("id=\"root\""), "{cab}");
+    assert!(cab.contains("Content-Security-Policy: default-src 'self'") && cab.contains("Cache-Control: no-cache") && cab.contains("nosniff"), "{cab}");
+    let (cab, corpo) = get("/assets/app-Ab12.js", "Accept-Encoding: gzip, deflate\r\n");
+    assert!(cab.contains("Content-Encoding: gzip") && cab.contains("immutable") && cab.contains("text/javascript"), "{cab}");
+    let mut aberto = String::new();
+    flate2::read::GzDecoder::new(&corpo[..]).read_to_string(&mut aberto).unwrap();
+    assert_eq!(aberto, js, "o ficheiro comprimido abre igual ao original");
+    assert!(get("/assets/nao-existe.js", "").0.starts_with("HTTP/1.1 404"), "um .js que falta não pode vir como HTML");
+    assert!(get("/../rede.json", "Accept: text/html\r\n").0.starts_with("HTTP/1.1 400"));
+    let (cab, corpo) = get("/rede/info", "Accept: */*\r\n");
+    let info: Value = serde_json::from_slice(&corpo).unwrap();
+    assert!(cab.contains("application/json") && info["web"] == true && info["sal"].as_str().is_some_and(|s| !s.is_empty()), "{info}");
+    // o que mexe na máquina onde corre não se faz a partir de outro posto ou do browser
+    for m in ["rede.estado", "atualizacao.verificar", "sistema.exportar", "internet.estado", "partilha.abrir"] {
+        let e = pedir_v2("t1", m, json!({})).unwrap_err();
+        assert!(e.contains("só se usa no próprio computador"), "{m}: {e}");
+    }
+    // o browser leva o ficheiro que gerou no servidor (e só esse posto o pode levar)
+    pedir_v2("t5", "auth.login", json!({ "login": "admin", "senha": "1234" })).unwrap();
+    let copia = pedir_v2("t5", "sistema.backup", Value::Null).unwrap();
+    let ficheiro = copia["ficheiro"].as_str().unwrap().to_string();
+    let levado = pedir_v2("t5", "ficheiros.descarregar", json!({ "ficheiro": ficheiro })).unwrap();
+    let bytes = B64.decode(levado["base64"].as_str().unwrap()).unwrap();
+    assert_eq!(bytes, std::fs::read(&ficheiro).unwrap());
+    assert!(pedir_v2("t1", "ficheiros.descarregar", json!({ "ficheiro": ficheiro })).unwrap_err().contains("indisponível"), "outro posto não leva o ficheiro");
+    assert!(pedir_v2("t5", "ficheiros.descarregar", json!({ "ficheiro": "/etc/passwd" })).unwrap_err().contains("indisponível"));
+    // escolher o posto a partir de outro aparelho não muda o posto da máquina do servidor
+    let antes = std::fs::read_to_string(pasta.join("posto.json")).ok();
+    assert_eq!(pedir_v2("t5", "posto.selecionar", json!({ "id": posto2 })).unwrap()["id"], posto2);
+    assert_eq!(std::fs::read_to_string(pasta.join("posto.json")).ok(), antes, "o posto escolhido é do aparelho, não do servidor");
+    assert_eq!(arc.posto().id, 1);
 
     // ---- quem erra a chave muitas vezes fica bloqueado uns minutos ----
     for _ in 0..6 {
@@ -2078,7 +2128,7 @@ async fn servidor_demo() {
     // servidor de rede + posto da auditoria já autenticado
     let arc = std::sync::Arc::new(st);
     crate::rede::registar_estado(arc.clone());
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new(), web: true };
     crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
     let cliente = crate::rede::Config { modo: "cliente".into(), servidor: "127.0.0.1:7799".into(), ..cfg.clone() };
     crate::rede::pedir_com_token(&cliente, "auditoria", "auth.login", json!({ "login": "admin", "senha": "1234" }), 1, "Auditoria").expect("entrar");
@@ -2287,7 +2337,7 @@ async fn servidor_base() {
     st.carregar_posto(1).await.unwrap();
     let arc = std::sync::Arc::new(st);
     crate::rede::registar_estado(arc.clone());
-    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new() };
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7799, servidor: String::new(), chave: "auditoria123".into(), sal: String::new(), web: true };
     crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
     let cliente = crate::rede::Config { modo: "cliente".into(), servidor: "127.0.0.1:7799".into(), ..cfg.clone() };
     crate::rede::pedir_com_token(&cliente, "auditoria", "auth.login", json!({ "login": "admin", "senha": "1234" }), 1, "Auditoria").expect("entrar");

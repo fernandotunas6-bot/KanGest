@@ -44,7 +44,10 @@ continua a ser serializada num só lugar — o servidor.
 
 ## Limites e cuidados
 
-- Mesmo cifrada, a porta é para a rede local: **não a exponha à Internet** nem a encaminhe no router.
+- Mesmo cifrada, a porta é para a rede local: **não a exponha à Internet** nem a encaminhe no router. Para trabalhar
+  de fora da loja use o túnel da Cloudflare **com o Access à frente** ([WEB-PWA.md](WEB-PWA.md)).
+- A mesma porta serve a aplicação ao **browser** (telemóveis, tablets, terminais Android, iPad): ver
+  [WEB-PWA.md](WEB-PWA.md). Desliga-se em Configurações → Rede → «Permitir postos pelo browser».
 - **Sem rede não há venda** no posto cliente: os dados estão no servidor. Quem precisa de vender
   sempre deve ficar em modo *Sozinho*.
 - O servidor só abre (ou muda de porta) ao arrancar a aplicação: depois de mudar a porta, feche e

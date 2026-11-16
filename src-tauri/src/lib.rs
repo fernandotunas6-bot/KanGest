@@ -11,6 +11,7 @@ pub mod selo;
 mod services;
 mod smtp;
 mod state;
+mod web;
 pub mod webhooks;
 
 use std::sync::Arc;
@@ -87,6 +88,9 @@ pub fn run() {
                 }
                 Ok::<_, AppError>(())
             })?;
+            // Modo web: o servidor de rede entrega ao browser os mesmos ficheiros da aplicação embutidos aqui.
+            let activos = app.asset_resolver();
+            web::registar(Box::new(move |c: &str| activos.get(c.to_string()).map(|a| (a.bytes, a.mime_type))));
             // Postos em rede: abre o servidor ou liga-se a ele conforme o `rede.json` desta máquina.
             let estado = Arc::new(estado);
             rede::registar_estado(estado.clone());

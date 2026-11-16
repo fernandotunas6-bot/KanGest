@@ -51,6 +51,8 @@ O guia para quem instala (requisitos, qual instalador, postos em rede, actualiza
 está em [docs/BASE-DE-DADOS.md](docs/BASE-DE-DADOS.md).
 A comparação entre o KIGEST e o KanGest (funções e dados) está em [docs/COMPARACAO-KIGEST.md](docs/COMPARACAO-KIGEST.md).
 O equipamento do posto de venda (impressora térmica, gaveta, leitor, visor de cliente, terminal táctil) está em [docs/EQUIPAMENTO-POS.md](docs/EQUIPAMENTO-POS.md).
+O **modo web** (telemóveis e tablets Android e iPhone/iPad, terminais POS Android, outros computadores — no browser, sem
+instalar, e instalável como aplicação PWA) está em [docs/WEB-PWA.md](docs/WEB-PWA.md).
 A **API de integração** (loja online, contabilidade, BI e outras aplicações, com chaves de acesso) está em [docs/API.md](docs/API.md)
 e a especificação OpenAPI em [docs/openapi.json](docs/openapi.json). O estudo do que falta face aos grandes POS está em
 [docs/ANALISE-POS-MERCADO.md](docs/ANALISE-POS-MERCADO.md). A protecção com a Cloudflare (túnel e Access para a API, servidor de

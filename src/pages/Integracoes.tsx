@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Ban, BellRing, Copy, FileJson, KeyRound, Monitor, Network, Pencil, Plug, Plus, RefreshCw, Send, ShieldCheck, Trash2 } from "lucide-react";
-import { call } from "@/lib/api";
+import { call, copiarTexto } from "@/lib/api";
 import { dataHora } from "@/lib/format";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 
@@ -103,7 +103,7 @@ const ESTADOS: Record<ChaveApi["estado"], { label: string; tom: "ok" | "neutral"
 
 async function copiar(texto: string, o_que = "Copiado") {
   try {
-    await navigator.clipboard.writeText(texto);
+    await copiarTexto(texto);
     toast.success(`${o_que}.`);
   } catch {
     toast.error("Não foi possível copiar. Seleccione o texto e copie à mão.");

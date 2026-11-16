@@ -101,6 +101,10 @@ pub async fn selecionar(st: &AppState, s: SelecionarIn) -> AppResult<Value> {
         return Err(AppError::NaoEncontrado);
     }
     let p = st.carregar_posto(s.id).await?;
+    // pedido de outro posto (rede ou browser): o posto é dessa máquina, que o guarda ela própria
+    if crate::state::contexto().is_some() {
+        return Ok(serde_json::to_value(p)?);
+    }
     let ficheiro = st.pasta_dados.join("posto.json");
     std::fs::write(&ficheiro, json!({ "posto_id": s.id }).to_string())
         .map_err(|e| AppError::msg(format!("Não foi possível gravar {}: {e}", ficheiro.display())))?;

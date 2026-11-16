@@ -97,6 +97,14 @@
 }
 
 html, body, #root { height: 100%; }
+/* iPhone/iPad: campos com letra abaixo de 16px fazem o Safari ampliar a página ao tocar-lhes */
+@supports (-webkit-touch-callout: none) {
+  input, select, textarea { font-size: max(16px, 1em) !important; }
+}
+/* telemóveis com recorte (notch) e barra de gestos: o conteúdo fica dentro da zona segura */
+#root {
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
 body {
   margin: 0;
   background: var(--color-bg);

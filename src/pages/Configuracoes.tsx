@@ -8,7 +8,9 @@ import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import EmailConfig from "@/components/EmailConfig";
 import { imprimir } from "@/lib/print";
-import { call, reiniciar } from "@/lib/api";
+import { call, descricaoDispositivo, esquecerLigacao, levarFicheiro, ligacaoWeb, MODO_WEB, reiniciar } from "@/lib/api";
+import { instalarPwa, usePwa } from "@/lib/pwa";
+import { qrcode, qrSvgPath } from "@/lib/qrcode";
 import { useTabelas } from "@/lib/hooks";
 import { dataHora, parseKz, toInputKz } from "@/lib/format";
 import type { Empresa, EscPos, Posto, PostoOpcoes, VisorOpcoes } from "@/lib/types";
@@ -60,7 +62,7 @@ export default function Configuracoes() {
       </div>
       {aba === "Empresa" && <EmpresaForm />}
       {aba === "Postos e impressão" && <Postos />}
-      {aba === "Rede" && <Rede />}
+      {aba === "Rede" && (MODO_WEB ? <RedeNoBrowser /> : <Rede />)}
       {aba === "Email" && <EmailConfig />}
       {aba === "Tabelas" && <Tabelas />}
       {aba === "Sistema" && <Sistema />}
@@ -324,7 +326,7 @@ function Postos() {
   async function usarNestaMaquina(id: number) {
     try {
       await call("posto.selecionar", { id });
-      toast.success("Esta máquina passou a ser este posto.");
+      toast.success(MODO_WEB ? "Este aparelho passou a ser este posto." : "Esta máquina passou a ser este posto.");
       refetch();
       qc.invalidateQueries();
     } catch (e) {
@@ -383,7 +385,7 @@ function Postos() {
                   <>
                     {data.atual.id !== x.id && (
                       <Button size="sm" variant="ghost" onClick={() => usarNestaMaquina(x.id)}>
-                        Usar nesta máquina
+                        {MODO_WEB ? "Usar neste aparelho" : "Usar nesta máquina"}
                       </Button>
                     )}
                     <Button size="sm" variant="secondary" onClick={() => editar(x)}>
@@ -793,6 +795,7 @@ function Sistema() {
     try {
       const r = await call<{ ficheiro: string; externa?: string | null }>(tipo === "agora" ? "sistema.copiaAgora" : "sistema.backup");
       toast.success(tipo === "agora" ? "Cópia de segurança feita e verificada." : "Cópia exportada.", { description: r.externa ?? r.ficheiro, duration: 8000 });
+      if (tipo === "exportar") await levarFicheiro(r.ficheiro);
       refetch();
     } catch (e) {
       toast.error((e as Error).message);
@@ -1169,6 +1172,10 @@ interface EstadoRede {
   chave_curta?: boolean;
   servidor_activo: number | null;
   enderecos: string[];
+  /** O servidor entrega a aplicação ao browser (telemóveis, tablets, terminais). */
+  web: boolean;
+  /** Esta instalação traz a aplicação web (não traz numa versão de desenvolvimento). */
+  web_disponivel: boolean;
   ligados: { posto_id: number; posto: string; utilizador: string | null; endereco: string; ultimo: string; pedidos: number }[];
 }
 
@@ -1184,6 +1191,105 @@ function gerarChaveRede() {
   const b = crypto.getRandomValues(new Uint8Array(20));
   const c = Array.from(b, (x) => alfabeto[x % alfabeto.length]).join("");
   return c.match(/.{5}/g)!.join("-");
+}
+
+/** Endereço para abrir no browser dos telemóveis e tablets, com o código QR para não ter de o escrever. */
+function AcessoBrowser({ r }: { r: EstadoRede }) {
+  const urls = r.enderecos.map((e) => `http://${e}${r.servidor_activo === 80 ? "" : `:${r.servidor_activo}`}/`);
+  const q = urls[0] ? qrcode(urls[0], "M") : null;
+  const lado = q ? q.tamanho + 8 : 0;
+  return (
+    <Card>
+      <div className="flex items-center gap-2 border-b border-line p-4">
+        <MonitorSmartphone className="size-4 text-ink-3" />
+        <span className="font-medium">Abrir no telemóvel, tablet ou terminal</span>
+      </div>
+      {!r.web_disponivel ? (
+        <p className="p-4 text-[13px] text-accent-ink">Esta instalação não traz a aplicação para o browser (versão de desenvolvimento). Use a versão instalada no servidor.</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-6 p-4">
+          {q && (
+            <svg viewBox={`0 0 ${lado} ${lado}`} className="size-40 shrink-0 rounded-lg border border-line" shapeRendering="crispEdges" role="img" aria-label="Código QR do endereço">
+              <rect width={lado} height={lado} fill="#fff" />
+              <path d={qrSvgPath(q)} fill="#000" />
+            </svg>
+          )}
+          <div className="min-w-0 flex-1 space-y-2 text-[13px] text-ink-2">
+            <p>
+              Na mesma rede Wi-Fi, aponte a câmara do aparelho ao código ou escreva no browser:
+              {urls.map((u) => (
+                <b key={u} className="mt-1 block font-mono text-[15px] text-ink">
+                  {u}
+                </b>
+              ))}
+            </p>
+            <p>Depois introduza a chave de rede e o n.º do posto. Os pedidos vão cifrados com a chave, como nos postos instalados.</p>
+            <p className="text-ink-3">
+              Para instalar como aplicação (ícone, ecrã inteiro) e para trabalhar fora da loja, publique este servidor com HTTPS pelo túnel da Cloudflare — ver o guia «Modo web e
+              PWA».
+            </p>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** No browser: este aparelho está ligado a um servidor KanGest (a configuração de rede é a do servidor). */
+function RedeNoBrowser() {
+  const l = ligacaoWeb();
+  const pwa = usePwa();
+  const seguro = window.isSecureContext;
+  return (
+    <div className="max-w-3xl space-y-5">
+      <Card>
+        <div className="flex items-center gap-2 border-b border-line p-4">
+          <MonitorSmartphone className="size-4 text-ink-3" />
+          <span className="font-medium">Este aparelho</span>
+          <Badge tone="ok">ligado ao servidor</Badge>
+        </div>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 p-4 text-[13px]">
+          <dt className="text-ink-3">Servidor</dt>
+          <dd className="font-mono">{l?.base || location.host}</dd>
+          <dt className="text-ink-3">Versão do servidor</dt>
+          <dd>{l?.versao ?? "—"}</dd>
+          <dt className="text-ink-3">Posto</dt>
+          <dd>n.º {l?.posto ?? 1} <span className="text-ink-3">(muda-se em «Postos e impressão» → «Usar neste aparelho»)</span></dd>
+          <dt className="text-ink-3">Aparelho</dt>
+          <dd>{descricaoDispositivo()}</dd>
+          <dt className="text-ink-3">Ligação</dt>
+          <dd>{seguro ? "HTTPS + cifra da rede" : "Rede local (http) + cifra da rede"}</dd>
+        </dl>
+        <div className="flex flex-wrap items-center gap-2 border-t border-line p-4">
+          {pwa === "pode" && (
+            <Button onClick={() => instalarPwa()}>
+              <Plus className="size-4" /> Instalar como aplicação
+            </Button>
+          )}
+          {pwa === "instalada" && <Badge tone="ok">instalado como aplicação</Badge>}
+          <Button variant="secondary" onClick={() => esquecerLigacao()}>
+            Desligar este aparelho
+          </Button>
+        </div>
+        {pwa === "ios" && (
+          <p className="border-t border-line px-4 py-3 text-[12.5px] text-ink-2">
+            No iPhone/iPad: toque em <b>Partilhar</b> e depois em <b>Adicionar ao ecrã principal</b> — o KanGest abre em ecrã inteiro, como uma aplicação.
+          </p>
+        )}
+        {pwa === "nao" && !seguro && (
+          <p className="border-t border-line px-4 py-3 text-[12.5px] text-ink-2">
+            Pelo menu do browser, «Adicionar ao ecrã principal» cria um atalho. A instalação completa como aplicação precisa de HTTPS (túnel da Cloudflare).
+          </p>
+        )}
+      </Card>
+      <Card>
+        <div className="p-4 text-[13px] text-ink-2">
+          A configuração de rede, da Internet e das actualizações faz-se no computador servidor. Neste aparelho, os talões saem pela impressora configurada no posto (de rede,
+          por IP, ou ligada ao servidor) ou pelo diálogo de impressão do browser.
+        </div>
+      </Card>
+    </div>
+  );
 }
 
 /** Vários postos ligados ao mesmo servidor (substitui o SQL Server partilhado do KIGEST). */
@@ -1202,7 +1308,13 @@ function Rede() {
   async function guardar() {
     setBusy(true);
     try {
-      const x = await call<{ aviso: string | null }>("rede.guardar", { modo: v.modo, porta: Number(v.porta) || 7799, servidor: v.servidor ?? "", chave: v.chave ?? "" });
+      const x = await call<{ aviso: string | null }>("rede.guardar", {
+        modo: v.modo,
+        porta: Number(v.porta) || 7799,
+        servidor: v.servidor ?? "",
+        chave: v.chave ?? "",
+        web: v.web,
+      });
       toast.success("Configuração de rede guardada.", { description: x.aviso ?? undefined, duration: x.aviso ? 10000 : 4000 });
       setF(null);
       refetch();
@@ -1283,6 +1395,19 @@ function Rede() {
               segurança desta máquina passam a guardar o trabalho de todos.
             </p>
           )}
+          {v.modo === "servidor" && (
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3 hover:bg-sunken/60">
+              <input type="checkbox" className="mt-1" checked={v.web ?? true} onChange={(e) => set({ web: e.target.checked })} />
+              <div>
+                <div className="flex items-center gap-2 font-medium">
+                  <MonitorSmartphone className="size-4" /> Permitir postos pelo browser
+                </div>
+                <div className="text-[12.5px] text-ink-3">
+                  Telemóveis, tablets, terminais POS Android, iPad e outros computadores abrem o KanGest no browser, sem instalar nada, e entram com a chave de rede.
+                </div>
+              </div>
+            </label>
+          )}
           {v.modo === "cliente" && (
             <p className="text-[12.5px] text-ink-2">
               Os talões e a gaveta continuam a ser desta máquina; tudo o resto (artigos, stock, documentos, caixa) é do servidor. Sem rede, o posto não vende.
@@ -1306,6 +1431,8 @@ function Rede() {
           </div>
         </div>
       </Card>
+
+      {r.modo === "servidor" && r.servidor_activo && r.web && <AcessoBrowser r={r} />}
 
       {r.modo === "servidor" && (
         <Card>

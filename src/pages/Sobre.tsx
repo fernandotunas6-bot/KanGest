@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Link, useSearchParams } from "react-router-dom";
 import { BookOpen, Database, Download, Info, Keyboard, RefreshCw } from "lucide-react";
-import { call } from "@/lib/api";
+import { call, MODO_WEB } from "@/lib/api";
 import { numero } from "@/lib/format";
 import { MENU } from "@/lib/menu";
 import { Button, Card, Field, Input, PageHeader, cn } from "@/components/ui";
@@ -129,7 +129,14 @@ export default function Sobre() {
               </dd>
             </dl>
           </Card>
-          <Atualizacoes />
+          {MODO_WEB ? (
+            <Card className="p-5 text-[13px] text-ink-2">
+              No browser, o KanGest é sempre o do servidor da loja: as actualizações instalam-se no computador servidor (Sobre → Actualizações, lá) e este aparelho
+              recebe-as ao recarregar a página.
+            </Card>
+          ) : (
+            <Atualizacoes />
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4">

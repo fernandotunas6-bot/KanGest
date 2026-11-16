@@ -9,6 +9,7 @@ Guia para quem instala o KanGest num computador da loja ou do escritório. Para 
 |---|---|
 | Windows | Windows 10 ou 11, 64 bits |
 | macOS | macOS 10.15 (Catalina) ou mais recente; Apple Silicon ou Intel |
+| Android, iPhone/iPad, terminais POS Android, Linux | Sem instalador: no browser, ligados a um servidor KanGest da loja ([WEB-PWA.md](WEB-PWA.md)) |
 | Ecrã | Pelo menos 1024 × 680 (o tamanho mínimo da janela; o POS foi verificado em 1024×680, 1280×720, 1366×768 e 1920×1080) |
 | Memória e disco | Recomendado: 4 GB de memória (8 GB no computador que serve os postos em rede) e 1 GB livre para o programa, a base de dados e as cópias de segurança |
 | Internet | Não é precisa para vender. Serve para a licença, as actualizações, a Facturação Electrónica da AGT, o email e a API pela Cloudflare |
@@ -75,6 +76,9 @@ Os dados ficam em `~/Library/Application Support/ao.kigest.app`.
 4. Actualize sempre **primeiro o servidor e depois os postos**: postos e servidor têm de ter a mesma versão.
 
 Pormenores em [REDE.md](REDE.md). A API de integração usa outra porta (7800) e chaves próprias ([API.md](API.md)).
+
+**Telemóveis, tablets e terminais Android/iOS** não instalam nada: no browser, abrem `http://IP-DO-SERVIDOR:7799` (ou o
+código QR em Configurações → Rede, no servidor) e entram com a chave de rede — ver [WEB-PWA.md](WEB-PWA.md).
 
 ## 7. Internet (e proxy)
 

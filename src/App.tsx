@@ -1,6 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes } from "react-router-dom";
-import { call } from "@/lib/api";
+import { call, EVENTO_DESLIGADO, ligacaoWeb, MODO_WEB } from "@/lib/api";
+import LigarWeb from "@/pages/LigarWeb";
 import { useSession } from "@/store/session";
 import type { Sessao } from "@/lib/types";
 import AppShell from "@/components/layout/AppShell";
@@ -54,7 +56,39 @@ import Licenca from "@/pages/Licenca";
 import Integracoes from "@/pages/Integracoes";
 import { EcraBloqueado, MudarSenhaObrigatoria, usePolitica, useInatividade } from "@/components/Sessao";
 
+/** Em desenvolvimento, o browser pode falar com um servidor indicado nas variáveis VITE_RPC_*. */
+const PONTE_DEV = import.meta.env.DEV && !!import.meta.env.VITE_RPC_HTTP;
+const ligadoAgora = () => !MODO_WEB || PONTE_DEV || !!ligacaoWeb();
+
+/** No browser, primeiro liga-se o aparelho ao servidor KanGest (chave de rede); depois tudo igual. */
 export default function App() {
+  const [ligado, setLigado] = useState(ligadoAgora);
+  const qc = useQueryClient();
+  const setSessao = useSession((s) => s.setSessao);
+  useEffect(() => {
+    const f = () => {
+      if (ligadoAgora()) return;
+      setSessao(null);
+      qc.clear();
+      setLigado(false);
+    };
+    window.addEventListener(EVENTO_DESLIGADO, f);
+    return () => window.removeEventListener(EVENTO_DESLIGADO, f);
+  }, [qc, setSessao]);
+  if (!ligado) {
+    return (
+      <LigarWeb
+        onLigado={() => {
+          qc.clear();
+          setLigado(true);
+        }}
+      />
+    );
+  }
+  return <Principal />;
+}
+
+function Principal() {
   const { sessao, setSessao, pode } = useSession();
   const politica = usePolitica();
   useInatividade(politica.data?.inatividade_min ?? 0, !!sessao && !sessao.bloqueada && !sessao.mudar_senha);

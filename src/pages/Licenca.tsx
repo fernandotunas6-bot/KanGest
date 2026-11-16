@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, CheckCircle2, Clock, BadgeCheck, Copy, ExternalLink, KeyRound, MailCheck, RefreshCw, ShieldCheck } from "lucide-react";
-import { call } from "@/lib/api";
+import { call, copiarTexto } from "@/lib/api";
 import { data, dataHora } from "@/lib/format";
 import { NOMES_PLANO, urlPedirLicenca, useLicenca, useSincronizarLicenca, type LicencaEstado, type Sincronizacao } from "@/lib/licenca";
 import { useSession } from "@/store/session";
@@ -145,7 +145,7 @@ export default function Licenca() {
   async function copiar() {
     if (!e) return;
     try {
-      await navigator.clipboard.writeText(e.pedido);
+      await copiarTexto(e.pedido);
       toast.success("Código do pedido copiado.");
     } catch {
       toast.info(`Código do pedido: ${e.pedido}`);

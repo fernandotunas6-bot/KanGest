@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Copy, Mail, MessageCircle } from "lucide-react";
-import { call } from "@/lib/api";
+import { abrirExterno, call, copiarTexto } from "@/lib/api";
 import { Button, Field, Input, Modal } from "./ui";
 
 interface MensagemDoc {
@@ -44,8 +44,7 @@ export default function EnviarDocumento({ id, numero, onClose }: { id: number; n
     try {
       const r = await call<MensagemDoc>("documentos.mensagem", { id, telefone });
       // no posto (aplicação) abre o WhatsApp do sistema; no navegador, um separador novo
-      if ("__TAURI_INTERNALS__" in window) await call("partilha.abrir", { url: r.url });
-      else window.open(r.url, "_blank", "noopener");
+      await abrirExterno(r.url);
       onClose();
     } catch (e) {
       toast.error((e as Error).message);
@@ -56,7 +55,7 @@ export default function EnviarDocumento({ id, numero, onClose }: { id: number; n
 
   async function copiar() {
     try {
-      await navigator.clipboard.writeText(m.data?.texto ?? "");
+      await copiarTexto(m.data?.texto ?? "");
       toast.success("Texto copiado.");
     } catch {
       toast.error("Não foi possível copiar o texto.");
