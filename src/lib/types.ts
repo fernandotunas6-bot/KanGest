@@ -81,6 +81,8 @@ export interface Artigo {
   descricao_curta: string | null;
   /** dados do ramo (ISBN/autor, tamanho/cor, marca/modelo…): texto JSON vindo da base, ou objecto ao gravar */
   atributos?: string | Record<string, string | number | boolean> | null;
+  /** quando a fotografia foi alterada (vazio = sem foto); serve de versão para a cache das miniaturas */
+  foto?: string | null;
   tipo: "P" | "S";
   familia_id: number | null;
   subfamilia_id: number | null;

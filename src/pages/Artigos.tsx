@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, Layers, Package, Plus, Search, Tags, Trash2 } from "lucide-react";
+import { Camera, Copy, Image as ImageIcon, Layers, Package, Plus, Search, Tags, Trash2 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { call } from "@/lib/api";
 import { useDebounce, useTabelas } from "@/lib/hooks";
@@ -11,6 +11,7 @@ import { ArtigoPicker } from "@/components/Pickers";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 import { atributosDe, ramoPorId, resumoAtributos, type Ramo } from "@/lib/ramos";
+import { prepararFoto, useMiniaturas } from "@/lib/fotos";
 import { InputData } from "@/components/InputData";
 
 export default function Artigos() {
@@ -41,6 +42,7 @@ export default function Artigos() {
     queryKey: ["artigos", dq, familia],
     queryFn: () => call<Artigo[]>("artigos.listar", { q: dq, familia_id: familia ? Number(familia) : null, inativos: true }),
   });
+  const miniaturas = useMiniaturas(lista.data);
   const { ordenados, cab } = useOrdenacao(lista.data, (a, k: "ref" | "desc" | "familia" | "iva" | "custo" | "pvp" | "stock") =>
     k === "ref" ? a.referencia : k === "desc" ? a.descricao : k === "familia" ? a.familia : k === "iva" ? a.taxa_pct : k === "custo" ? a.custo_medio : k === "pvp" ? a.preco1_iva : a.tipo === "S" ? null : a.stock,
   );
@@ -126,6 +128,11 @@ export default function Artigos() {
                   }}>
                   <Td className="font-mono text-[12.5px] text-ink-2">{a.referencia}</Td>
                   <Td>
+                    <div className="flex items-start gap-2.5">
+                    {miniaturas[a.id] ? (
+                      <img src={miniaturas[a.id]} alt="" className="size-9 shrink-0 rounded-md border border-line object-cover" loading="lazy" />
+                    ) : null}
+                    <div className="min-w-0">
                     <div className="font-medium">
                       {a.descricao}
                       {!!a.composto && <Badge tone="brand" className="ml-2">Kit</Badge>}
@@ -133,6 +140,8 @@ export default function Artigos() {
                     </div>
                     {resumoAtributos(a, ramo) && <div className="text-[12px] text-ink-2">{resumoAtributos(a, ramo)}</div>}
                     {a.codigo_barras && <div className="font-mono text-[11.5px] text-ink-3">{a.codigo_barras}</div>}
+                    </div>
+                    </div>
                   </Td>
                   <Td className="text-ink-2">{a.familia}</Td>
                   <Td className="num text-right text-ink-2">{a.taxa_pct}%</Td>
@@ -202,6 +211,21 @@ function ArtigoForm({
   // dados do ramo (autor, tamanho, garantia…); os de outros ramos que o artigo já tenha mantêm-se
   const [atrib, setAtrib] = useState<Record<string, string | number | boolean>>(() => atributosDe(inicial));
   const [variantes, setVariantes] = useState(false);
+  // fotografia: a actual (carregada da ficha), a nova escolhida (grava-se com o artigo) ou "apagar"
+  const [fotoAtual, setFotoAtual] = useState<string | null>(null);
+  const [fotoNova, setFotoNova] = useState<{ miniatura: string; imagem: string } | "apagar" | null>(null);
+  useEffect(() => {
+    if (inicial.id && inicial.foto) call<{ imagem: string | null }>("fotos.obter", { artigo_id: inicial.id }).then((r) => setFotoAtual(r.imagem)).catch(() => {});
+  }, [inicial.id, inicial.foto]);
+  async function escolherFoto(f: File | undefined) {
+    if (!f) return;
+    try {
+      setFotoNova(await prepararFoto(f));
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+  const fotoVista = fotoNova === "apagar" ? null : fotoNova?.imagem ?? fotoAtual;
   const taxa = t?.taxas.find((x) => x.id === a.taxa_iva_id)?.percentagem ?? 0;
   // PVP com IVA: o guardado quando bate com o preço sem IVA (é o valor mestre); senão, calculado
   const [pvp, setPvp] = useState(() =>
@@ -257,7 +281,7 @@ function ArtigoForm({
     setBusy(true);
     try {
       const precos = pvp.map((p) => semIva(parseKz(p), taxa));
-      await call("artigos.guardar", {
+      const gravado = await call<{ id: number }>("artigos.guardar", {
         ...a,
         custo: parseKz(custo),
         preco1: precos[0],
@@ -283,6 +307,9 @@ function ArtigoForm({
         codigo_balanca: a.codigo_balanca ?? "",
         atributos: atrib,
       });
+      // a fotografia grava-se depois (o artigo novo só tem número agora)
+      if (fotoNova === "apagar") await call("fotos.apagar", { artigo_id: gravado.id });
+      else if (fotoNova) await call("fotos.guardar", { artigo_id: gravado.id, ...fotoNova });
       toast.success("Artigo guardado.");
       qc.invalidateQueries({ queryKey: ["artigos"] });
       qc.invalidateQueries({ queryKey: ["pos-artigos"] });
@@ -316,6 +343,27 @@ function ArtigoForm({
         </>
       }
     >
+      <div className="mb-4 flex items-center gap-4">
+        <div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-xl border border-dashed border-line-strong bg-sunken">
+          {fotoVista ? <img src={fotoVista} alt="Fotografia do artigo" className="size-full object-cover" /> : <ImageIcon className="size-6 text-ink-3" />}
+        </div>
+        <div className="space-y-1.5">
+          <div className="text-[13px] font-medium">Fotografia</div>
+          <div className="flex flex-wrap gap-2">
+            <label className="kg-btn kg-btn-sm inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 text-[13px] font-medium hover:bg-sunken">
+              <Camera className="size-4" /> {fotoVista ? "Trocar" : "Escolher ou tirar foto"}
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => escolherFoto(e.target.files?.[0])} />
+            </label>
+            {fotoVista && (
+              <Button variant="ghost" size="sm" onClick={() => setFotoNova("apagar")}>
+                Remover
+              </Button>
+            )}
+          </div>
+          <div className="text-[12px] text-ink-3">Aparece na grelha do POS e na loja online (API). Reduzida a 800 px.</div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-4 gap-4">
         <Field label="Descrição" className="col-span-3">
           <Input autoFocus value={a.descricao ?? ""} onChange={(e) => set("descricao", e.target.value)} />

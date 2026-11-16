@@ -952,6 +952,7 @@ pub(crate) const ROTAS: &[(&str, &str)] = &[
     ("POST", "/artigos"),
     ("GET", "/artigos/codigo/{codigo}"),
     ("GET", "/artigos/{id}"),
+    ("GET", "/artigos/{id}/foto"),
     ("PUT", "/artigos/{id}"),
     ("PATCH", "/artigos/{id}"),
     ("GET", "/stock"),
@@ -1099,6 +1100,10 @@ async fn rotear(st: &AppState, c: &Chave, p: &Pedido, segs: &[&str]) -> Res {
             c.exigir("api.artigos")?;
             artigo_codigo(st, c, p, codigo).await
         }
+        ("GET", ["artigos", id, "foto"]) => {
+            c.exigir("api.artigos")?;
+            artigo_foto(st, id).await
+        }
         ("GET", ["artigos", id]) => {
             c.exigir("api.artigos")?;
             artigo(st, c, p, id_de(id)?).await
@@ -1167,6 +1172,24 @@ async fn rotear(st: &AppState, c: &Chave, p: &Pedido, segs: &[&str]) -> Res {
         }
         _ => Err(Resposta::erro(405, "metodo_nao_permitido", format!("O método {} não é aceite em {}.", p.metodo, p.caminho))),
     }
+}
+
+/// Fotografia do artigo (a imagem em si, para a loja online): 404 se não tiver.
+async fn artigo_foto(st: &AppState, id: &str) -> Res {
+    let id: i64 = id.parse().map_err(|_| Resposta::erro(404, "nao_encontrado", "Artigo não encontrado."))?;
+    let d: Option<String> = sqlx::query_scalar("SELECT imagem FROM artigo_fotos WHERE artigo_id = ?")
+        .bind(id)
+        .fetch_optional(&st.pool)
+        .await
+        .map_err(|e| Resposta::erro(500, "erro_interno", e.to_string()))?;
+    let d = d.ok_or_else(|| Resposta::erro(404, "nao_encontrado", "O artigo não tem fotografia."))?;
+    let (tipo, bytes) = services::fotos::abrir_data_url(&d, usize::MAX / 2).map_err(|e| Resposta::erro(500, "erro_interno", e.to_string()))?;
+    let tipo: &'static str = match tipo.as_str() {
+        "image/png" => "image/png",
+        "image/jpeg" => "image/jpeg",
+        _ => "image/webp",
+    };
+    Ok(Resposta { estado: 200, tipo, corpo: bytes, extra: Vec::new(), erro: None })
 }
 
 // ============================== auxiliares das rotas ==============================
@@ -1335,7 +1358,7 @@ const ARTIGO_SQL: &str = "
                 THEN a.promo_desconto ELSE 0 END AS promo_atual,
            a.qtd_minima, a.qtd_maxima, a.controla_stock, a.permite_negativo, a.controla_lote, a.composto, a.ativo,
            a.custo, a.custo_medio, ?1 AS armazem_id, COALESCE(s.quantidade, 0) AS stock,
-           a.atributos, a.criado_em, a.alterado_em
+           a.atributos, EXISTS (SELECT 1 FROM artigo_fotos fo WHERE fo.artigo_id = a.id) AS tem_foto, a.criado_em, a.alterado_em
     FROM artigos a
     JOIN taxas_iva t ON t.id = a.taxa_iva_id
     LEFT JOIN unidades u ON u.id = a.unidade_id
@@ -1343,7 +1366,7 @@ const ARTIGO_SQL: &str = "
     LEFT JOIN subfamilias sf ON sf.id = a.subfamilia_id
     LEFT JOIN stock s ON s.artigo_id = a.id AND s.armazem_id = ?1";
 
-const BOOL_ARTIGO: &[&str] = &["controla_stock", "permite_negativo", "controla_lote", "composto", "ativo"];
+const BOOL_ARTIGO: &[&str] = &["controla_stock", "permite_negativo", "controla_lote", "composto", "ativo", "tem_foto"];
 
 fn artigo_json(row: &sqlx::sqlite::SqliteRow, c: &Chave) -> Value {
     let mut v = db::row_json(row);

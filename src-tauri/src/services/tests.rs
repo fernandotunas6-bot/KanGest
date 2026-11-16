@@ -4401,3 +4401,28 @@ async fn tamanho_do_despachante_temp() {
     drop((f, g, h));
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Fotografias dos artigos: conferidas, miniaturas em lote para o POS e a imagem pela API.
+#[tokio::test]
+async fn fotografias_dos_artigos() {
+    let (st, pasta) = base_com_admin("fotos").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Sumo de múcua", "taxa_iva_id": 1, "preco1": 50000 })).await["id"].as_i64().unwrap();
+    let webp = |extra: &str| format!("data:image/webp;base64,{}", B64.encode([b"RIFF\x10\x00\x00\x00WEBPVP8 ".as_slice(), extra.as_bytes()].concat()));
+    assert!(rpc_err(&st, "fotos.guardar", json!({ "artigo_id": a, "miniatura": "data:image/svg+xml;base64,PHN2Zz4=", "imagem": webp("x") })).await.contains("WebP, JPEG ou PNG"));
+    assert!(rpc_err(&st, "fotos.guardar", json!({ "artigo_id": 9999, "miniatura": webp("m"), "imagem": webp("i") })).await.contains("encontr"));
+    rpc(&st, "fotos.guardar", json!({ "artigo_id": a, "miniatura": webp("m"), "imagem": webp("imagem grande") })).await;
+    let lista = rpc(&st, "artigos.listar", json!({ "q": "múcua" })).await;
+    let versao = lista[0]["foto"].as_str().unwrap().to_string();
+    assert!(!versao.is_empty(), "a lista diz que há foto (e de quando, para a cache)");
+    let m = rpc(&st, "fotos.miniaturas", json!({ "ids": [a, 9999] })).await;
+    assert_eq!(m.as_object().unwrap().len(), 1);
+    assert_eq!(m[a.to_string()], webp("m"));
+    assert_eq!(rpc(&st, "fotos.obter", json!({ "artigo_id": a })).await["imagem"], webp("imagem grande"));
+    // trocar a foto muda a versão; apagar tira-a
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    rpc(&st, "fotos.guardar", json!({ "artigo_id": a, "miniatura": webp("m2"), "imagem": webp("i2") })).await;
+    assert_ne!(rpc(&st, "artigos.listar", json!({ "q": "múcua" })).await[0]["foto"].as_str().unwrap(), versao);
+    rpc(&st, "fotos.apagar", json!({ "artigo_id": a })).await;
+    assert!(rpc(&st, "artigos.listar", json!({ "q": "múcua" })).await[0]["foto"].is_null());
+    let _ = std::fs::remove_dir_all(&pasta);
+}

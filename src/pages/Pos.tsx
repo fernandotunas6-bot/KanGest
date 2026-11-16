@@ -51,6 +51,7 @@ import { useLicenca } from "@/lib/licenca";
 import { useEmpresa } from "@/components/PrintCabecalho";
 import { useAparencia } from "@/lib/aparencia";
 import { atributosDe, notaDaLinha, ramoPorId, resumoAtributos } from "@/lib/ramos";
+import { useMiniaturas } from "@/lib/fotos";
 import { abrirVisorEcra, ecraInteiro, linhasVisorColuna, ouvirVisorPronto, publicarVisor, type EstadoVisor } from "@/lib/equipamento";
 
 interface Linha {
@@ -249,6 +250,7 @@ export default function Pos() {
     queryFn: () => call<Artigo[]>("artigos.listar", { q, familia_id: familia, limite: 120 }),
   });
 
+  const miniaturas = useMiniaturas(artigos.data);
   const focar = () => setTimeout(() => buscaRef.current?.focus(), 30);
   const comIva = !!tabelas.data?.precos_com_iva;
   // fidelização: saldo de pontos do cliente identificado
@@ -1035,8 +1037,11 @@ export default function Pos() {
                       disabled={semStock}
                       className="group relative flex h-[104px] flex-col rounded-xl border border-line bg-surface p-2.5 text-left sm:h-[118px] sm:p-3 shadow-card transition hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:bg-sunken/60 disabled:hover:translate-y-0 disabled:hover:border-line disabled:hover:shadow-card"
                     >
-                      {semStock && <span className="absolute right-2 top-2 rounded-md bg-danger-50 px-1.5 py-0.5 text-[10.5px] font-medium text-danger">Sem stock</span>}
-                      <span className="line-clamp-2 text-[13.5px] font-medium leading-snug">{a.descricao}</span>
+                      {semStock && <span className="absolute right-2 top-2 z-[1] rounded-md bg-danger-50 px-1.5 py-0.5 text-[10.5px] font-medium text-danger">Sem stock</span>}
+                      <span className="flex min-w-0 items-start gap-2">
+                        <span className="line-clamp-2 min-w-0 flex-1 text-[13.5px] font-medium leading-snug">{a.descricao}</span>
+                        {miniaturas[a.id] && <img src={miniaturas[a.id]} alt="" className={cn("size-11 shrink-0 rounded-lg object-cover", semStock && "opacity-50")} loading="lazy" />}
+                      </span>
                       <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] text-ink-3">
                         <span className="truncate">{resumoAtributos(a, ramo) || a.referencia}</span>
                         {!!a.promo_atual && <span className="rounded bg-accent-50 px-1.5 py-px font-medium text-accent-ink">−{numero(a.promo_atual, 2)}%</span>}
