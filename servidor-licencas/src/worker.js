@@ -76,7 +76,7 @@ class Falha extends Error {
 // ------------------------------------------------------------------ protecção
 
 /** Pedidos por IP e por hora. O registo envia emails; a confirmação testa códigos; o painel conta só as falhas. */
-export const LIMITES = { registo: 20, confirmar: 60, renovar: 600, admin: 30 };
+export const LIMITES = { registo: 20, confirmar: 60, renovar: 600, admin: 30, web: 60 };
 const janelaHora = () => new Date().toISOString().slice(0, 13);
 
 /** Conta um pedido do IP (CF-Connecting-IP) e recusa acima do limite. Sem IP (testes locais), não limita. */
@@ -365,16 +365,47 @@ async function confirmar(env, c) {
     ).bind(nif, maquina, t, texto(c.versao, 20) || null),
     env.DB.prepare("DELETE FROM codigos WHERE nif = ? AND maquina = ?").bind(nif, maquina),
   ]);
+  // segredo do computador: só se mostra agora; confirmar de novo (código por email) troca-o
+  const segredo = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  await env.DB.prepare(
+    `INSERT INTO segredos_maquina (nif, maquina, segredo_hash, criado_em) VALUES (?1, ?2, ?3, ?4)
+     ON CONFLICT(nif, maquina) DO UPDATE SET segredo_hash = ?3, criado_em = ?4`,
+  ).bind(nif, maquina, await sha256(`segredo:${segredo}`), t).run();
   cliente = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(nif).first();
-  return { ok: true, ...(await licencaActual(env, cliente, maquina)) };
+  return { ok: true, segredo, ...(await licencaActual(env, cliente, maquina)) };
 }
 
-async function renovar(env, c) {
+/** Comparação em tempo constante (resumos com o mesmo tamanho). */
+function iguais(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let dif = 0;
+  for (let i = 0; i < a.length; i++) dif |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return dif === 0;
+}
+
+/**
+ * Computador registado e com o segredo certo. Os computadores registados antes de haver segredos não o têm:
+ * renovam como antes (`exigir` falso), mas para o acesso pela Internet têm de confirmar de novo o registo.
+ */
+async function autenticarMaquina(env, c, exigir = true) {
   const nif = validarNif(limpaNif(c.nif));
   const maquina = validarMaquina(limpaMaquina(c.maquina));
   const maq = await env.DB.prepare("SELECT bloqueada FROM maquinas WHERE nif = ? AND maquina = ?").bind(nif, maquina).first();
   if (!maq) throw new Falha("Este computador ainda não está registado. Registe-o em Sistema → Licença e Assinatura.", 404);
   if (maq.bloqueada) throw new Falha("Este computador foi bloqueado para este NIF. Contacte o suporte do KanGest.", 403);
+  const s = await env.DB.prepare("SELECT segredo_hash FROM segredos_maquina WHERE nif = ? AND maquina = ?").bind(nif, maquina).first();
+  if (!s) {
+    if (exigir) throw new Falha("Confirme de novo o registo deste computador (Sistema → Licença e Assinatura → Registar) para activar esta função.", 401);
+    return { nif, maquina };
+  }
+  if (!iguais(await sha256(`segredo:${String(c.segredo ?? "")}`), s.segredo_hash)) {
+    throw new Falha("O registo deste computador não é válido. Confirme-o de novo em Sistema → Licença e Assinatura.", 401);
+  }
+  return { nif, maquina };
+}
+
+async function renovar(env, c) {
+  const { nif, maquina } = await autenticarMaquina(env, c, false);
   await env.DB.prepare("UPDATE maquinas SET ultimo_contacto = ?, versao = COALESCE(?, versao) WHERE nif = ? AND maquina = ?")
     .bind(agora(), texto(c.versao, 20) || null, nif, maquina).run();
   const cliente = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(nif).first();
@@ -384,6 +415,111 @@ async function renovar(env, c) {
 async function planosPublicos(env) {
   const { results } = await env.DB.prepare("SELECT codigo, nome, postos, preco_mes, preco_ano FROM planos WHERE activo = 1 ORDER BY ordem").all();
   return { ok: true, moeda: "AOA", planos: results.map((p) => ({ ...p, preco_mes: p.preco_mes / 100, preco_ano: p.preco_ano / 100 })) };
+}
+
+// ------------------------------------------------------------------ acesso pela Internet (subdomínios)
+//
+// Cada empresa escolhe um nome (loja → https://loja.<WEB_DOMINIO>). O servidor cria, em nome do produtor, um túnel da
+// Cloudflare até ao KanGest servidor da loja (http://localhost:<porta>) e o registo DNS; o KanGest recebe o token do
+// túnel e corre o cloudflared. Configuração (docs/CLOUDFLARE.md): WEB_DOMINIO, CF_CONTA, CF_ZONA e o segredo
+// CF_API_TOKEN (Cloudflare Tunnel · Edit na conta, DNS · Edit na zona). Sem ela, o acesso web diz que não está disponível.
+
+const NOMES_RESERVADOS = new Set(["www", "api", "app", "admin", "painel", "licencas", "kangest", "mail", "email", "smtp", "ftp", "ns1", "ns2",
+  "suporte", "ajuda", "site", "status", "demo", "teste", "dev", "blog", "loja", "cdn", "static", "web", "portal", "login", "conta"]);
+
+function validarNome(v) {
+  const nome = String(v ?? "").trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/.test(nome) || nome.includes("--")) {
+    throw new Falha("O nome tem de ter 3 a 30 letras minúsculas, algarismos ou hífenes (sem começar nem acabar em hífen).");
+  }
+  if (NOMES_RESERVADOS.has(nome)) throw new Falha(`O nome «${nome}» está reservado. Escolha outro (por exemplo, o nome da empresa).`);
+  return nome;
+}
+
+const webConfigurado = (env) => Boolean(env.WEB_DOMINIO && env.CF_CONTA && env.CF_ZONA && env.CF_API_TOKEN);
+
+/** Pedido à API da Cloudflare com o token do produtor. Devolve o `result`; os erros passam a Falha 502. */
+async function cf(env, metodo, caminho, corpo) {
+  const r = await fetch("https://api.cloudflare.com/client/v4" + caminho, {
+    method: metodo,
+    headers: { authorization: `Bearer ${env.CF_API_TOKEN}`, "content-type": "application/json" },
+    body: corpo === undefined ? undefined : JSON.stringify(corpo),
+  });
+  let d = null;
+  try { d = await r.json(); } catch { /* em baixo */ }
+  if (!r.ok || !d?.success) {
+    const msg = d?.errors?.map((e) => `${e.code}: ${e.message}`).join("; ") || `HTTP ${r.status}`;
+    throw new Falha(`A Cloudflare recusou o pedido (${msg}). Tente mais tarde ou contacte o suporte do KanGest.`, 502);
+  }
+  return d.result;
+}
+
+async function webEstado(env, c) {
+  const { nif, maquina } = await autenticarMaquina(env, c);
+  const s = await env.DB.prepare("SELECT * FROM subdominios WHERE nif = ?").bind(nif).first();
+  return {
+    ok: true,
+    disponivel: webConfigurado(env),
+    dominio: env.WEB_DOMINIO || null,
+    nome: s?.nome ?? null,
+    endereco: s ? `https://${s.nome}.${env.WEB_DOMINIO}` : null,
+    neste_computador: s ? s.maquina === maquina : null,
+  };
+}
+
+async function webActivar(env, c) {
+  const { nif, maquina } = await autenticarMaquina(env, c);
+  if (!webConfigurado(env)) throw new Falha("O acesso pela Internet ainda não está disponível. Contacte o suporte do KanGest.", 503);
+  const cliente = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(nif).first();
+  if (!cliente || estadoCliente(cliente) === "EXPIRADA") {
+    throw new Falha("A assinatura terminou: renove-a para activar o acesso pela Internet.", 402);
+  }
+  const nome = validarNome(c.nome);
+  const porta = Number(c.porta ?? 7799);
+  if (!Number.isInteger(porta) || porta < 1024 || porta > 65535) throw new Falha("Porta inválida.");
+  const existente = await env.DB.prepare("SELECT * FROM subdominios WHERE nif = ?").bind(nif).first();
+  if (existente && existente.maquina !== maquina) {
+    throw new Falha(`O acesso pela Internet desta empresa está activo noutro computador (${existente.maquina}). Desactive-o primeiro.`, 409);
+  }
+  const dono = await env.DB.prepare("SELECT nif FROM subdominios WHERE nome = ?").bind(nome).first();
+  if (dono && dono.nif !== nif) throw new Falha(`O endereço ${nome}.${env.WEB_DOMINIO} já está em uso. Escolha outro nome.`, 409);
+
+  const conta = `/accounts/${env.CF_CONTA}`;
+  const host = `${nome}.${env.WEB_DOMINIO}`;
+  const tunel = existente?.tunel_id ?? (await cf(env, "POST", `${conta}/cfd_tunnel`, { name: `kangest-${nif}-${Date.now()}`, config_src: "cloudflare" })).id;
+  await cf(env, "PUT", `${conta}/cfd_tunnel/${tunel}/configurations`, {
+    config: { ingress: [{ hostname: host, service: `http://localhost:${porta}` }, { service: "http_status:404" }] },
+  });
+  let dns = existente?.dns_id ?? null;
+  if (!existente || existente.nome !== nome || !dns) {
+    const novo = await cf(env, "POST", `/zones/${env.CF_ZONA}/dns_records`, {
+      type: "CNAME", name: host, content: `${tunel}.cfargotunnel.com`, proxied: true, ttl: 1, comment: `KanGest NIF ${nif}`,
+    });
+    if (dns) await cf(env, "DELETE", `/zones/${env.CF_ZONA}/dns_records/${dns}`).catch(() => {});
+    dns = novo.id;
+  }
+  const token = await cf(env, "GET", `${conta}/cfd_tunnel/${tunel}/token`);
+  const t = agora();
+  await env.DB.prepare(
+    `INSERT INTO subdominios (nif, nome, maquina, tunel_id, dns_id, porta, criado_em, actualizado_em) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+     ON CONFLICT(nif) DO UPDATE SET nome = ?2, maquina = ?3, tunel_id = ?4, dns_id = ?5, porta = ?6, actualizado_em = ?7`,
+  ).bind(nif, nome, maquina, tunel, dns, porta, t).run();
+  return { ok: true, nome, endereco: `https://${host}`, token };
+}
+
+/** Desliga o acesso pela Internet. Qualquer computador registado da empresa o pode fazer (ex.: o servidor avariou). */
+async function webDesactivar(env, c) {
+  const { nif } = await autenticarMaquina(env, c);
+  const s = await env.DB.prepare("SELECT * FROM subdominios WHERE nif = ?").bind(nif).first();
+  if (!s) return { ok: true, mensagem: "O acesso pela Internet já estava desligado." };
+  if (webConfigurado(env)) {
+    const conta = `/accounts/${env.CF_CONTA}`;
+    if (s.dns_id) await cf(env, "DELETE", `/zones/${env.CF_ZONA}/dns_records/${s.dns_id}`).catch(() => {});
+    await cf(env, "DELETE", `${conta}/cfd_tunnel/${s.tunel_id}/connections`).catch(() => {});
+    await cf(env, "DELETE", `${conta}/cfd_tunnel/${s.tunel_id}`).catch(() => {});
+  }
+  await env.DB.prepare("DELETE FROM subdominios WHERE nif = ?").bind(nif).run();
+  return { ok: true, mensagem: `O endereço ${s.nome}.${env.WEB_DOMINIO ?? ""} foi desligado.` };
 }
 
 // ------------------------------------------------------------------ painel do produtor
@@ -562,6 +698,13 @@ async function tratar(req, env) {
   if (m === "POST" && caminho === "/v1/renovar") {
     await limitar(env, req, "renovar");
     return json(await renovar(env, await corpoJson(req)));
+  }
+  if (m === "POST" && caminho.startsWith("/v1/web/")) {
+    const f = { estado: webEstado, activar: webActivar, desactivar: webDesactivar }[caminho.slice("/v1/web/".length)];
+    if (f) {
+      await limitar(env, req, "web");
+      return json(await f(env, await corpoJson(req)));
+    }
   }
 
   // painel: Cloudflare Access (se configurado) e, na API, o token; as falhas contam por IP

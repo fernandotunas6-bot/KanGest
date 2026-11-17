@@ -3,6 +3,7 @@
 
     CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… python3 scripts/publicar-licencas.py [--segredos] [--email-api CHAVE --remetente "KanGest <licencas@dominio>"]
         [--access-equipa empresa.cloudflareaccess.com --access-aud <AUD>]   (Cloudflare Access à frente do painel; docs/CLOUDFLARE.md)
+        [--web-dominio kangest.ao --web-token <TOKEN>]   (acesso pela Internet por subdomínios; docs/CLOUDFLARE.md)
 
 Na primeira vez: cria a base D1 «kangest-licencas», aplica o schema.sql, envia o Worker com os segredos e liga o
 endereço *.workers.dev. Nas seguintes: aplica o schema (só cria o que falta) e envia o código, mantendo os segredos.
@@ -118,6 +119,16 @@ def main():
             sys.exit("Indique --access-equipa e --access-aud juntos.")
         segredos["ACCESS_EQUIPA"] = equipa
         segredos["ACCESS_AUD"] = aud
+    # acesso pela Internet (docs/CLOUDFLARE.md): domínio dos subdomínios e token com «Cloudflare Tunnel · Edit»
+    # (conta) e «DNS · Edit» (zona do domínio); a zona descobre-se pelo domínio
+    if opc("--web-dominio") is not None or opc("--web-token") is not None:
+        dominio, token_web = (opc("--web-dominio") or "").strip().lower(), (opc("--web-token") or "").strip()
+        if not dominio or not token_web:
+            sys.exit("Indique --web-dominio e --web-token juntos.")
+        zonas = api("GET", f"/zones?name={dominio}", token)
+        if not zonas:
+            sys.exit(f"O domínio {dominio} não está nesta conta da Cloudflare.")
+        segredos.update({"WEB_DOMINIO": dominio, "CF_CONTA": conta, "CF_ZONA": zonas[0]["id"], "CF_API_TOKEN": token_web})
     for nome, valor in segredos.items():
         api("PUT", f"/accounts/{conta}/workers/scripts/{NOME}/secrets", token, {"name": nome, "text": valor, "type": "secret_text"})
     if segredos:

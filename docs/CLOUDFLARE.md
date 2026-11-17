@@ -87,7 +87,34 @@ bloqueio por chaves erradas; o Access tem o seu próprio registo (Zero Trust →
    O painel passa a abrir em `https://licencas.kangest.ao/admin` depois de entrar pelo Access; pelo endereço
    `workers.dev` deixa de abrir.
 
-## 3. Site
+## 3. Acesso pela Internet com endereço do KanGest (subdomínios)
+
+O KanGest de cada cliente pode ter `https://<nome>.<domínio do KanGest>` ([WEB-PWA.md](WEB-PWA.md)). O servidor de
+licenças cria os túneis e os registos DNS em nome do produtor (`/v1/web/estado`, `/v1/web/activar`,
+`/v1/web/desactivar`), só para computadores registados com o seu segredo e com a assinatura em dia.
+
+**Para activar (uma vez):**
+
+1. Ponha o domínio do KanGest (ex.: `kangest.ao`) na Cloudflare, na mesma conta do servidor de licenças.
+2. **My Profile → API Tokens → Create token** com **Account · Cloudflare Tunnel · Edit** (a conta) e
+   **Zone · DNS · Edit** (só a zona do domínio).
+3. Publique o servidor de licenças com o domínio e o token:
+
+   ```bash
+   CLOUDFLARE_API_TOKEN=… python3 scripts/publicar-licencas.py --web-dominio kangest.ao --web-token <TOKEN>
+   ```
+
+   Ficam como segredos do Worker: `WEB_DOMINIO`, `CF_CONTA`, `CF_ZONA` e `CF_API_TOKEN`. Sem eles, o KanGest
+   mostra que o endereço próprio ainda não está disponível.
+4. Recomendado na zona: **WAF → Rate limiting** em `/rpc` (ex.: 600 pedidos por minuto por IP), **Bot Fight Mode**,
+   **Always Use HTTPS** e TLS mínimo 1.2. O Cloudflare Access gratuito conta lugares por utilizador na conta toda
+   (50), por isso não se põe à frente de cada cliente: a entrada é a do KanGest (chave de rede, utilizador e senha).
+
+Nomes reservados (`www`, `api`, `admin`, `licencas`, `loja`…) estão em `servidor-licencas/src/worker.js`. Um nome é
+de uma só empresa; uma empresa tem um só endereço, no computador onde o activou (para o mudar de computador,
+desliga-se primeiro, de qualquer computador registado da empresa).
+
+## 4. Site
 
 - `python3 scripts/gerar-site.py` gera `site/_headers` com a CSP (o hash SHA-256 do script de configuração em linha,
   o formsubmit.co dos formulários e a Web Analytics da Cloudflare), HSTS, `X-Frame-Options: DENY`, `nosniff`,
@@ -100,7 +127,7 @@ bloqueio por chaves erradas; o Access tem o seu próprio registo (Zero Trust →
   «Account · Account Settings · Read» e guarde-o no GitHub em **Settings → Secrets and variables → Actions** como
   `CLOUDFLARE_API_TOKEN`. Sem ele, o workflow só avisa.
 
-## 4. Próximos recursos
+## 5. Próximos recursos
 
 - **R2**: cópia de segurança cifrada na nuvem (o KanGest envia a cópia diária, cifrada no computador do cliente).
 - **Turnstile** no formulário de contacto do site (precisa de um ponto que confirme o token antes de enviar).

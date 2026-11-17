@@ -112,6 +112,8 @@ pub fn run() {
             if !config_rede.cliente() {
                 api::arrancar(estado.clone());
             }
+            // acesso pela Internet (subdomínio do KanGest): volta a ligar o túnel, se estiver activado
+            services::acesso_web::arrancar(estado.clone());
             // avisos automáticos da API (webhooks) às lojas online e outros sistemas
             webhooks::iniciar(estado.clone());
             // Facturação electrónica da AGT: envia e consulta os documentos em segundo plano.

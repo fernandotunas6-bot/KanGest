@@ -79,22 +79,36 @@ assert.deepEqual(Object.keys(lic), ["v", "id", "nif", "empresa", "plano", "posto
 assert.equal(lic.nif, NIF); assert.equal(lic.empresa, "Empresa Exemplo, Lda"); assert.equal(lic.plano, "EXPERIENCIA");
 assert.equal(lic.inicio, HOJE); assert.equal(lic.fim, somar(HOJE, 29)); assert.equal(lic.tolerancia, 0); assert.equal(lic.maquina, M1);
 const idExperiencia = lic.id;
+// o computador recebe o seu segredo (só agora); na base fica só o resumo
+const SEGREDO_M1 = r.corpo.segredo;
+assert.match(SEGREDO_M1, /^[A-Za-z0-9_-]{43}$/);
+assert.ok(!JSON.stringify(await env.DB.prepare("SELECT * FROM segredos_maquina").all()).includes(SEGREDO_M1), "o segredo não fica em claro");
 
 // o código só serve uma vez
 r = await post("/v1/confirmar", { nif: NIF, maquina: M1, codigo });
 assert.equal(r.estado, 404);
 
-// renovar sem mudanças devolve a mesma licença (não emite outra)
+// renovar sem mudanças devolve a mesma licença (não emite outra); com segredo, só com ele
 r = await post("/v1/renovar", { nif: NIF, maquina: M1, versao: "1.0.1" });
+assert.equal(r.estado, 401, "quem só sabe o NIF e o código do computador já não renova por ele");
+r = await post("/v1/renovar", { nif: NIF, maquina: M1, versao: "1.0.1", segredo: SEGREDO_M1.slice(0, -1) + "x" });
+assert.equal(r.estado, 401);
+r = await post("/v1/renovar", { nif: NIF, maquina: M1, versao: "1.0.1", segredo: SEGREDO_M1 });
 assert.equal(r.estado, 200); assert.equal(ler(r.corpo.licenca).id, idExperiencia);
 
 // segundo computador do mesmo NIF: a experiência NÃO recomeça
+// renovação com o segredo de cada computador (recebido ao confirmar o registo)
+const SEGREDOS = {};
+const renovar = (corpo) => post("/v1/renovar", { ...corpo, segredo: SEGREDOS[corpo.maquina] });
 const registar = async (maquina) => {
   const a = await post("/v1/registo", { nif: NIF, empresa: "Empresa Exemplo, Lda", email: "geral@exemplo.ao", maquina });
   if (a.estado !== 200) return a;
-  const c = (await admin("resumo")).corpo.codigos.find((x) => x.maquina === maquina).codigo_aberto;
-  return post("/v1/confirmar", { nif: NIF, maquina, codigo: c });
+  const c = (await admin("resumo")).corpo.codigos.find((x) => x.maquina === maquina && x.nif === NIF).codigo_aberto;
+  const x = await post("/v1/confirmar", { nif: NIF, maquina, codigo: c });
+  if (x.corpo.segredo) SEGREDOS[maquina] = x.corpo.segredo;
+  return x;
 };
+SEGREDOS[M1] = SEGREDO_M1;
 await env.DB.prepare("UPDATE clientes SET experiencia_ate = ? WHERE nif = ?").bind(somar(HOJE, 5), NIF).run();
 r = await registar(M2);
 assert.equal(r.estado, 200); lic = ler(r.corpo.licenca);
@@ -106,7 +120,7 @@ assert.equal(r.estado, 409); assert.match(r.corpo.erro, /2 computadores/);
 
 // experiência acabada: sem licença, com explicação
 await env.DB.prepare("UPDATE clientes SET experiencia_ate = ? WHERE nif = ?").bind(somar(HOJE, -1), NIF).run();
-r = await post("/v1/renovar", { nif: NIF, maquina: M1 });
+r = await renovar({ nif: NIF, maquina: M1 });
 assert.equal(r.corpo.licenca, null); assert.equal(r.corpo.estado, "EXPIRADA"); assert.match(r.corpo.mensagem, /experiência/);
 
 // painel: sem chave não entra
@@ -128,7 +142,7 @@ const ate = r.corpo.pago_ate;
 const esperado = new Date(HOJE + "T12:00:00Z"); esperado.setUTCMonth(esperado.getUTCMonth() + 12); esperado.setUTCDate(esperado.getUTCDate() - 1);
 assert.equal(ate, esperado.toISOString().slice(0, 10));
 assert.equal(r.corpo.licencas.length, 2);
-r = await post("/v1/renovar", { nif: NIF, maquina: M1 });
+r = await renovar({ nif: NIF, maquina: M1 });
 lic = ler(r.corpo.licenca);
 assert.equal(r.corpo.estado, "ACTIVA"); assert.equal(lic.plano, "COMERCIO"); assert.equal(lic.postos, 3); assert.equal(lic.fim, ate); assert.equal(lic.tolerancia, 15); assert.equal(lic.maquina, M1);
 const exemplo = r.corpo.licenca;
@@ -142,13 +156,13 @@ assert.equal(r.corpo.cliente.estado, "ACTIVA");
 
 // postos especiais para o cliente
 await admin("cliente", { nif: NIF, postos: 5 });
-lic = ler((await post("/v1/renovar", { nif: NIF, maquina: M2 })).corpo.licenca);
+lic = ler((await renovar({ nif: NIF, maquina: M2 })).corpo.licenca);
 assert.equal(lic.postos, 5);
 
 // bloquear um computador
 r = await admin("maquina", { nif: NIF, maquina: M2, bloqueada: true });
 assert.equal(r.estado, 200);
-r = await post("/v1/renovar", { nif: NIF, maquina: M2 });
+r = await renovar({ nif: NIF, maquina: M2 });
 assert.equal(r.estado, 403);
 
 // licença manual (cliente sem internet), a partir do código do pedido
@@ -242,6 +256,98 @@ assert.equal((await pedir("GET", "/nada")).estado, 404);
   assert.ok(buscas - antes <= 1, "não vai à Cloudflare a cada JWT inventado");
   // as rotas públicas não pedem o Access
   assert.equal((await worker.fetch(new Request("https://licencas.teste/v1/planos"), envAccess)).status, 200);
+  globalThis.fetch = fetchOriginal;
+}
+
+
+// ------------------------------------------------------------------ acesso pela Internet (subdomínios)
+{
+  const pedidosCf = [];
+  const fetchOriginal = globalThis.fetch;
+  let n = 0;
+  globalThis.fetch = async (url, op = {}) => {
+    const u = String(url);
+    assert.ok(u.startsWith("https://api.cloudflare.com/client/v4/"), u);
+    assert.equal(op.headers.authorization, "Bearer token-do-produtor");
+    const caminho = u.slice("https://api.cloudflare.com/client/v4".length);
+    pedidosCf.push(`${op.method} ${caminho}`);
+    const corpo = op.body ? JSON.parse(op.body) : null;
+    let result = {};
+    if (op.method === "POST" && caminho.endsWith("/cfd_tunnel")) result = { id: `tunel-${++n}`, name: corpo.name };
+    else if (op.method === "POST" && caminho.endsWith("/dns_records")) { result = { id: `dns-${++n}`, ...corpo }; pedidosCf.push(JSON.stringify(corpo)); }
+    else if (op.method === "PUT") pedidosCf.push(JSON.stringify(corpo));
+    else if (op.method === "GET" && caminho.endsWith("/token")) result = "token-do-tunel";
+    return new Response(JSON.stringify({ success: true, result }), { headers: { "content-type": "application/json" } });
+  };
+  const envWeb = { ...env, WEB_DOMINIO: "kangest.ao", CF_CONTA: "conta1", CF_ZONA: "zona1", CF_API_TOKEN: "token-do-produtor" };
+  const web = async (accao, corpo, e = envWeb) => {
+    const x = await worker.fetch(new Request("https://licencas.teste/v1/web/" + accao, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(corpo) }), e);
+    return { estado: x.status, corpo: await x.json() };
+  };
+  const eu = { nif: NIF, maquina: M1, segredo: SEGREDO_M1 };
+
+  // sem o segredo do computador, nada
+  assert.equal((await web("estado", { nif: NIF, maquina: M1 })).estado, 401);
+  // sem a configuração do produtor: não disponível
+  r = await web("estado", eu, env);
+  assert.equal(r.estado, 200); assert.equal(r.corpo.disponivel, false);
+  assert.equal((await web("activar", { ...eu, nome: "kianda" }, env)).estado, 503);
+
+  // nomes inválidos e reservados
+  for (const nome of ["ab", "-loja", "loja-", "a--b", "Loja Kianda", "x".repeat(31)]) {
+    assert.equal((await web("activar", { ...eu, nome })).estado, 400, nome);
+  }
+  r = await web("activar", { ...eu, nome: "admin" });
+  assert.equal(r.estado, 400); assert.match(r.corpo.erro, /reservado/);
+
+  // activar: túnel, configuração (localhost:7799), DNS CNAME com proxy e o token
+  r = await web("activar", { ...eu, nome: "Kianda" });
+  assert.equal(r.estado, 200, JSON.stringify(r.corpo));
+  assert.deepEqual([r.corpo.nome, r.corpo.endereco, r.corpo.token], ["kianda", "https://kianda.kangest.ao", "token-do-tunel"]);
+  assert.ok(pedidosCf.includes("POST /accounts/conta1/cfd_tunnel"));
+  assert.ok(pedidosCf.some((x) => x.includes('"hostname":"kianda.kangest.ao","service":"http://localhost:7799"') && x.includes("http_status:404")));
+  assert.ok(pedidosCf.some((x) => x.includes('"type":"CNAME"') && x.includes('"content":"tunel-1.cfargotunnel.com"') && x.includes('"proxied":true')));
+  r = await web("estado", eu);
+  assert.deepEqual([r.corpo.disponivel, r.corpo.nome, r.corpo.endereco, r.corpo.neste_computador], [true, "kianda", "https://kianda.kangest.ao", true]);
+
+  // activar outra vez (ex.: reinstalação) reaproveita o túnel e o DNS
+  pedidosCf.length = 0;
+  r = await web("activar", { ...eu, nome: "kianda" });
+  assert.equal(r.estado, 200);
+  assert.ok(!pedidosCf.some((x) => x.startsWith("POST")), "nem túnel nem DNS novos: " + pedidosCf.join(" | "));
+
+  // outro computador da mesma empresa não o pode tomar; outra empresa não usa o mesmo nome
+  await env.DB.prepare("UPDATE clientes SET maquinas_max = 3, experiencia_ate = ? WHERE nif = ?").bind(somar(HOJE, 10), NIF).run();
+  await env.DB.prepare("DELETE FROM limites").run();
+  r = await registar(M3);
+  assert.equal(r.estado, 200, JSON.stringify(r.corpo));
+  const eu3 = { nif: NIF, maquina: M3, segredo: r.corpo.segredo };
+  r = await web("activar", { ...eu3, nome: "kianda" });
+  assert.equal(r.estado, 409); assert.match(r.corpo.erro, /noutro computador/);
+  await env.DB.prepare("INSERT INTO subdominios (nif, nome, maquina, tunel_id, dns_id, porta, criado_em, actualizado_em) VALUES ('5999999999', 'outra', 'X', 't', 'd', 7799, '', '')").run();
+  r = await web("activar", { ...eu, nome: "outra" });
+  assert.equal(r.estado, 409); assert.match(r.corpo.erro, /já está em uso/);
+
+  // mudar de nome: DNS novo e o antigo apagado, o mesmo túnel
+  pedidosCf.length = 0;
+  r = await web("activar", { ...eu, nome: "kianda-luanda", porta: 7800 });
+  assert.equal(r.estado, 200); assert.equal(r.corpo.endereco, "https://kianda-luanda.kangest.ao");
+  assert.ok(pedidosCf.some((x) => x.startsWith("DELETE /zones/zona1/dns_records/dns-")), pedidosCf.join(" | "));
+  assert.ok(!pedidosCf.includes("POST /accounts/conta1/cfd_tunnel"));
+  assert.ok(pedidosCf.some((x) => x.includes("http://localhost:7800")));
+
+  // desligar (de qualquer computador registado da empresa): apaga DNS, ligações e túnel
+  pedidosCf.length = 0;
+  r = await web("desactivar", eu3);
+  assert.equal(r.estado, 200);
+  assert.ok(pedidosCf.some((x) => x.startsWith("DELETE /zones/zona1/dns_records/")));
+  assert.ok(pedidosCf.some((x) => /^DELETE \/accounts\/conta1\/cfd_tunnel\/tunel-1$/.test(x)), pedidosCf.join(" | "));
+  r = await web("estado", eu);
+  assert.equal(r.corpo.nome, null);
+
+  // assinatura terminada: não activa
+  await env.DB.prepare("UPDATE clientes SET pago_ate = NULL, experiencia_ate = ? WHERE nif = ?").bind(somar(HOJE, -60), NIF).run();
+  assert.equal((await web("activar", { ...eu, nome: "kianda" })).estado, 402);
   globalThis.fetch = fetchOriginal;
 }
 

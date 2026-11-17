@@ -1299,6 +1299,162 @@ function AcessoBrowser({ r }: { r: EstadoRede }) {
 }
 
 /** No browser: este aparelho está ligado a um servidor KanGest (a configuração de rede é a do servidor). */
+interface EstadoWeb {
+  /** Porque é que este computador não pode ter o acesso (null = pode). */
+  servidor: string | null;
+  nome: string | null;
+  endereco: string | null;
+  activo: boolean;
+  tunel: { a_correr: boolean; ligado: boolean; erro: string | null; linhas: string[] };
+  remoto?: { disponivel?: boolean; dominio?: string | null; erro?: string };
+  aviso?: string;
+}
+
+/** Endereço próprio do KanGest na Internet (ex.: https://loja.kangest.ao), por um túnel da Cloudflare até este servidor. */
+function AcessoInternet() {
+  const qc = useQueryClient();
+  const nav = useNavigate();
+  const { data: e, refetch } = useQuery({
+    queryKey: ["acesso-web"],
+    queryFn: () => call<EstadoWeb>("web.estado", { verificar: true }),
+    refetchInterval: (q) => (q.state.data?.activo && !q.state.data.tunel.ligado ? 4000 : false),
+  });
+  const [nome, setNome] = useState("");
+  const [mudar, setMudar] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!e) return null;
+  const dominio = e.remoto?.dominio ?? null;
+  const limpo = nome.trim().toLowerCase();
+  const valido = /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/.test(limpo) && !limpo.includes("--");
+
+  async function activar() {
+    setBusy(true);
+    try {
+      const v = await call<EstadoWeb>("web.activar", { nome: limpo });
+      toast.success(`Acesso pela Internet activado: ${v.endereco}`);
+      setMudar(false);
+      await refetch();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function desligar() {
+    if (!window.confirm(`Desligar ${e?.endereco}? Os aparelhos de fora deixam de chegar ao KanGest; na loja tudo continua igual.`)) return;
+    setBusy(true);
+    try {
+      const v = await call<EstadoWeb>("web.desactivar");
+      if (v.aviso) toast.warning(v.aviso, { duration: 10000 });
+      else toast.success("Acesso pela Internet desligado.");
+      qc.setQueryData(["acesso-web"], v);
+      await refetch();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const q = e.endereco ? qrcode(e.endereco + "/", "M") : null;
+  const lado = q ? q.tamanho + 8 : 0;
+  const formulario = (
+    <div className="space-y-3">
+      <Field label="Nome do endereço" hint="3 a 30 letras minúsculas, algarismos ou hífenes (ex.: o nome da empresa)">
+        <div className="flex items-center gap-2">
+          <span className="text-[13px] text-ink-3">https://</span>
+          <Input className="max-w-[16rem] font-mono" value={nome} onChange={(x) => setNome(x.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} placeholder="minhaempresa" maxLength={30} />
+          <span className="font-mono text-[13px] text-ink-2">.{dominio}</span>
+        </div>
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={activar} disabled={!valido || busy}>
+          <Globe className="size-4" /> {busy ? "A activar…" : e.activo ? "Mudar o endereço" : "Activar o acesso pela Internet"}
+        </Button>
+        {mudar && (
+          <Button variant="secondary" onClick={() => setMudar(false)}>
+            Cancelar
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2 border-b border-line p-4">
+        <Globe className="size-4 text-ink-3" />
+        <span className="font-medium">Acesso pela Internet</span>
+        {e.activo && (
+          <Badge tone={e.tunel.ligado ? "ok" : e.tunel.erro ? "danger" : "accent"}>{e.tunel.ligado ? "Ligado" : e.tunel.erro ? "Com erro" : "A ligar…"}</Badge>
+        )}
+      </div>
+      <div className="space-y-3 p-4 text-[13px] text-ink-2">
+        {e.servidor ? (
+          <p className="text-accent-ink">{e.servidor}</p>
+        ) : e.activo && e.endereco ? (
+          <>
+            <div className="flex flex-wrap items-center gap-6">
+              {q && (
+                <svg viewBox={`0 0 ${lado} ${lado}`} className="size-36 shrink-0 rounded-lg border border-line" shapeRendering="crispEdges" role="img" aria-label="Código QR do endereço na Internet">
+                  <rect width={lado} height={lado} fill="#fff" />
+                  <path d={qrSvgPath(q)} fill="#000" />
+                </svg>
+              )}
+              <div className="min-w-0 flex-1 space-y-2">
+                <p>Em qualquer lado, num telemóvel, tablet ou computador, abra:</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <b className="font-mono text-[16px] text-ink">{e.endereco}</b>
+                  <Button size="sm" variant="secondary" onClick={() => navigator.clipboard.writeText(e.endereco ?? "").then(() => toast.success("Endereço copiado."))}>
+                    Copiar
+                  </Button>
+                </div>
+                <p>
+                  Pede a chave de rede e o n.º do posto na primeira vez, e depois o utilizador e a senha. Com HTTPS, instala-se como aplicação. Os dados ficam neste computador: ele tem de
+                  estar ligado e com Internet para se entrar de fora; na loja continua tudo a funcionar sem Internet.
+                </p>
+                {e.tunel.erro && !e.tunel.ligado && <p className="text-danger">Túnel: {e.tunel.erro}</p>}
+              </div>
+            </div>
+            {mudar ? (
+              formulario
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={() => { setNome(e.nome ?? ""); setMudar(true); }}>
+                  Mudar o endereço
+                </Button>
+                <Button variant="secondary" onClick={desligar} disabled={busy}>
+                  Desligar
+                </Button>
+              </div>
+            )}
+          </>
+        ) : e.remoto?.erro ? (
+          <>
+            <p>{e.remoto.erro}</p>
+            <Button variant="secondary" onClick={() => nav("/licenca")}>
+              Ir para Licença e Assinatura
+            </Button>
+          </>
+        ) : !e.remoto?.disponivel ? (
+          <p>
+            O endereço próprio do KanGest (como <span className="font-mono">minhaempresa.kangest.ao</span>) ainda não está disponível. Entretanto, pode publicar este servidor com o seu
+            domínio pelo túnel da Cloudflare — ver o guia «Modo web e PWA».
+          </p>
+        ) : (
+          <>
+            <p>
+              Dê a esta empresa um endereço na Internet, como os programas na nuvem, sem abrir portas no router: o KanGest liga-se à Cloudflare de dentro para fora e o endereço abre
+              este servidor em qualquer browser, com HTTPS.
+            </p>
+            {formulario}
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function RedeNoBrowser() {
   const l = ligacaoWeb();
   const pwa = usePwa();
@@ -1496,6 +1652,7 @@ function Rede() {
       </Card>
 
       {r.modo === "servidor" && r.servidor_activo && r.web && <AcessoBrowser r={r} />}
+      {r.modo === "servidor" && r.web && <AcessoInternet />}
 
       {r.modo === "servidor" && (
         <Card>

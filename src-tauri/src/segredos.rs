@@ -20,7 +20,7 @@ const AAD: &[u8] = b"kangest-config";
 pub const FICHEIRO: &str = "kangest.chave";
 
 /// Chaves da tabela `config` que guardam segredos.
-pub const CHAVES: [&str; 5] = ["agt.chave_privada", "fe.senha", "fe.chave_software", "fe.chave_contribuinte", "email.senha"];
+pub const CHAVES: [&str; 7] = ["agt.chave_privada", "fe.senha", "fe.chave_software", "fe.chave_contribuinte", "email.senha", "licenca.segredo", "web.token"];
 
 static CHAVE: OnceLock<[u8; 32]> = OnceLock::new();
 

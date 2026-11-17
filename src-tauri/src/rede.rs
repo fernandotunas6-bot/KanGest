@@ -38,7 +38,8 @@ const LOCAIS: [&str; 7] = ["rede.", "impressao.", "sistema.exportar", "atualizac
 /// ficheiros no disco, abrir o browser): o servidor recusa-os quando chegam pela rede. A impressão
 /// fica de fora de propósito: um posto no browser imprime pela impressora configurada no seu posto
 /// (de rede, por IP, ou ligada ao servidor).
-const SO_NA_MAQUINA: [&str; 6] = ["rede.", "sistema.exportar", "atualizacao.", "licenca.abrirSite", "partilha.", "internet."];
+/// O acesso pela Internet (`web.`) liga um túnel nesta máquina: também só aqui.
+const SO_NA_MAQUINA: [&str; 7] = ["rede.", "sistema.exportar", "atualizacao.", "licenca.abrirSite", "partilha.", "internet.", "web."];
 
 // ============================== configuração ==============================
 
@@ -357,7 +358,21 @@ struct PedidoHttp {
     /// O browser aceita HTML (navegação) — distingue a página da aplicação da resposta aos postos.
     aceita_html: bool,
     aceita_gzip: bool,
+    /// IP de quem pediu, dito pelo túnel da Cloudflare (`CF-Connecting-IP`); só conta se a ligação vier do próprio computador.
+    ip_cloudflare: Option<std::net::IpAddr>,
     corpo: String,
+}
+
+/// Endereço de quem pede. Pelo túnel da Cloudflare (acesso pela Internet) a ligação chega do próprio computador
+/// (o `cloudflared`) e o IP verdadeiro vem no `CF-Connecting-IP`: sem isto, todos os aparelhos de fora pareceriam
+/// o mesmo e o bloqueio por chave errada trancaria toda a gente. O cabeçalho só se aceita vindo do próprio
+/// computador — de outro posto da rede seria falsificável.
+fn endereco_real(ligacao: Option<std::net::IpAddr>, ip_cloudflare: Option<std::net::IpAddr>) -> String {
+    match (ligacao, ip_cloudflare) {
+        (Some(l), Some(cf)) if l.is_loopback() => cf.to_string(),
+        (Some(l), _) => l.to_string(),
+        (None, _) => String::new(),
+    }
 }
 
 /// Lê um pedido HTTP simples (linha do pedido, cabeçalhos que interessam e corpo).
@@ -394,6 +409,7 @@ fn ler_pedido(fluxo: &mut TcpStream) -> Result<PedidoHttp, String> {
     }
     let aceita_html = valor("accept").is_some_and(|a| a.contains("text/html"));
     let aceita_gzip = valor("accept-encoding").is_some_and(|a| a.contains("gzip"));
+    let ip_cloudflare = valor("cf-connecting-ip").and_then(|v| v.parse().ok());
     let mut corpo = dados[corte..].to_vec();
     while corpo.len() < tamanho {
         let n = fluxo.read(&mut tampao).map_err(|e| format!("Leitura interrompida: {e}"))?;
@@ -402,7 +418,7 @@ fn ler_pedido(fluxo: &mut TcpStream) -> Result<PedidoHttp, String> {
         }
         corpo.extend_from_slice(&tampao[..n]);
     }
-    Ok(PedidoHttp { metodo, caminho, aceita_html, aceita_gzip, corpo: String::from_utf8_lossy(&corpo).to_string() })
+    Ok(PedidoHttp { metodo, caminho, aceita_html, aceita_gzip, ip_cloudflare, corpo: String::from_utf8_lossy(&corpo).to_string() })
 }
 
 #[derive(Deserialize)]
@@ -427,8 +443,10 @@ fn um() -> i64 {
 fn atender(st: &AppState, seg: &Seguranca, mut fluxo: TcpStream) {
     fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
-    let endereco = fluxo.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
-    let saida = match ler_pedido(&mut fluxo) {
+    let ligacao = fluxo.peer_addr().ok().map(|a| a.ip());
+    let pedido = ler_pedido(&mut fluxo);
+    let endereco = endereco_real(ligacao, pedido.as_ref().ok().and_then(|p| p.ip_cloudflare));
+    let saida = match pedido {
         Err(e) => resposta(400, &json!({ "ok": false, "erro": e })),
         Ok(p) if p.metodo == "GET" || p.metodo == "HEAD" => {
             let web = config().web;
@@ -914,4 +932,22 @@ pub fn teste_abrir_resposta(k: &[u8; 32], http: &str) -> Value {
     let corpo = http.split_once("\r\n\r\n").expect("resposta HTTP").1;
     let v: Value = serde_json::from_str(corpo.trim()).expect("JSON");
     serde_json::from_slice(&cifra::abrir(k, AAD_RESPOSTA, &v).expect("resposta cifrada com a chave do posto")).unwrap()
+}
+
+#[cfg(test)]
+mod testes_endereco {
+    use super::endereco_real;
+
+    #[test]
+    fn ip_do_tunel_so_vindo_do_proprio_computador() {
+        let ip = |s: &str| Some(s.parse().unwrap());
+        // pelo túnel (cloudflared no próprio computador): vale o IP de quem está do outro lado
+        assert_eq!(endereco_real(ip("127.0.0.1"), ip("41.63.10.20")), "41.63.10.20");
+        assert_eq!(endereco_real(ip("::1"), ip("2001:db8::7")), "2001:db8::7");
+        // de outro posto da rede, o cabeçalho é ignorado (seria falsificável)
+        assert_eq!(endereco_real(ip("192.168.1.30"), ip("41.63.10.20")), "192.168.1.30");
+        // sem cabeçalho, a ligação
+        assert_eq!(endereco_real(ip("127.0.0.1"), None), "127.0.0.1");
+        assert_eq!(endereco_real(None, None), "");
+    }
 }
