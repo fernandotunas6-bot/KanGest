@@ -16,6 +16,7 @@ import {
   PanelLeftOpen,
   Plus,
   Search,
+  ShieldCheck,
   ShoppingCart,
   Star,
   Sun,
@@ -34,6 +35,7 @@ import { bloquearSessao } from "@/components/Sessao";
 import { AvisoLicenca } from "@/components/AvisoLicenca";
 import { PaletaComandos } from "@/components/Comandos";
 import DocumentoModal from "@/components/DocumentoModal";
+import DoisPassos from "@/components/DoisPassos";
 import type { Sessao } from "@/lib/types";
 
 const CHAVE_ABERTO = "kangest.menu.aberto";
@@ -65,6 +67,7 @@ export default function AppShell() {
   const loc = useLocation();
   const qc = useQueryClient();
   const [senha, setSenha] = useState(false);
+  const [doisPassos, setDoisPassos] = useState(false);
   const [paleta, setPaleta] = useState(false);
   const [docAberto, setDocAberto] = useState<number | null>(null);
   const [aberto, setAberto] = useState<string | null>(() => lerLocal(CHAVE_ABERTO, "vendas") || null);
@@ -266,7 +269,7 @@ export default function AppShell() {
           <span className="hidden sm:contents">
             <BotaoTema />
           </span>
-          <MenuUtilizador sessao={sessao} onSenha={() => setSenha(true)} onSair={sair} />
+          <MenuUtilizador sessao={sessao} onSenha={() => setSenha(true)} onDoisPassos={() => setDoisPassos(true)} onSair={sair} />
         </header>
 
         <main className="min-w-0 flex-1 overflow-y-auto">
@@ -287,6 +290,7 @@ export default function AppShell() {
       />
       <DocumentoModal id={docAberto} onClose={() => setDocAberto(null)} />
       {senha && <AlterarSenha onClose={() => setSenha(false)} />}
+      {doisPassos && <DoisPassos onClose={() => setDoisPassos(false)} />}
     </div>
   );
 }
@@ -494,7 +498,7 @@ const DENSIDADES: { id: Densidade; label: string }[] = [
   { id: "compacta", label: "Compacta" },
 ];
 
-function MenuUtilizador({ sessao, onSenha, onSair }: { sessao: Sessao | null; onSenha: () => void; onSair: () => void }) {
+function MenuUtilizador({ sessao, onSenha, onDoisPassos, onSair }: { sessao: Sessao | null; onSenha: () => void; onDoisPassos: () => void; onSair: () => void }) {
   const nav = useNavigate();
   const { tema, setTema, densidade, setDensidade, toque, setToque } = useAparencia();
   const inicial = sessao?.nome.slice(0, 1).toUpperCase();
@@ -529,6 +533,15 @@ function MenuUtilizador({ sessao, onSenha, onSair }: { sessao: Sessao | null; on
             }}
           >
             Alterar senha
+          </MenuItem>
+          <MenuItem
+            icon={ShieldCheck}
+            onClick={() => {
+              fechar();
+              onDoisPassos();
+            }}
+          >
+            Verificação em dois passos
           </MenuItem>
           <MenuItem
             icon={Lock}

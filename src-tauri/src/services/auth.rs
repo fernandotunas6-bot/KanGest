@@ -26,6 +26,11 @@ pub fn hash_senha(senha: &str) -> AppResult<String> {
         .map_err(|e| AppError::msg(e.to_string()))
 }
 
+/// A senha confere com o resumo guardado (para confirmar a identidade antes de mudar a segurança da conta).
+pub(super) fn senha_confere(senha: &str, hash: &str) -> bool {
+    verificar(senha, hash)
+}
+
 fn verificar(senha: &str, hash: &str) -> bool {
     PasswordHash::new(hash)
         .map(|h| Argon2::default().verify_password(senha.as_bytes(), &h).is_ok())
@@ -46,6 +51,8 @@ pub struct Politica {
     pub inatividade_min: i64,
     /// permitir entrar só com o PIN (terminais POS)
     pub login_pin: bool,
+    /// exigir a verificação em dois passos a quem entra pela Internet (acesso por subdomínio)
+    pub dois_passos_internet: bool,
 }
 
 pub async fn politica(st: &AppState) -> AppResult<Politica> {
@@ -58,6 +65,7 @@ pub async fn politica(st: &AppState) -> AppResult<Politica> {
         bloqueio_min: n("seguranca.bloqueio_min", 15).clamp(1, 1440),
         inatividade_min: n("seguranca.inatividade_min", 0).clamp(0, 480),
         login_pin: v("seguranca.login_pin") == "1",
+        dois_passos_internet: v("seguranca.dois_passos_internet") == "1",
     })
 }
 
@@ -79,6 +87,8 @@ pub struct PoliticaIn {
     bloqueio_min: i64,
     inatividade_min: i64,
     login_pin: bool,
+    #[serde(default)]
+    dois_passos_internet: bool,
 }
 
 pub async fn seguranca_guardar(st: &AppState, p: PoliticaIn) -> AppResult<Value> {
@@ -89,6 +99,7 @@ pub async fn seguranca_guardar(st: &AppState, p: PoliticaIn) -> AppResult<Value>
         ("seguranca.bloqueio_min", p.bloqueio_min.clamp(1, 1440).to_string()),
         ("seguranca.inatividade_min", p.inatividade_min.clamp(0, 480).to_string()),
         ("seguranca.login_pin", if p.login_pin { "1" } else { "0" }.to_string()),
+        ("seguranca.dois_passos_internet", if p.dois_passos_internet { "1" } else { "0" }.to_string()),
     ];
     let mut tx = crate::db::transacao(&st.pool).await?;
     for (k, v) in valores {
@@ -233,6 +244,9 @@ async fn entrar(st: &AppState, row: &sqlx::sqlite::SqliteRow, como: &str) -> App
 pub struct LoginIn {
     login: String,
     senha: String,
+    /// Código da verificação em dois passos (da aplicação ou de recuperação), na segunda volta.
+    #[serde(default)]
+    codigo: Option<String>,
 }
 
 pub async fn login(st: &AppState, i: LoginIn) -> AppResult<Value> {
@@ -254,7 +268,13 @@ pub async fn login(st: &AppState, i: LoginIn) -> AppResult<Value> {
         registar(st, Some(id), login, "FALHA", Some("conta desactivada".into())).await;
         return Err(AppError::msg("Esta conta está desactivada. Fale com o administrador."));
     }
-    entrar(st, &row, "senha").await
+    match super::dois_passos::no_login(st, &row, i.codigo.as_deref()).await? {
+        super::dois_passos::NoLogin::Seguir => {}
+        // senha certa: o ecrã pede o código e volta a entrar com ele
+        super::dois_passos::NoLogin::PedirCodigo => return Ok(json!({ "dois_passos": true })),
+        super::dois_passos::NoLogin::Errado => return Err(falhou(st, &pol, id, login, row.get("tentativas"), "código de dois passos errado").await?),
+    }
+    entrar(st, &row, if crate::state::pela_internet() { "senha (Internet)" } else { "senha" }).await
 }
 
 /// Falhas seguidas de entrada por PIN em cada posto (um PIN de 4 dígitos não pode ser adivinhado à força).
@@ -271,6 +291,10 @@ pub async fn login_pin(st: &AppState, i: PinIn) -> AppResult<Value> {
     let pol = politica(st).await?;
     if !pol.login_pin {
         return Err(AppError::msg("A entrada por PIN não está activada."));
+    }
+    // um PIN de 4 algarismos é para o balcão: de fora entra-se com o utilizador e a senha (e os dois passos)
+    if crate::state::pela_internet() {
+        return Err(AppError::msg("A entrada só com o PIN não se usa pela Internet. Entre com o utilizador e a senha."));
     }
     let posto = st.posto().id;
     {
@@ -421,6 +445,7 @@ pub async fn listar(st: &AppState) -> AppResult<Value> {
             "permissoes": permissoes,
             "limite_desconto": r.get::<f64, _>("limite_desconto"),
             "tem_pin": r.get::<Option<String>, _>("pin_hash").is_some(),
+            "dois_passos": r.get::<Option<String>, _>("totp_segredo").is_some_and(|x| !x.is_empty()),
             "perfil": perfil,
             "perfil_descricao": r.get::<Option<String>, _>("perfil_descricao"),
             "mudar_senha": r.get::<i64, _>("mudar_senha") == 1,

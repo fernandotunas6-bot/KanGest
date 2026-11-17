@@ -4,11 +4,11 @@ O módulo está em **Sistema → Utilizadores e Permissões**. Tem cinco separad
 
 | Separador | Para quê | Quem vê |
 |---|---|---|
-| Utilizadores | Criar e editar contas, perfil, PIN, limite de desconto, permissões próprias, redefinir senha, desbloquear | permissão *Utilizadores e permissões* |
+| Utilizadores | Criar e editar contas, perfil, PIN, limite de desconto, permissões próprias, redefinir senha, desbloquear, repor a verificação em dois passos | permissão *Utilizadores e permissões* |
 | Perfis e permissões | Perfis de acesso (Administrador, Gestor, Caixa e os criados pela empresa) e a matriz de permissões de cada um | idem |
 | Registo de acessos | Entradas, saídas, tentativas falhadas, bloqueios, mudanças de senha, por posto | permissão *Registo de acessos e auditoria* |
 | Auditoria | Operações registadas (emissões, anulações, importações, alterações de configuração…) | idem |
-| Segurança | Política de senhas, bloqueio por tentativas, bloqueio por inactividade, entrada por PIN | *Utilizadores e permissões* |
+| Segurança | Política de senhas, bloqueio por tentativas, bloqueio por inactividade, entrada por PIN, dois passos pela Internet | *Utilizadores e permissões* |
 
 O menu **Sistema → Registo de Acessos e Auditoria** abre directamente o registo de acessos.
 
@@ -55,6 +55,26 @@ Cada utilizador tem um perfil. As permissões do perfil aplicam-se a todos os se
   a sessão bloqueada.
 - Com **Permitir entrar só com o PIN** activo, o ecrã de entrada mostra um teclado numérico — útil nos terminais
   tácteis para trocar de operador depressa. Após 5 PIN errados no mesmo posto, a entrada por PIN fica suspensa 5 minutos.
+
+## Verificação em dois passos
+
+Cada pessoa pode ligá-la na sua conta (menu do utilizador → **Verificação em dois passos**). Depois da senha, o
+KanGest pede o código de 6 algarismos que uma aplicação de autenticação do telemóvel (Google Authenticator,
+Microsoft Authenticator, Authy…) mostra e muda de 30 em 30 segundos (TOTP, RFC 6238). Quem souber a senha não
+entra sem o telemóvel.
+
+- Para ligar: ler o código QR (ou escrever a chave), escrever o código e a senha. Aparecem **8 códigos de
+  recuperação**, cada um serve uma vez para entrar sem o telemóvel; não voltam a ser mostrados.
+- Para desligar: senha e um código (da aplicação ou de recuperação).
+- Quem perdeu o telemóvel e os códigos: o administrador usa **Repor dois passos** na lista de utilizadores; a pessoa
+  volta a entrar só com a senha e liga-a de novo.
+- Um código já usado não serve outra vez; aceita-se o código anterior e o seguinte (relógio do telemóvel um pouco
+  desacertado). Códigos errados contam como tentativas falhadas para o bloqueio da conta.
+- A chave guarda-se cifrada na base (como os outros segredos, [SEGURANCA.md](SEGURANCA.md) §4) e os códigos de
+  recuperação só em SHA-256.
+- Em **Segurança**, **Exigir a verificação em dois passos a quem entra pela Internet** recusa, pelo subdomínio
+  (túnel da Cloudflare), as contas que não a tenham ligada. Na rede da loja nada muda. Pela Internet o PIN nunca
+  serve para entrar.
 
 ## Registo
 

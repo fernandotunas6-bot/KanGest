@@ -85,7 +85,8 @@ portas no router:
 Os dados continuam neste computador: ele tem de estar ligado e com Internet para se entrar de fora; na loja tudo
 continua a funcionar sem Internet. Mudar o nome mantém o túnel; **Desligar** apaga o endereço. Atrás do túnel, o
 KanGest conhece o IP verdadeiro de cada aparelho (`CF-Connecting-IP`, aceite só do próprio computador), por isso o
-bloqueio por chave de rede errada atinge só quem errou.
+bloqueio por chave de rede errada atinge só quem errou. Quem entra assim não pode usar o PIN, e o administrador
+pode exigir-lhe a verificação em dois passos ([UTILIZADORES.md](UTILIZADORES.md)).
 
 O produtor activa este serviço uma vez, com o domínio do KanGest na Cloudflare ([CLOUDFLARE.md](CLOUDFLARE.md)).
 

@@ -445,7 +445,10 @@ fn atender(st: &AppState, seg: &Seguranca, mut fluxo: TcpStream) {
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
     let ligacao = fluxo.peer_addr().ok().map(|a| a.ip());
     let pedido = ler_pedido(&mut fluxo);
-    let endereco = endereco_real(ligacao, pedido.as_ref().ok().and_then(|p| p.ip_cloudflare));
+    let ip_cloudflare = pedido.as_ref().ok().and_then(|p| p.ip_cloudflare);
+    let endereco = endereco_real(ligacao, ip_cloudflare);
+    // pelo túnel: ligação do próprio computador (o cloudflared) com o IP de quem está do outro lado
+    let pela_internet = ip_cloudflare.is_some() && ligacao.is_some_and(|l| l.is_loopback());
     let saida = match pedido {
         Err(e) => resposta(400, &json!({ "ok": false, "erro": e })),
         Ok(p) if p.metodo == "GET" || p.metodo == "HEAD" => {
@@ -491,7 +494,7 @@ fn atender(st: &AppState, seg: &Seguranca, mut fluxo: TcpStream) {
                         Ok(p) if ja_visto(&p.id) => json!({ "ok": false, "id": p.id, "erro": "Pedido repetido recusado." }),
                         Ok(p) => {
                             let id = p.id.clone();
-                            let mut r = executar(st, p, &endereco);
+                            let mut r = executar(st, p, &endereco, pela_internet);
                             r["id"] = json!(id);
                             r
                         }
@@ -505,7 +508,7 @@ fn atender(st: &AppState, seg: &Seguranca, mut fluxo: TcpStream) {
     let _ = fluxo.flush();
 }
 
-fn executar(st: &AppState, p: Pedido, endereco: &str) -> Value {
+fn executar(st: &AppState, p: Pedido, endereco: &str, pela_internet: bool) -> Value {
     if SO_NA_MAQUINA.iter().any(|l| p.metodo.starts_with(l)) {
         return json!({ "ok": false, "erro": "Esta função só se usa no próprio computador (na aplicação KanGest instalada), não a partir de outro posto." });
     }
@@ -538,7 +541,7 @@ fn executar(st: &AppState, p: Pedido, endereco: &str) -> Value {
 
     let r = tauri::async_runtime::block_on(async {
         let posto = st.ler_posto(p.posto).await?;
-        let ctx = Contexto { sessao: sessao.clone(), posto, api_chave: None };
+        let ctx = Contexto { sessao: sessao.clone(), posto, api_chave: None, pela_internet };
         CONTEXTO.scope(ctx, services::dispatch(st, &p.metodo, p.params)).await
     });
 

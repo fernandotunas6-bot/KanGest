@@ -763,7 +763,7 @@ impl Chave {
     }
 
     fn contexto(&self) -> Contexto {
-        Contexto { sessao: Arc::new(Mutex::new(Some(self.sessao.clone()))), posto: self.posto.clone(), api_chave: Some(self.id) }
+        Contexto { sessao: Arc::new(Mutex::new(Some(self.sessao.clone()))), posto: self.posto.clone(), api_chave: Some(self.id), pela_internet: false }
     }
 }
 

@@ -13,6 +13,7 @@ KanGest ou os seus dados dê muito trabalho, deixe rasto e não funcione às ceg
 | Depuradores (engenharia reversa com o programa a correr) | A emissão pára com um depurador ligado | abaixo, §3 |
 | Licenças | Assinatura Ed25519 do produtor | [LICENCAS.md](LICENCAS.md) |
 | API de integração pela Internet | Chaves de API (guardadas só em SHA-256), Cloudflare Tunnel e Access (JWT RS256) | [API.md](API.md), [CLOUDFLARE.md](CLOUDFLARE.md) |
+| Entrada pela Internet (subdomínio) | Verificação em dois passos (TOTP) por utilizador, que o administrador pode exigir; PIN recusado | [UTILIZADORES.md](UTILIZADORES.md) |
 | Avisos automáticos (webhooks) | Assinatura HMAC-SHA256 de cada aviso | [API.md](API.md) |
 
 ## 1. Selo dos dados da licença

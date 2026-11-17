@@ -4519,3 +4519,80 @@ async fn acesso_pela_internet_por_subdominio() {
     *super::acesso_web::SERVIDOR_TESTE.lock().unwrap() = None;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Verificação em dois passos: ligar com a senha e um código, entrar com código (uma vez cada), códigos de recuperação,
+/// e pela Internet (túnel) a política que a exige e a recusa da entrada só com PIN.
+#[tokio::test]
+async fn verificacao_em_dois_passos() {
+    use super::dois_passos::{codigo, de_base32};
+    use crate::state::{Contexto, CONTEXTO};
+    let (st, pasta) = base_com_admin("dois-passos").await;
+    let passo = || chrono::Utc::now().timestamp().div_euclid(30);
+
+    let n = rpc(&st, "auth.doisPassosNovo", Value::Null).await;
+    let segredo = de_base32(n["segredo"].as_str().unwrap()).unwrap();
+    assert_eq!(segredo.len(), 20);
+    assert!(n["uri"].as_str().unwrap().starts_with("otpauth://totp/KanGest:admin?secret="));
+    let ligar = |c: String, senha: &str| json!({ "segredo": n["segredo"], "codigo": c, "senha": senha });
+    assert!(rpc_err(&st, "auth.doisPassosLigar", ligar(codigo(&segredo, passo()), "errada")).await.contains("senha"));
+    let fora: String = (0..1_000_000).map(|x| format!("{x:06}")).find(|c| (-2..=2).all(|d| codigo(&segredo, passo() + d) != *c)).unwrap();
+    assert!(rpc_err(&st, "auth.doisPassosLigar", ligar(fora.clone(), "1234")).await.contains("não confere"));
+    let p0 = passo();
+    let l = rpc(&st, "auth.doisPassosLigar", ligar(codigo(&segredo, p0), "1234")).await;
+    let recuperacao: Vec<String> = serde_json::from_value(l["codigos"].clone()).unwrap();
+    assert_eq!(recuperacao.len(), 8);
+    let guardado: String = sqlx::query_scalar("SELECT totp_segredo FROM utilizadores WHERE login = 'admin'").fetch_one(&st.pool).await.unwrap();
+    assert!(guardado.starts_with("kgs1:"), "o segredo fica cifrado");
+    assert_eq!(rpc(&st, "auth.doisPassosEstado", Value::Null).await["activo"], true);
+
+    // entrar: depois da senha certa, o código; sem sessão até lá
+    rpc(&st, "auth.logout", Value::Null).await;
+    let r = rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    assert_eq!(r, json!({ "dois_passos": true }));
+    assert!(rpc(&st, "auth.sessao", Value::Null).await.is_null());
+    rpc_err(&st, "auth.login", json!({ "login": "admin", "senha": "1234", "codigo": codigo(&segredo, p0) })).await;
+    let tentativas: i64 = sqlx::query_scalar("SELECT tentativas FROM utilizadores WHERE login = 'admin'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(tentativas, 1, "o código já usado não serve outra vez e conta como falha");
+    assert!(rpc_err(&st, "auth.login", json!({ "login": "admin", "senha": "errada", "codigo": codigo(&segredo, p0 + 1) })).await.contains("incorrect"));
+    let s = rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234", "codigo": codigo(&segredo, p0 + 1) })).await;
+    assert_eq!(s["login"], "admin");
+    // código de recuperação: uma vez
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234", "codigo": recuperacao[0].to_uppercase() })).await;
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc_err(&st, "auth.login", json!({ "login": "admin", "senha": "1234", "codigo": recuperacao[0] })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234", "codigo": recuperacao[1] })).await;
+    assert_eq!(rpc(&st, "auth.doisPassosEstado", Value::Null).await["codigos_restantes"], 6);
+
+    // pela Internet: com a política, quem não tem os dois passos não entra; o PIN não serve
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Ana", "login": "ana", "senha": "ana12345", "perfil": "CAIXA", "pin": "4321", "mudar_senha": false })).await;
+    let pol = rpc(&st, "seguranca.obter", Value::Null).await;
+    let mut nova = pol.clone();
+    nova["dois_passos_internet"] = json!(true);
+    nova["login_pin"] = json!(true);
+    rpc(&st, "seguranca.guardar", nova).await;
+    let pela_internet = |metodo: &'static str, params: Value| {
+        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true };
+        CONTEXTO.scope(ctx, super::dispatch(&st, metodo, params))
+    };
+    let e = pela_internet("auth.login", json!({ "login": "ana", "senha": "ana12345" })).await.unwrap_err().to_string();
+    assert!(e.contains("dois passos"), "{e}");
+    let e = pela_internet("auth.loginPin", json!({ "pin": "4321" })).await.unwrap_err().to_string();
+    assert!(e.contains("PIN não se usa pela Internet"), "{e}");
+    assert_eq!(pela_internet("auth.login", json!({ "login": "admin", "senha": "1234" })).await.unwrap(), json!({ "dois_passos": true }));
+    // na loja, a Ana entra como sempre
+    rpc(&st, "auth.logout", Value::Null).await;
+    assert_eq!(rpc(&st, "auth.login", json!({ "login": "ana", "senha": "ana12345" })).await["login"], "ana");
+
+    // o administrador repõe; o próprio desliga com senha e código
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234", "codigo": recuperacao[2] })).await;
+    assert!(rpc_err(&st, "auth.doisPassosDesligar", json!({ "senha": "1234", "codigo": fora })).await.contains("não confere"));
+    rpc(&st, "auth.doisPassosDesligar", json!({ "senha": "1234", "codigo": recuperacao[3] })).await;
+    assert_eq!(rpc(&st, "auth.doisPassosEstado", Value::Null).await["activo"], false);
+    let ana: i64 = sqlx::query_scalar("SELECT id FROM utilizadores WHERE login = 'ana'").fetch_one(&st.pool).await.unwrap();
+    rpc(&st, "utilizadores.doisPassosRepor", json!({ "id": ana })).await;
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auditoria WHERE acao = 'DOIS_PASSOS'").fetch_one(&st.pool).await.unwrap();
+    assert!(n >= 4, "{n}");
+    let _ = std::fs::remove_dir_all(&pasta);
+}

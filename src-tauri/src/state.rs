@@ -178,6 +178,13 @@ pub struct Contexto {
     pub posto: PostoAtual,
     /// Pedido da API de integração: a chave que o fez (os documentos ficam com ela e não entram no caixa).
     pub api_chave: Option<i64>,
+    /// O pedido chegou pela Internet (túnel da Cloudflare até este servidor), não da rede da loja.
+    pub pela_internet: bool,
+}
+
+/// O pedido em curso chegou pela Internet (acesso por subdomínio): pede mais na entrada (dois passos, sem PIN).
+pub fn pela_internet() -> bool {
+    contexto().is_some_and(|c| c.pela_internet)
 }
 
 tokio::task_local! {
