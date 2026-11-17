@@ -1,3 +1,5 @@
+pub mod acesso_web;
+mod dois_passos;
 mod atualizacao;
 mod avencas;
 mod auth;
@@ -166,6 +168,18 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "api.webhookSegredo" => crate::webhooks::renovar_segredo(st, p(params)?).await,
         "api.webhookTestar" => crate::webhooks::testar(st, p(params)?).await,
         "api.entregaReenviar" => crate::webhooks::reenviar(st, p(params)?).await,
+
+        // ---- verificação em dois passos (TOTP) ----
+        "auth.doisPassosEstado" => dois_passos::estado(st).await,
+        "auth.doisPassosNovo" => dois_passos::novo(st).await,
+        "auth.doisPassosLigar" => dois_passos::ligar(st, p(params)?).await,
+        "auth.doisPassosDesligar" => dois_passos::desligar(st, p(params)?).await,
+        "utilizadores.doisPassosRepor" => dois_passos::repor(st, p(params)?).await,
+
+        // ---- acesso pela Internet (subdomínio do KanGest por túnel da Cloudflare) ----
+        "web.estado" => acesso_web::estado(st, p(params)?).await,
+        "web.activar" => acesso_web::activar(st, p(params)?).await,
+        "web.desactivar" => acesso_web::desactivar(st).await,
 
         // ---- postos em rede (servidor / cliente) ----
         "rede.estado" => crate::rede::estado(st).await,

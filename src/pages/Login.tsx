@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { LockKeyhole } from "lucide-react";
+import { LockKeyhole, ShieldCheck } from "lucide-react";
 import { call } from "@/lib/api";
 import { useSession } from "@/store/session";
 import type { Sessao } from "@/lib/types";
@@ -13,6 +13,9 @@ export default function Login({ empresa }: { empresa: string | null }) {
   const [pin, setPin] = useState("");
   const [modo, setModo] = useState<"senha" | "pin">("senha");
   const [erro, setErro] = useState("");
+  // verificação em dois passos: a senha está certa e falta o código da aplicação (ou um de recuperação)
+  const [pedirCodigo, setPedirCodigo] = useState(false);
+  const [codigo, setCodigo] = useState("");
   const [busy, setBusy] = useState(false);
   const setSessao = useSession((s) => s.setSessao);
   const politica = usePolitica();
@@ -23,12 +26,17 @@ export default function Login({ empresa }: { empresa: string | null }) {
     setBusy(true);
     setErro("");
     try {
-      const s = await call<Sessao>(metodo, params);
+      const s = await call<Sessao | { dois_passos: true }>(metodo, params);
+      if ("dois_passos" in s) {
+        setPedirCodigo(true);
+        return;
+      }
       setSessao(s);
       nav(inicioDe(s), { replace: true });
     } catch (err) {
       setErro((err as Error).message);
-      setSenha("");
+      setCodigo("");
+      if (!pedirCodigo) setSenha("");
       setPin("");
     } finally {
       setBusy(false);
@@ -37,7 +45,14 @@ export default function Login({ empresa }: { empresa: string | null }) {
 
   function submeter(e: FormEvent) {
     e.preventDefault();
-    entrar("auth.login", { login, senha });
+    entrar("auth.login", pedirCodigo ? { login, senha, codigo } : { login, senha });
+  }
+
+  function recomecar() {
+    setPedirCodigo(false);
+    setCodigo("");
+    setSenha("");
+    setErro("");
   }
 
   useTecladoFisicoPin(comPin && modo === "pin", pin, setPin, () => entrar("auth.loginPin", { pin }));
@@ -71,7 +86,32 @@ export default function Login({ empresa }: { empresa: string | null }) {
           </div>
         )}
 
-        {modo === "pin" && comPin ? (
+        {pedirCodigo ? (
+          <form onSubmit={submeter} className="space-y-4">
+            <div className="flex gap-3 rounded-lg bg-brand-50 p-3 text-[13px] text-ink-2">
+              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
+              <span>Verificação em dois passos: escreva o código de 6 algarismos que a aplicação de autenticação mostra agora (ou um dos códigos de recuperação).</span>
+            </div>
+            <Field label="Código">
+              <Input
+                autoFocus
+                required
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={codigo}
+                onChange={(e) => setCodigo(e.target.value.slice(0, 12))}
+                className="h-11 text-center font-mono text-[20px] tracking-[0.3em]"
+                placeholder="000000"
+              />
+            </Field>
+            <Button size="lg" className="w-full" loading={busy}>
+              Confirmar
+            </Button>
+            <button type="button" onClick={recomecar} className="w-full text-[13px] text-ink-3 hover:text-ink">
+              Entrar com outro utilizador
+            </button>
+          </form>
+        ) : modo === "pin" && comPin ? (
           <TecladoPin valor={pin} onChange={setPin} ocupado={busy} onConfirmar={() => entrar("auth.loginPin", { pin })} />
         ) : (
           <form onSubmit={submeter} className="space-y-4">

@@ -91,3 +91,26 @@ CREATE TABLE IF NOT EXISTS limites (
     janela TEXT NOT NULL,             -- hora UTC (AAAA-MM-DDTHH)
     n INTEGER NOT NULL DEFAULT 0
 );
+
+-- Segredo de cada computador registado (só o resumo SHA-256), dado ao confirmar o registo. Autentica os pedidos
+-- seguintes desse computador (renovação, acesso pela Internet): o NIF e o código do computador não são segredos.
+CREATE TABLE IF NOT EXISTS segredos_maquina (
+    nif TEXT NOT NULL,
+    maquina TEXT NOT NULL,
+    segredo_hash TEXT NOT NULL,
+    criado_em TEXT NOT NULL,
+    PRIMARY KEY (nif, maquina)
+);
+
+-- Acesso pela Internet: um subdomínio por empresa (ex.: loja.kangest.ao), servido por um túnel da Cloudflare até ao
+-- KanGest servidor da loja. O túnel e o registo DNS são criados pelo servidor de licenças, em nome do produtor.
+CREATE TABLE IF NOT EXISTS subdominios (
+    nif TEXT PRIMARY KEY,
+    nome TEXT NOT NULL UNIQUE,
+    maquina TEXT NOT NULL,            -- computador onde o túnel corre
+    tunel_id TEXT NOT NULL,
+    dns_id TEXT,
+    porta INTEGER NOT NULL,
+    criado_em TEXT NOT NULL,
+    actualizado_em TEXT NOT NULL
+);

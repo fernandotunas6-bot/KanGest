@@ -14,7 +14,8 @@ A análise do sistema antigo e o roteiro estão em [docs/ANALISE-KIGEST.md](docs
 Outros produtos na mesma página: [SIGA Plus](https://www.portal-siga.com) (gestão escolar) e o projecto da
 [Livraria Adventista](https://livrariaadventista.ao). O site tem as fontes em [site-fonte/](site-fonte/) (páginas, estilos, `config.json` com versão, downloads e contactos)
 e gera-se com `python3 scripts/gerar-site.py` para [site/](site/). Publica-se no Cloudflare Pages (projecto `kangest`) com
-`CLOUDFLARE_API_TOKEN=… python3 scripts/publicar-site-cloudflare.py`; a cópia no GitHub Pages vem do ramo `gh-pages`.
+`CLOUDFLARE_API_TOKEN=… python3 scripts/publicar-site-cloudflare.py`, ou sozinho a cada mudança no `main` (`.github/workflows/site.yml`,
+com o segredo `CLOUDFLARE_API_TOKEN`; ver [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md)); a cópia no GitHub Pages vem do ramo `gh-pages`.
 
 ## Requisitos
 

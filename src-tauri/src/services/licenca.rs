@@ -536,8 +536,23 @@ pub(crate) fn servidor() -> String {
     std::env::var("KANGEST_LICENCAS_URL").ok().filter(|u| !u.trim().is_empty()).unwrap_or_else(|| SERVIDOR.into()).trim_end_matches('/').to_string()
 }
 
+/// Segredo deste computador, dado pelo servidor de licenças ao confirmar o registo (None antes disso, ou se a base veio
+/// de outro computador e o segredo cifrado já não abre).
+async fn segredo_maquina(st: &AppState) -> Option<String> {
+    crate::segredos::ler(&st.pool, "licenca.segredo").await.ok().flatten().filter(|s| !s.is_empty())
+}
+
+/// Credenciais deste computador no servidor de licenças: NIF, código do computador e segredo.
+pub(crate) async fn credenciais(st: &AppState) -> AppResult<Value> {
+    let (_, nif) = dados_empresa(st).await?;
+    let segredo = segredo_maquina(st).await.ok_or_else(|| {
+        AppError::msg("Registe este KanGest em Sistema → Licença e Assinatura (ou confirme de novo o registo) para usar o acesso pela Internet.")
+    })?;
+    Ok(json!({ "nif": nif, "maquina": id_maquina(), "segredo": segredo }))
+}
+
 /// POST ao servidor de licenças. Os erros que o servidor explica passam ao utilizador tal como vêm.
-async fn chamar_servidor(caminho: &str, corpo: Value) -> AppResult<Value> {
+pub(crate) async fn chamar_servidor(caminho: &str, corpo: Value) -> AppResult<Value> {
     let url = format!("{}{caminho}", servidor());
     let dados = serde_json::to_vec(&corpo)?;
     let r = tokio::task::spawn_blocking(move || {
@@ -622,6 +637,10 @@ pub async fn confirmar(st: &AppState, i: ConfirmarIn) -> AppResult<Value> {
     let s = st.exigir_perm("sistema.configuracoes")?;
     let (_, nif) = dados_empresa(st).await?;
     let v = chamar_servidor("/v1/confirmar", json!({ "nif": nif, "maquina": id_maquina(), "codigo": i.codigo.trim() })).await?;
+    // segredo deste computador: autentica as renovações e o acesso pela Internet (o NIF e o computador não são segredos)
+    if let Some(segredo) = v.get("segredo").and_then(Value::as_str) {
+        crate::segredos::gravar(&st.pool, "licenca.segredo", segredo).await?;
+    }
     cfg_gravar(&st.pool, "licenca.registada", "1").await?;
     cfg_gravar(&st.pool, "licenca.sincronizada_em", &db::agora()).await?;
     aplicar(st, &v, Some(s.id)).await?;
@@ -659,7 +678,8 @@ pub async fn sincronizar(st: &AppState, i: SincronizarIn) -> AppResult<Value> {
         }
     }
     let (_, nif) = dados_empresa(st).await?;
-    let v = chamar_servidor("/v1/renovar", json!({ "nif": nif, "maquina": id_maquina(), "versao": env!("CARGO_PKG_VERSION") })).await?;
+    let segredo = segredo_maquina(st).await;
+    let v = chamar_servidor("/v1/renovar", json!({ "nif": nif, "maquina": id_maquina(), "versao": env!("CARGO_PKG_VERSION"), "segredo": segredo })).await?;
     cfg_gravar(&st.pool, "licenca.sincronizada_em", &db::agora()).await?;
     let mudou = aplicar(st, &v, Some(s.id)).await?;
     Ok(json!({ "mudou": mudou, "mensagem": v.get("mensagem"), "estado": calcular(st).await? }))

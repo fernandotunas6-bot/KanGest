@@ -91,6 +91,10 @@ uma versão nova do KanGest; as licenças antigas continuam válidas enquanto a 
 - As datas da experiência e do relógio vão seladas na base (`licenca.selo`, HMAC-SHA256): editá-las à mão não dá mais
   dias nem esconde um relógio atrasado. O executável oficial leva um selo de integridade e não emite se tiver sido
   alterado nem com um depurador ligado. Ver [SEGURANCA.md](SEGURANCA.md).
+- **Segredo por computador**: ao confirmar o registo, o servidor dá ao computador um segredo (guardado cifrado no
+  KanGest e, no servidor, só o resumo SHA-256). As renovações e o acesso pela Internet levam-no: o NIF e o código
+  do computador não são segredos (vão no código do pedido). Os computadores registados antes renovam como antes; para
+  o acesso pela Internet confirmam de novo o registo.
 - Em rede, a licença é a do servidor: os postos pedem-lhe o estado e é ele que emite os documentos. O registo online
   faz-se também no servidor (é o computador dele que fica registado).
 - Ao receber uma licença do servidor, o KanGest nunca troca uma licença válida que dure mais (por exemplo, emitida à

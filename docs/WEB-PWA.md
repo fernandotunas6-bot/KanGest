@@ -67,7 +67,30 @@ ficam guardados** no aparelho: o service worker (`sw.js`) não toca nos pedidos 
   local, em ecrã inteiro).
 - Sem HTTPS (rede local por `http://`), o Android cria um atalho no ecrã principal; o resto funciona igual.
 
-### HTTPS e acesso fora da loja (túnel da Cloudflare)
+### Endereço próprio do KanGest (como os programas na nuvem)
+
+Em **Configurações → Rede → Acesso pela Internet**, no computador servidor, escolhe-se um nome e o KanGest fica em
+`https://<nome>.<domínio do KanGest>` (ex.: `https://kianda.kangest.ao`), em qualquer browser, com HTTPS e sem abrir
+portas no router:
+
+1. O KanGest tem de estar **registado** (Sistema → Licença e Assinatura) e com a assinatura em dia; o computador é o
+   **servidor** da rede, com **«Permitir postos pelo browser»** ligado.
+2. Escreve-se o nome (3 a 30 letras minúsculas, algarismos ou hífenes) e carrega-se em **Activar**. O servidor de
+   licenças cria, em nome do produtor, um túnel da Cloudflare até este computador e o endereço; o KanGest descarrega
+   o `cloudflared` da release oficial (conferido pelo SHA-256 publicado) e liga o túnel. Volta a ligá-lo sozinho ao
+   abrir o programa e se a ligação cair.
+3. Quem abre o endereço entra como num posto no browser: chave de rede e n.º do posto na primeira vez, depois o
+   utilizador e a senha (ou PIN). Os pedidos vão cifrados com a chave de rede, por cima do HTTPS.
+
+Os dados continuam neste computador: ele tem de estar ligado e com Internet para se entrar de fora; na loja tudo
+continua a funcionar sem Internet. Mudar o nome mantém o túnel; **Desligar** apaga o endereço. Atrás do túnel, o
+KanGest conhece o IP verdadeiro de cada aparelho (`CF-Connecting-IP`, aceite só do próprio computador), por isso o
+bloqueio por chave de rede errada atinge só quem errou. Quem entra assim não pode usar o PIN, e o administrador
+pode exigir-lhe a verificação em dois passos ([UTILIZADORES.md](UTILIZADORES.md)).
+
+O produtor activa este serviço uma vez, com o domínio do KanGest na Cloudflare ([CLOUDFLARE.md](CLOUDFLARE.md)).
+
+### HTTPS e acesso fora da loja com o seu domínio (túnel da Cloudflare)
 
 O túnel da Cloudflare dá HTTPS e um endereço próprio (ex.: `https://loja.empresa.ao`) sem abrir portas no router —
 é também o caminho para usar o KanGest fora da loja (dono a ver vendas em casa, vendedor externo, segunda loja):

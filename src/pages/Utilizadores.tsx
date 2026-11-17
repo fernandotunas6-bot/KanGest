@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { KeyRound, LockOpen, Plus, ShieldCheck, Trash2, UserCog, UsersRound } from "lucide-react";
+import { KeyRound, LockOpen, Plus, ShieldCheck, ShieldOff, Trash2, UserCog, UsersRound } from "lucide-react";
 import { call } from "@/lib/api";
 import { dataHora, hojeISO } from "@/lib/format";
 import { GRUPOS_PERMISSOES, TODAS_PERMISSOES } from "@/lib/permissoes";
@@ -21,6 +21,7 @@ interface Utilizador {
   permissoes_proprias: boolean;
   limite_desconto: number;
   tem_pin: boolean;
+  dois_passos: boolean;
   mudar_senha: boolean;
   ultimo_acesso: string | null;
   bloqueado_ate: string | null;
@@ -43,6 +44,7 @@ interface Politica {
   bloqueio_min: number;
   inatividade_min: number;
   login_pin: boolean;
+  dois_passos_internet: boolean;
 }
 
 const VISTAS = [
@@ -176,6 +178,17 @@ function ListaUtilizadores() {
     }
   }
 
+  async function reporDoisPassos(x: Utilizador) {
+    if (!window.confirm(`Desligar a verificação em dois passos de ${x.nome}? Volta a entrar só com a senha até a ligar de novo.`)) return;
+    try {
+      await call("utilizadores.doisPassosRepor", { id: x.id });
+      toast.success(`Verificação em dois passos de ${x.nome} desligada.`);
+      atualizar();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+
   async function desbloquear(x: Utilizador) {
     try {
       await call("utilizadores.desbloquear", { id: x.id });
@@ -208,6 +221,7 @@ function ListaUtilizadores() {
               <Th>Utilizador</Th>
               <Th>Perfil</Th>
               <Th>PIN</Th>
+              <Th>Dois passos</Th>
               <Th>Último acesso</Th>
               <Th>Estado</Th>
               <Th className="text-right">Acções</Th>
@@ -228,6 +242,7 @@ function ListaUtilizadores() {
                   {x.permissoes_proprias && <Badge className="ml-1">personalizado</Badge>}
                 </Td>
                 <Td>{x.tem_pin ? <Badge tone="ok">Definido</Badge> : <span className="text-ink-3">—</span>}</Td>
+                <Td>{x.dois_passos ? <Badge tone="ok">Ligada</Badge> : <span className="text-ink-3">—</span>}</Td>
                 <Td className="text-ink-2">{x.ultimo_acesso ? dataHora(x.ultimo_acesso) : "nunca entrou"}</Td>
                 <Td>{estado(x)}</Td>
                 <Td>
@@ -235,6 +250,11 @@ function ListaUtilizadores() {
                     {x.bloqueado_ate && (
                       <Button size="sm" variant="secondary" onClick={() => desbloquear(x)}>
                         <LockOpen className="size-4" /> Desbloquear
+                      </Button>
+                    )}
+                    {x.dois_passos && (
+                      <Button size="sm" variant="ghost" onClick={() => reporDoisPassos(x)} title="Para quem perdeu o telemóvel e os códigos de recuperação">
+                        <ShieldOff className="size-4" /> Repor dois passos
                       </Button>
                     )}
                     <Button size="sm" variant="ghost" onClick={() => redefinir(x)} title="Gera uma senha provisória que o utilizador tem de mudar ao entrar">
@@ -595,6 +615,16 @@ function Seguranca() {
           <span className="font-medium">Permitir entrar só com o PIN</span>
           <span className="block text-[12.5px] text-ink-3">
             Útil nos terminais POS para trocar de operador depressa. Cada PIN é único; após 5 PIN errados o posto espera 5 minutos.
+          </span>
+        </span>
+      </label>
+      <label className="mt-3 flex items-start gap-3 rounded-lg border border-line p-3">
+        <input type="checkbox" className="mt-1" checked={p.dois_passos_internet} onChange={(e) => setP({ ...p, dois_passos_internet: e.target.checked })} />
+        <span>
+          <span className="font-medium">Exigir a verificação em dois passos a quem entra pela Internet</span>
+          <span className="block text-[12.5px] text-ink-3">
+            Pelo subdomínio da empresa só entra quem tiver ligado a verificação (menu da conta → Verificação em dois passos). Na rede da loja nada muda. Pela Internet, o PIN
+            nunca serve para entrar.
           </span>
         </span>
       </label>
