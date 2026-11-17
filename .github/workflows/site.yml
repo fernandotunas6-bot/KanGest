@@ -1,0 +1,68 @@
+# Publica o site (kangest.pages.dev) no Cloudflare Pages sempre que muda no main, ou à mão em Actions → Site → Run workflow.
+# Gera o site a partir de site-fonte/ (scripts/gerar-site.py, com os cabeçalhos de segurança em _headers) e envia-o
+# com scripts/publicar-site-cloudflare.py.
+#
+# Precisa do segredo CLOUDFLARE_API_TOKEN (Settings → Secrets and variables → Actions), com a permissão
+# «Account · Cloudflare Pages · Edit» e «Account Settings · Read»; ou indique a conta na variável CLOUDFLARE_ACCOUNT_ID.
+# Sem o segredo, o workflow avisa e não publica.
+name: Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site-fonte/**"
+      - "site/**"
+      - "scripts/gerar-site.py"
+      - "scripts/publicar-site-cloudflare.py"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# uma publicação de cada vez; a mais recente ganha
+concurrency:
+  group: site
+  cancel-in-progress: true
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    env:
+      # os segredos não se usam directamente nas condições dos passos
+      TEM_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Gerar o site
+        run: python3 scripts/gerar-site.py
+
+      - name: Publicar no Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::warning::Sem o segredo CLOUDFLARE_API_TOKEN: o site não foi publicado (ver o início de .github/workflows/site.yml)."
+            exit 0
+          fi
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || unset CLOUDFLARE_ACCOUNT_ID
+          python3 scripts/publicar-site-cloudflare.py
+
+      - name: Confirmar o site publicado
+        if: env.TEM_TOKEN == 'true'
+        run: |
+          versao="$(python3 -c "import json; print(json.load(open('site-fonte/config.json'))['versao'])")"
+          for i in 1 2 3 4 5 6; do
+            pagina="$(curl -fsSL https://kangest.pages.dev/baixar || true)"
+            if echo "$pagina" | grep -q "KanGest $versao"; then break; fi
+            sleep 10
+          done
+          echo "$pagina" | grep -q "KanGest $versao" || { echo "::error::kangest.pages.dev não mostra a versão $versao."; exit 1; }
+          curl -fsSIL https://kangest.pages.dev/ | grep -qi "^content-security-policy:" || { echo "::error::Sem os cabeçalhos de segurança (_headers)."; exit 1; }
+          echo "Site publicado com a versão $versao e os cabeçalhos de segurança."

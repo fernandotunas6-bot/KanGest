@@ -93,6 +93,12 @@ bloqueio por chaves erradas; o Access tem o seu próprio registo (Zero Trust →
   o formsubmit.co dos formulários e a Web Analytics da Cloudflare), HSTS, `X-Frame-Options: DENY`, `nosniff`,
   `Referrer-Policy` e `Permissions-Policy`. O `publicar-site-cloudflare.py` envia-o como configuração do Pages.
 - No painel: Pages → `kangest` → **Metrics → Web Analytics** (sem cookies; a CSP já o permite) e **Custom domains**.
+- **Publicação automática** (`.github/workflows/site.yml`): cada push no `main` que mude `site-fonte/`, `site/` ou os
+  scripts do site gera o site e publica-o no Pages; também se corre à mão em **Actions → Site → Run workflow**. No fim
+  confirma que `kangest.pages.dev` mostra a versão do `site-fonte/config.json` e os cabeçalhos de segurança.
+  Activa-se uma vez: crie um token em **My Profile → API Tokens** com «Account · Cloudflare Pages · Edit» e
+  «Account · Account Settings · Read» e guarde-o no GitHub em **Settings → Secrets and variables → Actions** como
+  `CLOUDFLARE_API_TOKEN`. Sem ele, o workflow só avisa.
 
 ## 4. Próximos recursos
 
