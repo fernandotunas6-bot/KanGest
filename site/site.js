@@ -90,6 +90,90 @@
     });
   });
 
+  // página de entrada no KanGest web: o servidor de licenças diz o endereço da empresa e se o computador da loja está ligado
+  const fe = $("#formEntrar");
+  if (fe) {
+    const W = C.web || {};
+    const campo = $("#en-nome", fe), erro = $("[data-erro]", fe), botao = $("button[type=submit]", fe);
+    const desligado = $("[data-desligado]", fe), mesmoAssim = $("[data-mesmo-assim]", fe);
+    const sufixo = $("[data-sufixo]", fe);
+    if (W.dominio) { sufixo.textContent = "." + W.dominio; sufixo.hidden = false; }
+    const CHAVE = "kangest.empresas";
+    const lerRecentes = () => { try { return JSON.parse(localStorage.getItem(CHAVE) || "[]").filter((e) => e && e.nome); } catch { return []; } };
+    const gravarRecentes = (l) => { try { localStorage.setItem(CHAVE, JSON.stringify(l.slice(0, 5))); } catch { /* sem armazenamento: não lembra */ } };
+    // aceita «loja», «loja.kangest.ao» ou o endereço completo colado
+    const limpar = (v) => {
+      let t = String(v || "").trim().toLowerCase().replace(/^https?:\/\//, "");
+      t = t.split(/[/?#]/)[0];
+      if (t.includes(".")) t = t.split(".")[0];
+      return t;
+    };
+    const ir = (url, nome) => {
+      if (fe.lembrar.checked) gravarRecentes([{ nome, quando: new Date().toISOString().slice(0, 10) }, ...lerRecentes().filter((e) => e.nome !== nome)]);
+      location.href = url;
+    };
+    const mostrarRecentes = () => {
+      const l = lerRecentes(), caixa = $("[data-recentes]", fe), lista = $("[data-lista-recentes]", fe);
+      lista.textContent = "";
+      caixa.hidden = !l.length;
+      l.forEach((e) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "empresa";
+        b.textContent = e.nome + (W.dominio ? "." + W.dominio : "");
+        const q = document.createElement("small");
+        q.textContent = e.quando || "";
+        b.append(q);
+        b.addEventListener("click", () => { campo.value = e.nome; fe.requestSubmit(); });
+        lista.append(b);
+      });
+      if (l.length) {
+        const x = document.createElement("button");
+        x.type = "button";
+        x.className = "esquecer";
+        x.textContent = "Esquecer estas empresas neste aparelho";
+        x.addEventListener("click", () => { gravarRecentes([]); mostrarRecentes(); });
+        lista.append(x);
+      }
+    };
+    const ocupado = (sim) => { botao.disabled = sim; botao.firstChild.textContent = sim ? "A procurar… " : "Continuar "; };
+    fe.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      erro.textContent = "";
+      desligado.hidden = true;
+      const nome = limpar(campo.value);
+      campo.value = nome;
+      if (!/^[a-z0-9-]{3,30}$/.test(nome)) return (erro.textContent = "Escreva o endereço da empresa: 3 a 30 letras minúsculas, algarismos ou hífenes.");
+      if (!W.licencas) return (erro.textContent = "O acesso pela Internet ainda não está disponível.");
+      ocupado(true);
+      try {
+        const r = await fetch(`${W.licencas}/v1/web/endereco?nome=${encodeURIComponent(nome)}`, { cache: "no-store" });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) {
+          erro.textContent = d.erro || "Não foi possível encontrar a empresa agora. Tente de novo dentro de momentos.";
+        } else if (d.ligado === false) {
+          mesmoAssim.href = d.endereco;
+          mesmoAssim.onclick = (e) => { e.preventDefault(); ir(d.endereco, nome); };
+          desligado.hidden = false;
+        } else {
+          return ir(d.endereco, nome);
+        }
+      } catch {
+        erro.textContent = "Não foi possível contactar o serviço do KanGest. Verifique a ligação à Internet.";
+        if (W.dominio) {
+          const url = `https://${nome}.${W.dominio}`;
+          mesmoAssim.href = url;
+          mesmoAssim.onclick = (e) => { e.preventDefault(); ir(url, nome); };
+          desligado.hidden = false;
+        }
+      }
+      ocupado(false);
+    });
+    mostrarRecentes();
+    const pedida = new URLSearchParams(location.search).get("empresa");
+    if (pedida) { campo.value = limpar(pedida); fe.requestSubmit(); }
+  }
+
   // pedido de contacto / orçamento
   const fc = $("#formContacto");
   if (fc) {

@@ -114,6 +114,16 @@ Nomes reservados (`www`, `api`, `admin`, `licencas`, `loja`…) estão em `servi
 de uma só empresa; uma empresa tem um só endereço, no computador onde o activou (para o mudar de computador,
 desliga-se primeiro, de qualquer computador registado da empresa).
 
+**Página de entrada comum** (`/entrar` no site, botão **Entrar** no topo de todas as páginas): a pessoa escreve o
+nome da empresa e o site pergunta ao servidor de licenças (`GET /v1/web/endereco?nome=…`, público, 120 pedidos por
+hora por IP) o endereço e se o túnel está ligado. Encaminha para `https://<nome>.<domínio>`, ou avisa que o
+computador da loja está desligado. Lembra as empresas usadas no aparelho. `https://<site>/entrar?empresa=<nome>`
+entra directamente (bom para um atalho ou um código QR na loja).
+
+**Quando o domínio estiver na Cloudflare**, além dos passos 2 e 3: em `site-fonte/config.json` ponha
+`web.dominio` (ex.: `"kangest.ao"`), para o campo mostrar o sufixo. Se o site passar para o domínio (ex.:
+`kangest.ao` ou `app.kangest.ao` no projecto Pages, **Custom domains**), mude também `site`.
+
 ## 4. Site
 
 - `python3 scripts/gerar-site.py` gera `site/_headers` com a CSP (o hash SHA-256 do script de configuração em linha,

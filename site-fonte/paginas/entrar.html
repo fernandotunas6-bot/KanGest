@@ -1,0 +1,56 @@
+<!--{"titulo": "Entrar no KanGest web · KanGest", "descricao": "Entre no KanGest da sua empresa a partir de qualquer computador, tablet ou telemóvel, com o endereço próprio da empresa.", "menu": "entrar"}-->
+<section class="heroi heroi-pagina heroi-entrar">
+  <div class="cont entrar">
+    <div class="entrar-intro">
+      <nav class="migalhas" aria-label="Caminho"><a href="index.html">Início</a><span>/</span><span>Entrar</span></nav>
+      <span class="olho">KanGest web</span>
+      <h1>Entre no KanGest da sua empresa</h1>
+      <p class="sub">De qualquer computador, tablet ou telemóvel, no browser e sem instalar nada. Os dados continuam no computador da sua loja.</p>
+    </div>
+    <ul class="entrar-pontos">
+      <li>{{icone:cadeado}}<span>Ligação cifrada (HTTPS) até ao computador da loja, sem abrir portas no router.</span></li>
+      <li>{{icone:escudo}}<span>O mesmo utilizador e a mesma senha da loja; a empresa pode exigir a verificação em dois passos.</span></li>
+      <li>{{icone:loja}}<span>Na loja, sem Internet, o KanGest continua a funcionar pela rede local.</span></li>
+    </ul>
+
+    <form class="formulario entrar-cartao" id="formEntrar" novalidate>
+      <h3>Endereço da empresa</h3>
+      <p class="nota">O nome que o administrador escolheu em <b>Configurações → Rede → Acesso pela Internet</b>.</p>
+      <div class="campo">
+        <label for="en-nome">Endereço</label>
+        <div class="endereco-empresa">
+          <input id="en-nome" name="nome" autocomplete="organization" autocapitalize="none" spellcheck="false" inputmode="url" placeholder="nome-da-empresa" required>
+          <span class="sufixo" data-sufixo hidden></span>
+        </div>
+      </div>
+      <label class="lembrar"><input type="checkbox" name="lembrar" checked> Lembrar neste aparelho</label>
+      <button class="btn btn-verde" type="submit">Continuar {{icone:seta}}</button>
+      <p class="erro-form" data-erro role="alert"></p>
+      <div class="aviso-loja" data-desligado hidden>
+        <p><b>O computador da loja parece desligado ou sem Internet.</b> O KanGest web só abre com ele ligado. Ligue-o (ou peça a alguém na loja) e tente de novo.</p>
+        <a class="btn btn-linha btn-pequeno" data-mesmo-assim href="#">Tentar mesmo assim {{icone:seta}}</a>
+      </div>
+      <div class="recentes" data-recentes hidden>
+        <p class="nota">Empresas neste aparelho</p>
+        <div class="recentes-lista" data-lista-recentes></div>
+      </div>
+    </form>
+  </div>
+</section>
+
+<section>
+  <div class="cont grade-3">
+    <div class="recurso">
+      <h3>Ainda não tem endereço?</h3>
+      <p>No computador servidor da loja, abra <b>Configurações → Rede → Acesso pela Internet</b>, escolha um nome e active. Fica pronto num minuto, com a assinatura em dia.</p>
+    </div>
+    <div class="recurso">
+      <h3>Dentro da loja</h3>
+      <p>Os outros computadores, tablets e terminais POS entram pela rede local, mesmo sem Internet: vejam o endereço em <b>Configurações → Rede</b>.</p>
+    </div>
+    <div class="recurso">
+      <h3>Instalar como aplicação</h3>
+      <p>No telemóvel ou no tablet, depois de entrar, use <b>Adicionar ao ecrã principal</b> (ou <b>Instalar aplicação</b>) para abrir o KanGest como uma app.</p>
+    </div>
+  </div>
+</section>

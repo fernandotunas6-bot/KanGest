@@ -88,6 +88,9 @@ KanGest conhece o IP verdadeiro de cada aparelho (`CF-Connecting-IP`, aceite só
 bloqueio por chave de rede errada atinge só quem errou. Quem entra assim não pode usar o PIN, e o administrador
 pode exigir-lhe a verificação em dois passos ([UTILIZADORES.md](UTILIZADORES.md)).
 
+Fora da loja também se entra pelo site: botão **Entrar** (página `/entrar`), escreve-se o nome da empresa e o
+site leva ao endereço dela, ou avisa se o computador da loja estiver desligado.
+
 O produtor activa este serviço uma vez, com o domínio do KanGest na Cloudflare ([CLOUDFLARE.md](CLOUDFLARE.md)).
 
 ### HTTPS e acesso fora da loja com o seu domínio (túnel da Cloudflare)
