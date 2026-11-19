@@ -5220,3 +5220,98 @@ async fn utilizador_de_uma_loja() {
     assert_eq!(rpc(&st, "dashboard", Value::Null).await["vendas_hoje"], 342000);
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Auditoria séria: o antes e o depois de cada ficha, sem senhas nem imagens, e o selo em cadeia que denuncia o que
+/// se mexer na base de dados por fora (linhas alteradas no meio ou apagadas no fim).
+#[tokio::test]
+async fn auditoria_com_antes_depois_e_selo() {
+    let (st, pasta) = base_com_admin("auditoria-seria").await;
+    let hoje = db::hoje();
+
+    // artigo: criar, alterar, gravar sem mudanças
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Caneta azul", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    let alterado = json!({ "id": art, "descricao": "Caneta azul BIC", "taxa_iva_id": 1, "preco1": 120000 });
+    rpc(&st, "artigos.guardar", alterado.clone()).await;
+    rpc(&st, "artigos.guardar", alterado).await;
+    let h = rpc(&st, "auditoria.historico", json!({ "entidade": "artigos", "registo_id": art })).await;
+    let h = h.as_array().unwrap();
+    assert_eq!(h.len(), 2, "uma criação e uma alteração (a gravação sem mudanças não conta): {h:?}");
+    assert_eq!(h[0]["acao"], "ALTERAR");
+    assert_eq!(h[0]["antes"]["preco1"], 100000);
+    assert_eq!(h[0]["depois"]["preco1"], 120000);
+    assert_eq!(h[0]["depois"]["descricao"], "Caneta azul BIC");
+    assert!(h[0]["antes"].get("taxa_iva_id").is_none(), "numa alteração só ficam os campos que mudaram");
+    assert!(h[0]["detalhe"].as_str().unwrap().contains("preço 1"), "{}", h[0]["detalhe"]);
+    assert_eq!(h[0]["origem"], "local");
+    assert_eq!(h[0]["utilizador"], "Admin");
+    assert_eq!(h[1]["acao"], "CRIAR");
+    assert_eq!(h[1]["depois"]["descricao"], "Caneta azul");
+
+    // utilizador: a senha e o PIN nunca vão para o registo
+    let u = rpc(&st, "utilizadores.guardar", json!({ "nome": "Operador", "login": "caixa1", "perfil": "CAIXA", "senha": "caixa123", "mudar_senha": false })).await["id"].as_i64().unwrap();
+    rpc(&st, "utilizadores.guardar", json!({ "id": u, "nome": "Operador", "login": "caixa1", "perfil": "CAIXA", "pin": "4321" })).await;
+    let hu = rpc(&st, "auditoria.historico", json!({ "entidade": "utilizadores", "registo_id": u })).await;
+    let texto = hu.to_string();
+    let hash: String = sqlx::query_scalar("SELECT senha_hash FROM utilizadores WHERE id = ?").bind(u).fetch_one(&st.pool).await.unwrap();
+    assert!(!texto.contains(&hash) && !texto.contains("caixa123") && !texto.contains("4321"), "segredos no registo: {texto}");
+    assert_eq!(hu[1]["depois"]["senha_hash"], "•••");
+    assert!(hu[0]["depois"]["pin_hash"].as_str().unwrap().starts_with("•••"), "{}", hu[0]);
+
+    // configurações: só as chaves que mudaram
+    rpc(&st, "seguranca.guardar", json!({ "senha_min": 9, "tentativas": 4, "bloqueio_min": 15, "inatividade_min": 10, "login_pin": true })).await;
+    let cfg = rpc(&st, "auditoria.listar", json!({ "de": hoje, "ate": hoje, "entidade": "config" })).await;
+    let cfg = cfg.as_array().unwrap();
+    assert_eq!(cfg.len(), 1, "{cfg:?}");
+    assert!(cfg[0]["depois"].as_object().unwrap().values().any(|v| v == "9"), "{}", cfg[0]);
+    assert_eq!(cfg[0]["entidade_nome"], "Configurações");
+
+    // filtros: texto, acção e utilizador
+    let por_texto = rpc(&st, "auditoria.listar", json!({ "de": hoje, "ate": hoje, "texto": "BIC" })).await;
+    assert!(por_texto.as_array().unwrap().iter().all(|l| l["entidade"] == "artigos"));
+    assert!(!por_texto.as_array().unwrap().is_empty());
+    let criacoes = rpc(&st, "auditoria.listar", json!({ "de": hoje, "ate": hoje, "evento": "CRIAR" })).await;
+    assert_eq!(criacoes.as_array().unwrap().len(), 2);
+    let opcoes = rpc(&st, "auditoria.opcoes", Value::Null).await;
+    assert!(opcoes["acoes"].as_array().unwrap().iter().any(|a| a == "ALTERAR"));
+    assert!(opcoes["fichas"].as_array().unwrap().iter().any(|f| f["nome"] == "Artigo"));
+
+    // selo: todas as linhas seladas e a cadeia íntegra
+    let sem_selo: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auditoria WHERE selo IS NULL").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(sem_selo, 0);
+    let v = rpc(&st, "auditoria.verificar", Value::Null).await;
+    assert_eq!(v["integra"], true, "{v}");
+
+    // pelo programa não se apaga nem se altera
+    assert!(sqlx::query("DELETE FROM auditoria").execute(&st.pool).await.is_err());
+    assert!(sqlx::query("UPDATE auditoria SET detalhe = 'outra coisa' WHERE id = 1").execute(&st.pool).await.is_err());
+    assert!(sqlx::query("UPDATE auditoria SET selo = 'x' WHERE id = 1").execute(&st.pool).await.is_err());
+
+    // por fora (sem os gatilhos): mudar uma linha do meio parte a cadeia nessa linha
+    let alvo: i64 = sqlx::query_scalar("SELECT id FROM auditoria WHERE acao = 'ALTERAR' AND entidade = 'artigos'").fetch_one(&st.pool).await.unwrap();
+    sqlx::query("DROP TRIGGER auditoria_nao_se_altera").execute(&st.pool).await.unwrap();
+    sqlx::query("UPDATE auditoria SET depois = '{\"preco1\":110000}' WHERE id = ?").bind(alvo).execute(&st.pool).await.unwrap();
+    let v = rpc(&st, "auditoria.verificar", Value::Null).await;
+    assert_eq!(v["integra"], false);
+    assert_eq!(v["problema"]["id"], alvo, "{v}");
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+
+    // noutra base: apagar as últimas linhas por fora fica escrito no próprio registo
+    let (st, pasta) = base_com_admin("auditoria-quebra").await;
+    rpc(&st, "entidades.guardar", json!({ "nome": "Cliente A", "nif": "5417000001" })).await;
+    rpc(&st, "entidades.guardar", json!({ "nome": "Cliente B", "nif": "5417000002" })).await;
+    assert_eq!(rpc(&st, "auditoria.verificar", Value::Null).await["integra"], true);
+    let ultimo: i64 = sqlx::query_scalar("SELECT MAX(id) FROM auditoria").fetch_one(&st.pool).await.unwrap();
+    sqlx::query("DROP TRIGGER auditoria_nao_se_apaga").execute(&st.pool).await.unwrap();
+    sqlx::query("DELETE FROM auditoria WHERE id = ?").bind(ultimo).execute(&st.pool).await.unwrap();
+    // a actividade seguinte dá pela falta e deixa-o escrito, selado
+    rpc(&st, "entidades.guardar", json!({ "nome": "Cliente C", "nif": "5417000003" })).await;
+    let quebra: String = sqlx::query_scalar("SELECT detalhe FROM auditoria WHERE acao = 'AUDITORIA_QUEBRA'").fetch_one(&st.pool).await.unwrap();
+    assert!(quebra.contains(&format!("n.º {ultimo}")), "{quebra}");
+    let v = rpc(&st, "auditoria.verificar", Value::Null).await;
+    assert_eq!(v["integra"], false);
+    assert_eq!(v["quebras"], 1);
+    assert!(v["problema"]["motivo"].as_str().unwrap().contains("fora do KanGest"), "{v}");
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

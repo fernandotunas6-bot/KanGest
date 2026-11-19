@@ -11,6 +11,7 @@ import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Ta
 import { InputData } from "@/components/InputData";
 import { useTabelas } from "@/lib/hooks";
 import { Avatar } from "@/components/MeuPerfil";
+import { AbasFicha, PainelAuditoria } from "@/components/Auditoria";
 
 interface Utilizador {
   id: number;
@@ -90,7 +91,7 @@ export default function Utilizadores() {
       {vista === "utilizadores" && <ListaUtilizadores />}
       {vista === "perfis" && <Perfis />}
       {vista === "acessos" && <Registo tipo="acessos" />}
-      {vista === "auditoria" && <Registo tipo="auditoria" />}
+      {vista === "auditoria" && <PainelAuditoria />}
       {vista === "seguranca" && <Seguranca />}
     </>
   );
@@ -286,75 +287,77 @@ function ListaUtilizadores() {
 
       {u && (
         <Modal open onClose={() => setU(null)} title={u.id ? `Editar ${u.nome}` : "Novo utilizador"} width="max-w-4xl" footer={<Button onClick={guardar}>Guardar</Button>}>
-          <div className="grid grid-cols-3 gap-4">
-            <Field label="Nome" className="col-span-2">
-              <Input autoFocus value={u.nome ?? ""} onChange={(e) => setU({ ...u, nome: e.target.value })} />
-            </Field>
-            <Field label="Utilizador (para entrar)">
-              <Input value={u.login ?? ""} onChange={(e) => setU({ ...u, login: e.target.value })} />
-            </Field>
-            <Field label="Perfil de acesso" hint={perfilEscolhido ? `${NIVEIS[perfilEscolhido.nivel]} · ${perfilEscolhido.permissoes.length} permissões` : undefined}>
-              <Select value={u.perfil} onChange={(e) => setU({ ...u, perfil: e.target.value })}>
-                {perfis.data?.map((p) => (
-                  <option key={p.codigo} value={p.codigo}>
-                    {p.descricao}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label={u.id ? "Nova senha (opcional)" : "Senha"} hint={`Mínimo ${politica.data?.senha_min ?? 6} caracteres`}>
-              <Input type="password" autoComplete="new-password" value={u.senha ?? ""} onChange={(e) => setU({ ...u, senha: e.target.value })} />
-            </Field>
-            <Field label={u.tem_pin ? "Novo PIN (opcional)" : "PIN"} hint="4 a 8 dígitos, único; «-» remove">
-              <Input inputMode="numeric" autoComplete="off" value={u.pin ?? ""} onChange={(e) => setU({ ...u, pin: e.target.value.replace(/[^\d-]/g, "").slice(0, 8) })} />
-            </Field>
-            <Field label="Limite de desconto (%)" hint="0 = sem limite">
-              <Input type="number" min={0} max={100} className="num text-right" value={u.limite_desconto ?? 0} onChange={(e) => setU({ ...u, limite_desconto: Number(e.target.value) })} />
-            </Field>
-            {(tabelas.data?.armazens?.length ?? 0) > 1 && (
-              <Field label="Loja" hint="Com uma loja, só entra nos postos dela e só vê os documentos, os relatórios e o painel dela" className="col-span-2">
-                <Select value={u.armazem_id ?? ""} disabled={u.perfil === "ADMIN"}
-                  onChange={(e) => setU({ ...u, armazem_id: e.target.value ? Number(e.target.value) : null })}>
-                  <option value="">Todas as lojas</option>
-                  {tabelas.data?.armazens.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
+          <AbasFicha entidade="utilizadores" id={u.id}>
+            <div className="grid grid-cols-3 gap-4">
+              <Field label="Nome" className="col-span-2">
+                <Input autoFocus value={u.nome ?? ""} onChange={(e) => setU({ ...u, nome: e.target.value })} />
+              </Field>
+              <Field label="Utilizador (para entrar)">
+                <Input value={u.login ?? ""} onChange={(e) => setU({ ...u, login: e.target.value })} />
+              </Field>
+              <Field label="Perfil de acesso" hint={perfilEscolhido ? `${NIVEIS[perfilEscolhido.nivel]} · ${perfilEscolhido.permissoes.length} permissões` : undefined}>
+                <Select value={u.perfil} onChange={(e) => setU({ ...u, perfil: e.target.value })}>
+                  {perfis.data?.map((p) => (
+                    <option key={p.codigo} value={p.codigo}>
+                      {p.descricao}
+                    </option>
+                  ))}
                 </Select>
               </Field>
-            )}
-            <div className="col-span-2 flex flex-wrap items-end gap-x-6 gap-y-2 pb-2">
-              {(!u.id || u.senha) && (
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={!!u.obrigarMudar} onChange={(e) => setU({ ...u, obrigarMudar: e.target.checked })} /> Obrigar a mudar a senha ao entrar
-                </label>
+              <Field label={u.id ? "Nova senha (opcional)" : "Senha"} hint={`Mínimo ${politica.data?.senha_min ?? 6} caracteres`}>
+                <Input type="password" autoComplete="new-password" value={u.senha ?? ""} onChange={(e) => setU({ ...u, senha: e.target.value })} />
+              </Field>
+              <Field label={u.tem_pin ? "Novo PIN (opcional)" : "PIN"} hint="4 a 8 dígitos, único; «-» remove">
+                <Input inputMode="numeric" autoComplete="off" value={u.pin ?? ""} onChange={(e) => setU({ ...u, pin: e.target.value.replace(/[^\d-]/g, "").slice(0, 8) })} />
+              </Field>
+              <Field label="Limite de desconto (%)" hint="0 = sem limite">
+                <Input type="number" min={0} max={100} className="num text-right" value={u.limite_desconto ?? 0} onChange={(e) => setU({ ...u, limite_desconto: Number(e.target.value) })} />
+              </Field>
+              {(tabelas.data?.armazens?.length ?? 0) > 1 && (
+                <Field label="Loja" hint="Com uma loja, só entra nos postos dela e só vê os documentos, os relatórios e o painel dela" className="col-span-2">
+                  <Select value={u.armazem_id ?? ""} disabled={u.perfil === "ADMIN"}
+                    onChange={(e) => setU({ ...u, armazem_id: e.target.value ? Number(e.target.value) : null })}>
+                    <option value="">Todas as lojas</option>
+                    {tabelas.data?.armazens.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
+                  </Select>
+                </Field>
               )}
-              {u.id && (
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={u.ativo !== 0} onChange={(e) => setU({ ...u, ativo: e.target.checked ? 1 : 0 })} /> Conta activa
-                </label>
-              )}
+              <div className="col-span-2 flex flex-wrap items-end gap-x-6 gap-y-2 pb-2">
+                {(!u.id || u.senha) && (
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={!!u.obrigarMudar} onChange={(e) => setU({ ...u, obrigarMudar: e.target.checked })} /> Obrigar a mudar a senha ao entrar
+                  </label>
+                )}
+                {u.id && (
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={u.ativo !== 0} onChange={(e) => setU({ ...u, ativo: e.target.checked ? 1 : 0 })} /> Conta activa
+                  </label>
+                )}
+              </div>
             </div>
-          </div>
 
-          <div className="mt-6 rounded-xl border border-line p-4">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <label className="flex items-center gap-2 font-medium">
-                <input
-                  type="checkbox"
-                  checked={!!u.personalizar}
-                  disabled={u.perfil === "ADMIN"}
-                  onChange={(e) => setU({ ...u, personalizar: e.target.checked, permissoes: e.target.checked ? (u.permissoes?.length ? u.permissoes : (perfilEscolhido?.permissoes ?? [])) : u.permissoes })}
-                />
-                Permissões próprias deste utilizador
-              </label>
-              <span className="text-[12.5px] text-ink-3">
-                {u.perfil === "ADMIN" ? "O Administrador tem sempre todas as permissões." : u.personalizar ? "Substituem as do perfil." : `Usa as do perfil ${perfilEscolhido?.descricao ?? ""}.`}
-              </span>
+            <div className="mt-6 rounded-xl border border-line p-4">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <label className="flex items-center gap-2 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={!!u.personalizar}
+                    disabled={u.perfil === "ADMIN"}
+                    onChange={(e) => setU({ ...u, personalizar: e.target.checked, permissoes: e.target.checked ? (u.permissoes?.length ? u.permissoes : (perfilEscolhido?.permissoes ?? [])) : u.permissoes })}
+                  />
+                  Permissões próprias deste utilizador
+                </label>
+                <span className="text-[12.5px] text-ink-3">
+                  {u.perfil === "ADMIN" ? "O Administrador tem sempre todas as permissões." : u.personalizar ? "Substituem as do perfil." : `Usa as do perfil ${perfilEscolhido?.descricao ?? ""}.`}
+                </span>
+              </div>
+              <MatrizPermissoes
+                valor={u.perfil === "ADMIN" ? TODAS_PERMISSOES : u.personalizar ? (u.permissoes ?? []) : (perfilEscolhido?.permissoes ?? [])}
+                onChange={(p) => setU({ ...u, permissoes: p })}
+                desativado={!u.personalizar || u.perfil === "ADMIN"}
+              />
             </div>
-            <MatrizPermissoes
-              valor={u.perfil === "ADMIN" ? TODAS_PERMISSOES : u.personalizar ? (u.permissoes ?? []) : (perfilEscolhido?.permissoes ?? [])}
-              onChange={(p) => setU({ ...u, permissoes: p })}
-              desativado={!u.personalizar || u.perfil === "ADMIN"}
-            />
-          </div>
+          </AbasFicha>
         </Modal>
       )}
 
