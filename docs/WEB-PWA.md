@@ -93,21 +93,31 @@ site leva ao endereço dela, ou avisa se o computador da loja estiver desligado.
 
 O produtor activa este serviço uma vez, com o domínio do KanGest na Cloudflare ([CLOUDFLARE.md](CLOUDFLARE.md)).
 
-### HTTPS e acesso fora da loja com o seu domínio (túnel da Cloudflare)
+### HTTPS e acesso fora da loja com o domínio da empresa (túnel da Cloudflare)
 
-O túnel da Cloudflare dá HTTPS e um endereço próprio (ex.: `https://loja.empresa.ao`) sem abrir portas no router —
-é também o caminho para usar o KanGest fora da loja (dono a ver vendas em casa, vendedor externo, segunda loja):
+Uma empresa com domínio próprio na Cloudflare (ex.: `gestao.empresa.ao`) usa-o em vez do endereço do KanGest, também
+sem abrir portas no router. É o caminho para usar o KanGest fora da loja (dono a ver vendas em casa, vendedor externo,
+segunda loja) com o nome da empresa:
 
-1. Zero Trust → **Networks → Tunnels** → o túnel da loja (ver [CLOUDFLARE.md](CLOUDFLARE.md)) → **Public hostname**:
-   `loja.empresa.ao` → Service **HTTP** → `localhost:7799`.
-2. **Obrigatório**: Zero Trust → **Access → Applications → Self-hosted** para `loja.empresa.ao`, com uma política
-   **Allow** só para os emails da equipa (código de uso único por email, ou o Google/Microsoft da empresa). Assim
-   ninguém chega sequer à página sem passar pela Cloudflare; a chave de rede e a senha de cada utilizador continuam
-   a ser pedidas depois.
-3. Regras recomendadas: **WAF** a bloquear países onde a empresa não trabalha, **Rate limiting** em `/rpc`
-   (ex.: 600 pedidos/minuto por IP), **Bot Fight Mode**, **Always Use HTTPS** e TLS mínimo 1.2.
+1. No painel da Cloudflare: **Zero Trust → Networks → Tunnels → Create a tunnel** (Cloudflared), com um nome à
+   escolha. Em **Public hostnames**: `gestao` + o domínio, Service **HTTP**, URL `localhost:7799` (a porta do servidor
+   em Configurações → Rede). O painel cria o registo DNS.
+2. No KanGest do computador servidor: **Configurações → Rede → Acesso pela Internet → Usar um domínio da empresa**.
+   Escreva o endereço e cole o comando de instalação que o painel mostra (ou só o token, que começa por `eyJ`). O
+   KanGest guarda o token cifrado, descarrega e confere o `cloudflared` e mantém o túnel ligado (não é preciso
+   instalar o serviço do `cloudflared` à parte). **Desligar** só o esquece neste computador: o túnel continua na conta
+   da Cloudflare da empresa, que o pode apagar lá.
+3. Recomendado: **Zero Trust → Access → Applications → Self-hosted** para o endereço, com uma política **Allow** só
+   para os emails da equipa (código de uso único por email, ou o Google/Microsoft da empresa; gratuito até 50
+   pessoas). Ninguém chega sequer à página sem passar pela Cloudflare; a chave de rede, a senha e, se a empresa a
+   exigir, a verificação em dois passos continuam a ser pedidas depois.
+4. Na zona: **Rate limiting** em `/rpc` (ex.: 600 pedidos/minuto por IP), **Bot Fight Mode**, **Always Use HTTPS** e
+   TLS mínimo 1.2.
 
-> Sem o Access à frente, não publique a porta 7799 na Internet.
+Atrás do túnel, o KanGest conhece o IP verdadeiro de cada aparelho (só aceita o `CF-Connecting-IP` vindo do próprio
+computador), recusa a entrada só com PIN e pode exigir a verificação em dois passos ([UTILIZADORES.md](UTILIZADORES.md)).
+
+> Não publique a porta 7799 directamente na Internet (reencaminhamento no router): use sempre o túnel.
 
 ## Terminais POS Android (ex.: Sunmi)
 

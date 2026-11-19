@@ -4649,6 +4649,35 @@ async fn acesso_pela_internet_por_subdominio() {
     assert!(corpo("/v1/web/desactivar").is_some());
     let auditoria: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auditoria WHERE acao = 'ACESSO_WEB'").fetch_one(&arc.pool).await.unwrap();
     assert_eq!(auditoria, 2);
+
+    // domínio da empresa: o token do túnel dela (aqui dentro do comando de instalação do painel da Cloudflare)
+    use base64::Engine;
+    let token = base64::engine::general_purpose::STANDARD.encode(r#"{"a":"conta-da-loja","t":"tunel-da-loja","s":"c2VncmVkbw=="}"#);
+    assert!(rpc_err(&arc, "web.activarProprio", json!({ "endereco": "gestao", "token": token })).await.contains("endereço completo"));
+    assert!(rpc_err(&arc, "web.activarProprio", json!({ "endereco": "gestao.loja.ao", "token": "abc" })).await.contains("token do túnel"));
+    let e = rpc(&arc, "web.activarProprio", json!({ "endereco": "https://Gestao.Loja.ao/", "token": format!("sudo cloudflared service install {token}") })).await;
+    assert_eq!((e["endereco"].as_str(), e["proprio"].as_bool(), e["activo"].as_bool()), (Some("https://gestao.loja.ao"), Some(true), Some(true)));
+    let cifrado: String = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'web.token'").fetch_one(&arc.pool).await.unwrap();
+    assert!(cifrado.starts_with("kgs1:") && !cifrado.contains(&token));
+    #[cfg(unix)]
+    {
+        let mut ligado = false;
+        for _ in 0..50 {
+            let t = rpc(&arc, "web.estado", Value::Null).await["tunel"].clone();
+            if t["ligado"] == true && t["linhas"][0].as_str().unwrap().contains(&token) {
+                ligado = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(ligado, "o cloudflared corre com o token da empresa");
+    }
+    // enquanto usa o domínio da empresa, não pede um endereço do KanGest; desligar não fala com o servidor de licenças
+    assert!(rpc_err(&arc, "web.activar", json!({ "nome": "kianda" })).await.contains("próprio domínio"));
+    let pedidos_antes = recebidos.lock().unwrap().len();
+    let v = rpc(&arc, "web.desactivar", Value::Null).await;
+    assert_eq!((v["activo"].as_bool(), v["proprio"].as_bool(), v["endereco"].is_null()), (Some(false), Some(false), true));
+    assert_eq!(recebidos.lock().unwrap().len(), pedidos_antes, "o túnel é da empresa: nada a apagar no servidor");
     std::env::remove_var("KANGEST_LICENCAS_URL");
     *super::acesso_web::SERVIDOR_TESTE.lock().unwrap() = None;
     let _ = std::fs::remove_dir_all(&pasta);

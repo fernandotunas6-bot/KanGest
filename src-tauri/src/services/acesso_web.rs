@@ -276,6 +276,8 @@ pub async fn estado(st: &AppState, i: EstadoIn) -> AppResult<Value> {
         "nome": cfg(st, "web.nome").await?,
         "endereco": cfg(st, "web.endereco").await?,
         "activo": crate::segredos::ler(&st.pool, "web.token").await.ok().flatten().is_some_and(|t| !t.is_empty()),
+        "proprio": proprio(st).await?,
+        "porta": crate::rede::config().porta,
         "tunel": estado_tunel(),
         "cloudflared": VERSAO_CLOUDFLARED,
     });
@@ -288,6 +290,71 @@ pub async fn estado(st: &AppState, i: EstadoIn) -> AppResult<Value> {
     Ok(v)
 }
 
+/// O acesso usa um túnel da própria empresa (domínio dela), e não um endereço do serviço do KanGest.
+async fn proprio(st: &AppState) -> AppResult<bool> {
+    Ok(cfg(st, "web.proprio").await?.as_deref() == Some("1"))
+}
+
+/// Token de um túnel da Cloudflare, sozinho ou dentro do comando de instalação que o painel mostra
+/// (`cloudflared service install eyJ…`): base64 de `{"a": conta, "t": túnel, "s": segredo}`.
+fn token_do_tunel(texto: &str) -> Option<String> {
+    use base64::Engine;
+    texto.split_whitespace().rev().find_map(|p| {
+        let p = p.trim_matches(|c: char| c == '"' || c == '\'' || c == '`');
+        if !p.starts_with("eyJ") {
+            return None;
+        }
+        let sem = p.trim_end_matches('=');
+        let bytes = base64::engine::general_purpose::STANDARD_NO_PAD
+            .decode(sem)
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(sem))
+            .ok()?;
+        let v: Value = serde_json::from_slice(&bytes).ok()?;
+        ["a", "t", "s"].iter().all(|k| v[*k].as_str().is_some_and(|x| !x.is_empty())).then(|| p.to_string())
+    })
+}
+
+/// `gestao.empresa.ao`, `https://gestao.empresa.ao/` ou com caminho → `https://gestao.empresa.ao`.
+fn endereco_proprio(texto: &str) -> Option<String> {
+    let t = texto.trim().to_lowercase();
+    let t = t.strip_prefix("https://").or_else(|| t.strip_prefix("http://")).unwrap_or(&t);
+    let host = t.split(['/', '?', '#']).next()?.trim_end_matches('.');
+    let partes: Vec<&str> = host.split('.').collect();
+    let valida = |l: &&str| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    (host.len() <= 253 && partes.len() >= 2 && partes.iter().all(valida) && partes.last()?.chars().all(|c| c.is_ascii_alphabetic())).then(|| format!("https://{host}"))
+}
+
+#[derive(Deserialize)]
+pub struct ProprioIn {
+    endereco: String,
+    token: String,
+}
+
+/// Domínio da empresa: o túnel criado por ela no painel da Cloudflare (Zero Trust → Networks → Tunnels), com o
+/// endereço a apontar para `http://localhost:<porta>`. O KanGest só o corre e mantém ligado.
+pub async fn activar_proprio(st: &AppState, i: ProprioIn) -> AppResult<Value> {
+    let s = st.exigir_perm("sistema.configuracoes")?;
+    pode_servir().map_err(AppError::msg)?;
+    let endereco = endereco_proprio(&i.endereco).ok_or_else(|| AppError::msg("Escreva o endereço completo, por exemplo gestao.empresa.ao."))?;
+    let token = token_do_tunel(&i.token).ok_or_else(|| {
+        AppError::msg("O token do túnel não é válido. No painel da Cloudflare (Zero Trust → Networks → Tunnels), copie o comando de instalação ou só o token (começa por «eyJ»).")
+    })?;
+    if !proprio(st).await? && crate::segredos::ler(&st.pool, "web.token").await.ok().flatten().is_some_and(|t| !t.is_empty()) {
+        return Err(AppError::msg("Esta empresa já tem um endereço do KanGest activo. Desligue-o primeiro."));
+    }
+    crate::segredos::gravar(&st.pool, "web.token", &token).await?;
+    cfg_gravar(st, "web.nome", endereco.trim_start_matches("https://")).await?;
+    cfg_gravar(st, "web.endereco", &endereco).await?;
+    cfg_gravar(st, "web.proprio", "1").await?;
+    sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'ACESSO_WEB', ?)")
+        .bind(s.id)
+        .bind(format!("Acesso pela Internet activado com o domínio da empresa: {endereco}"))
+        .execute(&st.pool)
+        .await?;
+    iniciar(st.pasta_dados.clone(), token);
+    estado(st, EstadoIn::default()).await
+}
+
 #[derive(Deserialize)]
 pub struct ActivarIn {
     nome: String,
@@ -297,6 +364,9 @@ pub struct ActivarIn {
 pub async fn activar(st: &AppState, i: ActivarIn) -> AppResult<Value> {
     let s = st.exigir_perm("sistema.configuracoes")?;
     let porta = pode_servir().map_err(AppError::msg)?;
+    if proprio(st).await? {
+        return Err(AppError::msg("Esta empresa usa o seu próprio domínio. Desligue-o primeiro para usar um endereço do KanGest."));
+    }
     let mut corpo = super::licenca::credenciais(st).await?;
     corpo["nome"] = json!(i.nome.trim().to_lowercase());
     corpo["porta"] = json!(porta);
@@ -321,13 +391,18 @@ pub async fn desactivar(st: &AppState) -> AppResult<Value> {
     let s = st.exigir_perm("sistema.configuracoes")?;
     parar();
     let endereco = cfg(st, "web.endereco").await?.unwrap_or_default();
-    // o endereço deixa de existir na Cloudflare; sem Internet, desliga-se aqui e avisa
-    let aviso = match super::licenca::credenciais(st).await {
-        Ok(c) => super::licenca::chamar_servidor("/v1/web/desactivar", c).await.err().map(|e| e.to_string()),
-        Err(e) => Some(e.to_string()),
+    // endereço do KanGest: deixa de existir na Cloudflare (sem Internet, desliga-se aqui e avisa); domínio da
+    // empresa: o túnel é dela, só se esquece aqui
+    let aviso = if proprio(st).await? {
+        None
+    } else {
+        match super::licenca::credenciais(st).await {
+            Ok(c) => super::licenca::chamar_servidor("/v1/web/desactivar", c).await.err().map(|e| e.to_string()),
+            Err(e) => Some(e.to_string()),
+        }
     };
     if aviso.is_none() {
-        for k in ["web.token", "web.nome", "web.endereco"] {
+        for k in ["web.token", "web.nome", "web.endereco", "web.proprio"] {
             sqlx::query("DELETE FROM config WHERE chave = ?").bind(k).execute(&st.pool).await?;
         }
     }
@@ -377,6 +452,25 @@ mod testes {
         assert!(resumo_publicado(&r, "cloudflared-windows-amd64.exe").is_none(), "só da release oficial");
         assert!(resumo_publicado(&r, "nao-existe").is_none());
         assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
+    #[test]
+    fn token_e_endereco_do_dominio_da_empresa() {
+        use base64::Engine;
+        let t = base64::engine::general_purpose::STANDARD.encode(r#"{"a":"conta","t":"6ff42ae2-765d-4adf-8112-31c55c1551ef","s":"c2VncmVkbw=="}"#);
+        assert_eq!(token_do_tunel(&t).as_deref(), Some(t.as_str()));
+        assert_eq!(token_do_tunel(&format!("sudo cloudflared service install {t}")).as_deref(), Some(t.as_str()), "do comando de instalação");
+        assert_eq!(token_do_tunel(&format!("cloudflared.exe service install \"{t}\"\n")).as_deref(), Some(t.as_str()), "Windows, com aspas");
+        let sem_segredo = base64::engine::general_purpose::STANDARD.encode(r#"{"a":"conta","t":"x"}"#);
+        assert!(token_do_tunel(&sem_segredo).is_none());
+        assert!(token_do_tunel("eyJ-isto-nao-e-base64").is_none());
+        assert!(token_do_tunel("").is_none());
+
+        assert_eq!(endereco_proprio(" Gestao.LivrariaAdventista.ao ").as_deref(), Some("https://gestao.livrariaadventista.ao"));
+        assert_eq!(endereco_proprio("https://gestao.empresa.ao/painel?x=1").as_deref(), Some("https://gestao.empresa.ao"));
+        for mau in ["gestao", "-a.empresa.ao", "a b.ao", "gestao.empresa.123", "http://", ""] {
+            assert!(endereco_proprio(mau).is_none(), "{mau}");
+        }
     }
 
     #[test]
