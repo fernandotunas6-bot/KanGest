@@ -1,9 +1,10 @@
 import { Fragment, forwardRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { ArrowLeft, Building2, Check, Eye, EyeOff } from "lucide-react";
-import { abrirExterno } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { abrirExterno, call } from "@/lib/api";
 import { cn } from "@/components/ui";
 import { Logo } from "@/components/Logo";
-import painelImg from "@/assets/acesso/painel.jpg";
+import entradaImg from "@/assets/acesso/entrada.jpg";
 import posImg from "@/assets/acesso/pos.jpg";
 import documentosImg from "@/assets/acesso/documentos.jpg";
 import relatoriosImg from "@/assets/acesso/relatorios.jpg";
@@ -23,41 +24,42 @@ const NOVIDADES = [
   { imagem: relatoriosImg, etiqueta: "Gestão", titulo: "Números em tempo real", texto: "Vendas por loja, por mês e por artigo, prontas a imprimir." },
 ];
 
-/** Montra: o painel do KanGest numa janela, o POS por cima e as novidades em cartões (só em ecrãs largos). */
-function Vitrine() {
+/**
+ * Montra: a imagem do ecrã de entrada (a da empresa, em Configurações → Aparência, ou a do KanGest: um senhor de fato e
+ * gravata diante de colunas claras) com o logótipo em cima e as novidades em cartões em baixo (só em ecrãs largos).
+ */
+function Vitrine({ imagemPropria }: { imagemPropria?: boolean }) {
+  const propria = useQuery({
+    queryKey: ["aparencia.imagemEntrada"],
+    queryFn: () => call<{ imagem: string | null }>("aparencia.imagemEntrada"),
+    enabled: !!imagemPropria,
+    staleTime: 5 * 60_000,
+  }).data?.imagem;
   return (
-    <aside className="relative hidden min-h-0 flex-col overflow-hidden bg-[#eef3f2] md:flex">
-      {/* fachada clara: faixas verticais de luz, como painéis de vidro */}
-      <div className="absolute inset-0 bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.9)_0_46px,rgba(205,221,217,0.55)_46px_62px,rgba(255,255,255,0.55)_62px_104px)]" />
-      <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_15%_10%,rgba(255,255,255,0.95),transparent_70%)]" />
+    <aside className="relative hidden min-h-0 flex-col overflow-hidden bg-[#e9ecef] md:flex">
+      <img
+        src={propria || entradaImg}
+        alt=""
+        draggable={false}
+        className="absolute inset-0 size-full object-cover"
+        style={{ objectPosition: propria ? "50% 35%" : "68% 100%" }}
+      />
+      {/* sombra suave em baixo, para os cartões se destacarem da imagem */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-64 bg-gradient-to-t from-black/30 to-transparent" />
       <div className="relative flex items-center gap-3 px-10 pt-9">
         <Logo className="size-12 rounded-[22%] shadow-md ring-1 ring-black/5" />
-        <span className="text-[24px] font-semibold tracking-tight text-[#0c4a44]">KanGest</span>
+        <span className="text-[24px] font-semibold tracking-tight" style={{ color: "var(--color-nav)" }}>
+          KanGest
+        </span>
       </div>
-      <div className="relative flex min-h-0 flex-1 items-center justify-center px-[7%] py-6">
-        <figure className="relative w-full max-w-[min(100%,calc((100vh-360px)*1.6))] overflow-hidden rounded-xl bg-white shadow-[0_34px_80px_-24px_rgba(12,74,68,0.55)] ring-1 ring-black/5">
-          <div className="flex items-center gap-1.5 border-b border-black/5 bg-[#f6f6f3] px-3 py-2">
-            <span className="size-2.5 rounded-full bg-[#ec6a5e]" />
-            <span className="size-2.5 rounded-full bg-[#f4bf4f]" />
-            <span className="size-2.5 rounded-full bg-[#61c554]" />
-            <span className="ml-3 text-[11px] text-[#7c8582]">KanGest — Painel</span>
-          </div>
-          <img src={painelImg} alt="O painel do KanGest" className="block w-full" draggable={false} />
-        </figure>
-        <img
-          src={posImg}
-          alt="O ponto de venda do KanGest"
-          draggable={false}
-          className="absolute bottom-[3%] right-[3%] w-[36%] rounded-lg shadow-[0_24px_50px_-16px_rgba(12,74,68,0.6)] ring-1 ring-black/10"
-        />
-      </div>
+      <div className="flex-1" />
       <div className="relative grid grid-cols-3 gap-4 px-6 pb-6">
         {NOVIDADES.map((n) => (
           <article key={n.titulo} className="relative aspect-[16/10] overflow-hidden rounded-lg shadow-lg ring-1 ring-black/10">
             <img src={n.imagem} alt="" draggable={false} className="absolute inset-0 size-full object-cover object-top" />
-            <div className="absolute inset-0 bg-gradient-to-b from-[#0c4a44]/95 via-[#0c4a44]/70 to-[#0c4a44]/15" />
+            <div className="absolute inset-0 bg-gradient-to-b from-nav/95 via-nav/70 to-nav/15" />
             <div className="relative p-3.5 text-white">
-              <div className="text-[10.5px] font-semibold uppercase tracking-wider text-[#f2b955]">{n.etiqueta}</div>
+              <div className="text-[10.5px] font-semibold uppercase tracking-wider text-accent">{n.etiqueta}</div>
               <div className="mt-1 text-[15px] font-semibold leading-tight">{n.titulo}</div>
               <div className="mt-1 text-[12px] leading-snug text-white/85">{n.texto}</div>
             </div>
@@ -81,7 +83,7 @@ export function RodapeAcesso({ onAjuda }: { onAjuda?: (s?: SeccaoAjuda) => void 
     { rotulo: "Site do KanGest", acao: () => void abrirExterno(SITE) },
   ];
   return (
-    <footer className="flex shrink-0 flex-wrap items-center justify-center gap-x-8 gap-y-1.5 bg-[#0b2724] px-6 py-3.5 text-[13px] text-white/85">
+    <footer className="flex shrink-0 flex-wrap items-center justify-center gap-x-8 gap-y-1.5 bg-nav px-6 py-3.5 text-[13px] text-white/85">
       {ligacoes.map((l) => (
         <button key={l.rotulo} type="button" onClick={l.acao} className="hover:text-white hover:underline">
           {l.rotulo}
@@ -92,18 +94,31 @@ export function RodapeAcesso({ onAjuda }: { onAjuda?: (s?: SeccaoAjuda) => void 
 }
 
 /** Painel de marca à esquerda e o formulário à direita (entrada, ligar o aparelho, senha provisória). */
-export function Moldura({ children, empresa, topo, onAjuda }: { children: ReactNode; empresa?: string | null; topo?: ReactNode; onAjuda?: (s?: SeccaoAjuda) => void }) {
+export function Moldura({
+  children,
+  empresa,
+  topo,
+  onAjuda,
+  imagemPropria,
+}: {
+  children: ReactNode;
+  empresa?: string | null;
+  topo?: ReactNode;
+  onAjuda?: (s?: SeccaoAjuda) => void;
+  /** A empresa tem imagem própria para o ecrã de entrada (setup.estado). */
+  imagemPropria?: boolean;
+}) {
   const canto = topo ?? (empresa ? <EmpresaNoCanto nome={empresa} /> : null);
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
       <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
-        <Vitrine />
+        <Vitrine imagemPropria={imagemPropria} />
         <section className="relative flex min-h-0 flex-col overflow-y-auto">
           {/* luz quente no canto, como num fim de tarde, e o verde da marca em baixo */}
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(75%_60%_at_100%_0%,rgba(224,154,43,0.13),transparent_70%),radial-gradient(60%_50%_at_0%_100%,rgba(20,107,99,0.09),transparent_70%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(75%_60%_at_100%_0%,color-mix(in_srgb,var(--color-accent)_14%,transparent),transparent_70%),radial-gradient(60%_50%_at_0%_100%,color-mix(in_srgb,var(--color-brand)_10%,transparent),transparent_70%)]" />
           <div className="pointer-events-none absolute inset-0 bg-[repeating-linear-gradient(115deg,transparent_0_140px,rgba(255,255,255,0.22)_140px_143px)]" />
           {/* ecrãs pequenos (telemóvel, terminal POS): só uma faixa com a marca */}
-          <div className="relative flex items-center gap-2.5 bg-[#0c4a44] px-5 py-3 text-white md:hidden">
+          <div className="relative flex items-center gap-2.5 bg-nav px-5 py-3 text-white md:hidden">
             <Logo className="size-8 rounded-[22%] ring-1 ring-white/15" />
             <span className="font-semibold">KanGest</span>
             {empresa && <span className="ml-auto truncate text-[12px] text-white/70">{empresa}</span>}
@@ -284,14 +299,14 @@ export function PaginaAcesso({
   const escura = variante === "escura";
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
-      <div className="flex shrink-0 items-center gap-2.5 bg-[#0b2724] px-6 py-2.5 text-white md:px-[12%]">
+      <div className="flex shrink-0 items-center gap-2.5 bg-nav px-6 py-2.5 text-white md:px-[12%]">
         <Logo className="size-7 rounded-[22%] ring-1 ring-white/15" />
         <span className="font-semibold">KanGest</span>
       </div>
       <header
         className={cn(
           "shrink-0 px-6 md:px-[12%]",
-          escura ? "bg-[linear-gradient(100deg,#0b2724_0%,#0f4a44_45%,#3a8a7e_100%)] py-14" : "bg-sunken py-10",
+          escura ? "bg-[linear-gradient(100deg,var(--color-nav)_0%,var(--color-brand-700)_45%,var(--color-brand)_100%)] py-14" : "bg-sunken py-10",
         )}
       >
         <button
@@ -303,7 +318,7 @@ export function PaginaAcesso({
         >
           <ArrowLeft className="size-5" />
         </button>
-        <h1 className={cn("mt-2 text-[28px] font-semibold tracking-tight", escura ? "text-[#f2b955]" : "text-accent-ink")}>{titulo}</h1>
+        <h1 className={cn("mt-2 text-[28px] font-semibold tracking-tight", escura ? "text-accent" : "text-accent-ink")}>{titulo}</h1>
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto px-6 py-10 md:px-[12%]">{children}</main>
       <RodapeAcesso onAjuda={onAjuda} />

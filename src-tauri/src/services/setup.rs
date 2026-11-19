@@ -11,7 +11,13 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
     let empresa: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM empresa").fetch_one(&st.pool).await?;
     let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM utilizadores").fetch_one(&st.pool).await?;
     let nome: Option<String> = sqlx::query_scalar("SELECT nome FROM empresa WHERE id = 1").fetch_optional(&st.pool).await?;
-    Ok(json!({ "inicializado": empresa > 0 && users > 0, "empresa": nome }))
+    // a aparência da empresa (cores e imagem do ecrã de entrada) já se vê antes de entrar
+    Ok(json!({
+        "inicializado": empresa > 0 && users > 0,
+        "empresa": nome,
+        "cores": super::aparencia::cores(&st.pool).await?,
+        "imagem_entrada": super::aparencia::tem_imagem(&st.pool).await?,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -45,6 +51,9 @@ pub struct InicializarIn {
     /// Ramo de actividade escolhido no primeiro arranque (livraria, farmácia, serviços…).
     #[serde(default)]
     ramo: Option<String>,
+    /// Jogo de cores escolhido na instalação (ver aparencia.rs); sem ele, as cores do KanGest.
+    #[serde(default)]
+    cores: Option<Value>,
 }
 
 async fn gravar_empresa(st: &AppState, e: &EmpresaIn) -> AppResult<()> {
@@ -88,9 +97,15 @@ pub async fn inicializar(st: &AppState, i: InicializarIn) -> AppResult<Value> {
     if i.admin.senha.len() < 4 {
         return Err(AppError::msg("A senha deve ter pelo menos 4 caracteres."));
     }
+    if let Some(c) = i.cores.as_ref() {
+        super::aparencia::validar_cores(c)?;
+    }
     gravar_empresa(st, &i.empresa).await?;
     if let Some(r) = i.ramo.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
         super::ramos::gravar_ramo(&st.pool, r).await?;
+    }
+    if let Some(c) = i.cores.as_ref() {
+        super::aparencia::gravar_cores(&st.pool, c).await?;
     }
     sqlx::query("INSERT INTO utilizadores (nome, login, senha_hash, perfil) VALUES (?, ?, ?, 'ADMIN')")
         .bind(i.admin.nome.trim())

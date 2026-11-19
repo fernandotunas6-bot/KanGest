@@ -7,6 +7,8 @@ import { useSession } from "@/store/session";
 import type { Sessao } from "@/lib/types";
 import AppShell from "@/components/layout/AppShell";
 import Setup from "@/pages/Setup";
+import { useAparencia } from "@/lib/aparencia";
+import type { Cores } from "@/lib/cores";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Pos from "@/pages/Pos";
@@ -96,7 +98,9 @@ function Principal() {
   const estado = useQuery({
     queryKey: ["setup"],
     queryFn: async () => {
-      const e = await call<{ inicializado: boolean; empresa: string | null }>("setup.estado");
+      const e = await call<{ inicializado: boolean; empresa: string | null; cores?: Cores | null; imagem_entrada?: boolean }>("setup.estado");
+      // as cores da empresa valem desde o ecrã de entrada (e ficam no aparelho para o próximo arranque)
+      useAparencia.getState().setCores(e.cores ?? null);
       const s = await call<Sessao | null>("auth.sessao");
       setSessao(s);
       return e;
@@ -117,7 +121,7 @@ function Principal() {
     );
   }
   if (!estado.data?.inicializado) return <Setup onDone={() => estado.refetch()} />;
-  if (!sessao) return <Login empresa={estado.data.empresa} />;
+  if (!sessao) return <Login empresa={estado.data.empresa} imagemPropria={!!estado.data.imagem_entrada} />;
   if (sessao.mudar_senha) return <MudarSenhaObrigatoria />;
 
   return (

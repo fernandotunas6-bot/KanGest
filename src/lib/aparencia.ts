@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { aplicarCores, coresGuardadas, guardarCores, type Cores } from "@/lib/cores";
 
 /** Aparência escolhida por cada utilizador neste computador (tema e densidade das tabelas). */
 export type Tema = "claro" | "escuro" | "sistema";
@@ -33,11 +34,15 @@ function gravar(chave: string, valor: string) {
 const escuroNoSistema = () => !!window.matchMedia?.("(prefers-color-scheme: dark)").matches;
 const efectivo = (t: Tema): "claro" | "escuro" => (t === "sistema" ? (escuroNoSistema() ? "escuro" : "claro") : t);
 
+/** O jogo de cores da empresa (Configurações → Aparência), igual para todos; o tema claro ou escuro é de cada um. */
+let coresActuais: Cores | null = coresGuardadas();
+
 function aplicar(tema: Tema, densidade: Densidade, toque: Toque) {
   const r = document.documentElement;
   r.dataset.tema = efectivo(tema);
   r.dataset.densidade = densidade;
   r.dataset.toque = toqueEfectivo(toque) ? "1" : "0";
+  aplicarCores(coresActuais, efectivo(tema) === "escuro");
 }
 
 interface Aparencia {
@@ -48,9 +53,12 @@ interface Aparencia {
   toque: Toque;
   /** Modo táctil ligado agora ("auto" resolvido). */
   tactil: boolean;
+  /** Jogo de cores da empresa (vem do servidor; `null` = o do KanGest). */
+  cores: Cores | null;
   setTema: (t: Tema) => void;
   setDensidade: (d: Densidade) => void;
   setToque: (t: Toque) => void;
+  setCores: (c: Cores | null) => void;
 }
 
 const temaInicial = ler<Tema>(CHAVE_TEMA, ["claro", "escuro", "sistema"], "claro");
@@ -65,6 +73,13 @@ export const useAparencia = create<Aparencia>((set, get) => ({
   temaEfectivo: efectivo(temaInicial),
   toque: toqueInicial,
   tactil: toqueEfectivo(toqueInicial),
+  cores: coresActuais,
+  setCores: (cores) => {
+    coresActuais = cores;
+    guardarCores(cores);
+    aplicar(get().tema, get().densidade, get().toque);
+    set({ cores });
+  },
   setTema: (tema) => {
     gravar(CHAVE_TEMA, tema);
     aplicar(tema, get().densidade, get().toque);

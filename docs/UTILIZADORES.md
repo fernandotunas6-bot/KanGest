@@ -93,13 +93,25 @@ autenticação (ou um código de recuperação, que fica gasto) e a senha nova, 
 
 ## Ecrã de entrada
 
-À esquerda, a montra do KanGest; à direita, «Bem-vindo ao KanGest» com o utilizador e a senha (o olho mostra o que se
+À esquerda, a imagem do ecrã de entrada com o logótipo e três cartões de novidades; à direita, «Bem-vindo ao
+KanGest» com o utilizador e a senha (o olho mostra o que se
 escreveu; os campos vazios dizem «Este campo é obrigatório»), **Ocultar valores** e **Esqueci-me da senha**. Em baixo,
 as **Perguntas frequentes** (entrar, aparelhos e rede, segurança), **Contacte-nos** e o site.
 
 **Ocultar valores** fica guardado no aparelho: no painel, os valores em kwanzas aparecem como `••••••` (e o eixo do
 gráfico sem montantes), para quem está do outro lado do balcão não os ver. No painel, **Mostrar valores** volta a
 mostrá-los.
+
+**Configurações → Aparência** (permissão de configurar o sistema), para todos os postos e browsers da empresa:
+
+- **Cores do sistema:** sete jogos prontos (o verde-petróleo do KanGest, azul-marinho, azul petróleo e ouro, vinho e
+  dourado, verde-floresta, grafite e laranja, violeta) ou um personalizado com duas cores (a principal — menu, botões,
+  ligações — e a de destaque — Abrir POS, Pagar, avisos). Os tons claros, escuros e os do tema escuro calculam-se
+  sozinhos, e uma cor demasiado clara escurece o necessário para o texto se ler. Escolhe-se também na instalação. O
+  tema claro ou escuro continua a ser de cada pessoa.
+- **Imagem do ecrã de entrada:** a da empresa (JPEG, PNG ou WebP; reduz-se a 1600 px), com autorização das pessoas
+  que aparecem. Sem ela, a do KanGest: fotografia n.º 9363112 do Pexels (licença Pexels, uso comercial gratuito),
+  editada — fato cinzento, gravata laranja e colunas claras (`scripts/compor-imagem-entrada.py`).
 
 ## Registo
 
