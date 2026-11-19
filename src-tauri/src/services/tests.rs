@@ -4953,6 +4953,83 @@ async fn verificacao_em_dois_passos() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// «Esqueci-me da senha» no ecrã de entrada: só com a verificação em dois passos (código da aplicação ou de
+/// recuperação), a mesma mensagem para tudo o que falha, códigos errados contam para o bloqueio, a autorização vale uma
+/// vez e só na loja (pela Internet não).
+#[tokio::test]
+async fn recuperar_a_senha_com_dois_passos() {
+    use super::dois_passos::{codigo, de_base32};
+    use crate::state::{Contexto, CONTEXTO};
+    let (st, pasta) = base_com_admin("recuperar-senha").await;
+    let passo = || chrono::Utc::now().timestamp().div_euclid(30);
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Ana", "login": "ana", "senha": "ana12345", "perfil": "CAIXA", "mudar_senha": false })).await;
+    let n = rpc(&st, "auth.doisPassosNovo", Value::Null).await;
+    let segredo = de_base32(n["segredo"].as_str().unwrap()).unwrap();
+    let p0 = passo();
+    let l = rpc(&st, "auth.doisPassosLigar", json!({ "segredo": n["segredo"], "codigo": codigo(&segredo, p0), "senha": "1234" })).await;
+    let recuperacao: Vec<String> = serde_json::from_value(l["codigos"].clone()).unwrap();
+    rpc(&st, "auth.logout", Value::Null).await;
+    let tentativas = |login: &'static str| {
+        let pool = st.pool.clone();
+        async move { sqlx::query_scalar::<_, i64>("SELECT tentativas FROM utilizadores WHERE login = ?").bind(login).fetch_one(&pool).await.unwrap() }
+    };
+    let verificar = |login: &str, c: &str| json!({ "login": login, "codigo": c });
+    let fora: String = (0..1_000_000).map(|x| format!("{x:06}")).find(|c| (-2..=2).all(|d| codigo(&segredo, passo() + d) != *c)).unwrap();
+
+    // sem dois passos, ou utilizador que não existe: a mesma mensagem, e não conta como tentativa
+    let e_ana = rpc_err(&st, "auth.recuperarVerificar", verificar("ana", "123456")).await;
+    assert!(e_ana.contains("peça ao administrador uma senha provisória"), "{e_ana}");
+    assert_eq!(rpc_err(&st, "auth.recuperarVerificar", verificar("ninguem", "123456")).await, e_ana);
+    assert_eq!(tentativas("ana").await, 0);
+    // código errado: a mesma mensagem, conta como tentativa falhada
+    assert_eq!(rpc_err(&st, "auth.recuperarVerificar", verificar("admin", &fora)).await, e_ana);
+    assert_eq!(tentativas("admin").await, 1);
+
+    // código certo: autorização; uma senha fraca não a gasta; a boa muda a senha e desfaz as tentativas
+    let r = rpc(&st, "auth.recuperarVerificar", verificar("admin", &codigo(&segredo, p0 + 1))).await;
+    assert_eq!(r["nome"], "Admin");
+    let token = r["token"].as_str().unwrap().to_string();
+    assert_eq!(token.len(), 64);
+    assert!(rpc_err(&st, "auth.recuperarConcluir", json!({ "token": token, "nova": "12" })).await.contains("caracteres"));
+    rpc(&st, "auth.recuperarConcluir", json!({ "token": token, "nova": "nova-senha-9" })).await;
+    assert!(rpc_err(&st, "auth.recuperarConcluir", json!({ "token": token, "nova": "outra-senha-8" })).await.contains("expirou"), "serve uma vez");
+    assert!(rpc_err(&st, "auth.recuperarConcluir", json!({ "token": "inventado", "nova": "outra-senha-8" })).await.contains("expirou"));
+    assert_eq!(tentativas("admin").await, 0);
+    assert!(rpc_err(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await.contains("incorrect"), "a senha antiga já não serve");
+    assert_eq!(rpc(&st, "auth.login", json!({ "login": "admin", "senha": "nova-senha-9" })).await, json!({ "dois_passos": true }), "os dois passos continuam");
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "nova-senha-9", "codigo": recuperacao[0] })).await;
+    rpc(&st, "auth.logout", Value::Null).await;
+
+    // com um código de recuperação, que se gasta
+    let r = rpc(&st, "auth.recuperarVerificar", verificar("admin", &recuperacao[1])).await;
+    rpc(&st, "auth.recuperarConcluir", json!({ "token": r["token"], "nova": "outra-senha-7" })).await;
+    assert_eq!(rpc_err(&st, "auth.recuperarVerificar", verificar("admin", &recuperacao[1])).await, e_ana);
+    let usados: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auditoria WHERE detalhe LIKE 'Recuperação da senha com um código de recuperação%'")
+        .fetch_one(&st.pool)
+        .await
+        .unwrap();
+    assert_eq!(usados, 1);
+    let registos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM acessos WHERE evento = 'RECUPERACAO' AND login = 'admin'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(registos, 2);
+
+    // pela Internet (túnel) não se recupera
+    let pela_internet = |metodo: &'static str, params: Value| {
+        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true };
+        CONTEXTO.scope(ctx, super::dispatch(&st, metodo, params))
+    };
+    let e = pela_internet("auth.recuperarVerificar", verificar("admin", &recuperacao[2])).await.unwrap_err().to_string();
+    assert!(e.contains("não se recupera pela Internet"), "{e}");
+
+    // códigos errados seguidos bloqueiam a conta (política por omissão: 5); bloqueada, nem o código certo serve
+    let mut ultimo = String::new();
+    for _ in 0..5 {
+        ultimo = rpc_err(&st, "auth.recuperarVerificar", verificar("admin", &fora)).await;
+    }
+    assert!(ultimo.contains("bloqueada"), "{ultimo}");
+    assert!(rpc_err(&st, "auth.recuperarVerificar", verificar("admin", &recuperacao[2])).await.contains("bloqueada"));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 /// Fotografias dos artigos: conferidas, miniaturas em lote para o POS e a imagem pela API.
 #[tokio::test]
 async fn fotografias_dos_artigos() {

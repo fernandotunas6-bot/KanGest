@@ -489,6 +489,7 @@ const EVENTOS: Record<string, { label: string; tom: "ok" | "danger" | "accent" |
   DESBLOQUEIO: { label: "Conta desbloqueada", tom: "accent" },
   SENHA: { label: "Senha alterada", tom: "brand" },
   SENHA_REDEFINIDA: { label: "Senha redefinida", tom: "accent" },
+  RECUPERACAO: { label: "Recuperação da senha", tom: "accent" },
   SESSAO_BLOQUEADA: { label: "Sessão bloqueada", tom: "neutral" },
   SESSAO_RETOMADA: { label: "Sessão retomada", tom: "neutral" },
 };

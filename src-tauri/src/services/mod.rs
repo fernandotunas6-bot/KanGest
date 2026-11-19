@@ -55,6 +55,7 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
     let livre = matches!(
         metodo,
         "setup.estado" | "setup.inicializar" | "setup.restaurar" | "auth.login" | "auth.loginPin" | "auth.logout" | "auth.sessao" | "auth.alterarSenha" | "auth.desbloquear" | "seguranca.politica"
+            | "auth.recuperarVerificar" | "auth.recuperarConcluir"
     );
     if !livre {
         if let Some(s) = st.sessao_opcional() {
@@ -91,6 +92,8 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "auth.login" => auth::login(st, p(params)?).await,
         "auth.logout" => auth::logout(st).await,
         "auth.loginPin" => auth::login_pin(st, p(params)?).await,
+        "auth.recuperarVerificar" => auth::recuperar_verificar(st, p(params)?).await,
+        "auth.recuperarConcluir" => auth::recuperar_concluir(st, p(params)?).await,
         "auth.bloquear" => auth::bloquear(st).await,
         "auth.desbloquear" => auth::desbloquear(st, p(params)?).await,
         "seguranca.politica" => auth::politica_publica(st).await,

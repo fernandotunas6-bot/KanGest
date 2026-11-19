@@ -429,6 +429,123 @@ pub async fn alterar_senha(st: &AppState, i: SenhaIn) -> AppResult<Value> {
     Ok(serde_json::to_value(s)?)
 }
 
+// ============================== recuperar a senha ==============================
+
+/// Autorizações para escolher a senha nova depois de conferido o código de dois passos: token → (utilizador, validade).
+/// Ficam só na memória do servidor (reiniciar anula-as), valem 10 minutos e servem uma vez.
+type Recuperacoes = std::sync::Mutex<Option<std::collections::HashMap<String, (i64, chrono::DateTime<chrono::Local>)>>>;
+static RECUPERACOES: Recuperacoes = std::sync::Mutex::new(None);
+const RECUPERACAO_MIN: i64 = 10;
+const ERRO_RECUPERACAO: &str =
+    "Utilizador ou código de verificação incorrectos. Sem a verificação em dois passos, peça ao administrador uma senha provisória.";
+const RECUPERACAO_EXPIROU: &str = "O pedido para mudar a senha expirou. Comece de novo.";
+
+/// Pela Internet (túnel) a senha não se recupera: só nos postos da loja, como o PIN.
+fn recuperar_so_na_loja() -> AppResult<()> {
+    if crate::state::pela_internet() {
+        return Err(AppError::msg("A senha não se recupera pela Internet. Use um posto da loja, ou peça ao administrador uma senha provisória."));
+    }
+    Ok(())
+}
+
+/// O utilizador da autorização, se ainda for válida (sem a gastar).
+fn autorizacao(token: &str) -> Option<i64> {
+    let agora = chrono::Local::now();
+    let mut g = RECUPERACOES.lock().unwrap();
+    let mapa = g.get_or_insert_with(Default::default);
+    mapa.retain(|_, (_, ate)| *ate > agora);
+    mapa.get(token).map(|(id, _)| *id)
+}
+
+#[derive(Deserialize)]
+pub struct RecuperarVerificarIn {
+    login: String,
+    codigo: String,
+}
+
+/// «Esqueci-me da senha», 1.º passo: o utilizador e o código da aplicação de autenticação (ou um código de
+/// recuperação, que se gasta). Só para contas com a verificação em dois passos; as outras pedem ao administrador uma
+/// senha provisória. A mensagem de erro é a mesma em todos os casos (não diz se o utilizador existe), e um código
+/// errado conta como tentativa falhada para o bloqueio da conta. Devolve uma autorização de 10 minutos.
+pub async fn recuperar_verificar(st: &AppState, i: RecuperarVerificarIn) -> AppResult<Value> {
+    recuperar_so_na_loja()?;
+    let pol = politica(st).await?;
+    let login = i.login.trim();
+    let Some(row) = sqlx::query("SELECT * FROM utilizadores WHERE login = ?").bind(login).fetch_optional(&st.pool).await? else {
+        registar(st, None, login, "FALHA", Some("recuperação da senha: utilizador inexistente".into())).await;
+        return Err(AppError::msg(ERRO_RECUPERACAO));
+    };
+    let id: i64 = row.get("id");
+    if let Some(ate) = bloqueada_ate(&row) {
+        registar(st, Some(id), login, "FALHA", Some("recuperação da senha: conta bloqueada".into())).await;
+        return Err(AppError::msg(format!("Conta bloqueada por tentativas falhadas até às {}. Peça ao administrador para a desbloquear.", hora(&ate))));
+    }
+    if row.get::<i64, _>("ativo") == 0 {
+        registar(st, Some(id), login, "FALHA", Some("recuperação da senha: conta desactivada".into())).await;
+        return Err(AppError::msg(ERRO_RECUPERACAO));
+    }
+    match super::dois_passos::conferir_conta(st, &row, &i.codigo, "Recuperação da senha").await? {
+        None => {
+            registar(st, Some(id), login, "FALHA", Some("recuperação da senha: conta sem dois passos".into())).await;
+            Err(AppError::msg(ERRO_RECUPERACAO))
+        }
+        Some(false) => {
+            let e = falhou(st, &pol, id, login, row.get("tentativas"), "recuperação da senha: código errado").await?;
+            // o aviso do bloqueio interessa; o de «senha incorrecta» não se aplica aqui
+            Err(if e.to_string().contains("bloqueada") { e } else { AppError::msg(ERRO_RECUPERACAO) })
+        }
+        Some(true) => {
+            let token: String = rand::thread_rng().gen::<[u8; 32]>().iter().map(|b| format!("{b:02x}")).collect();
+            {
+                let agora = chrono::Local::now();
+                let mut g = RECUPERACOES.lock().unwrap();
+                let mapa = g.get_or_insert_with(Default::default);
+                mapa.retain(|_, (_, ate)| *ate > agora);
+                mapa.insert(token.clone(), (id, agora + chrono::Duration::minutes(RECUPERACAO_MIN)));
+            }
+            registar(st, Some(id), login, "RECUPERACAO", Some("código de dois passos conferido".into())).await;
+            Ok(json!({ "token": token, "nome": row.get::<String, _>("nome"), "minutos": RECUPERACAO_MIN }))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RecuperarConcluirIn {
+    token: String,
+    nova: String,
+}
+
+/// «Esqueci-me da senha», 2.º passo: a senha nova (com a política de senhas), com a autorização do 1.º passo. A conta
+/// fica sem senha provisória e desbloqueada; a autorização gasta-se.
+pub async fn recuperar_concluir(st: &AppState, i: RecuperarConcluirIn) -> AppResult<Value> {
+    recuperar_so_na_loja()?;
+    let token = i.token.trim();
+    let id = autorizacao(token).ok_or_else(|| AppError::msg(RECUPERACAO_EXPIROU))?;
+    let pol = politica(st).await?;
+    // uma senha que não serve não gasta a autorização: escolhe-se outra
+    validar_senha(&pol, &i.nova)?;
+    let row = sqlx::query("SELECT login, senha_hash, ativo FROM utilizadores WHERE id = ?").bind(id).fetch_one(&st.pool).await?;
+    if row.get::<i64, _>("ativo") == 0 {
+        return Err(AppError::msg("Esta conta está desactivada. Fale com o administrador."));
+    }
+    if verificar(&i.nova, &row.get::<String, _>("senha_hash")) {
+        return Err(AppError::msg("A nova senha tem de ser diferente da actual."));
+    }
+    let gasta = RECUPERACOES.lock().unwrap().as_mut().and_then(|m| m.remove(token)).is_some();
+    if !gasta {
+        return Err(AppError::msg(RECUPERACAO_EXPIROU));
+    }
+    sqlx::query("UPDATE utilizadores SET senha_hash = ?, mudar_senha = 0, senha_alterada_em = ?, tentativas = 0, bloqueado_ate = NULL WHERE id = ?")
+        .bind(hash_senha(&i.nova)?)
+        .bind(db::agora())
+        .bind(id)
+        .execute(&st.pool)
+        .await?;
+    let login: String = row.get("login");
+    registar(st, Some(id), &login, "SENHA", Some("recuperada com a verificação em dois passos".into())).await;
+    Ok(json!({ "ok": true }))
+}
+
 // ============================== utilizadores ==============================
 
 pub async fn listar(st: &AppState) -> AppResult<Value> {

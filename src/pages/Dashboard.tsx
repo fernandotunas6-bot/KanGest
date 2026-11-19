@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { CalendarClock, CalendarX2, CheckCircle2, ChevronRight, CircleDollarSign, FileClock, FilePlus2, HandCoins, Hourglass, PackageMinus, Receipt, Repeat, Send, ShieldAlert, ShoppingCart, Table2, TrendingUp, Truck, type LucideIcon } from "lucide-react";
+import { CalendarClock, CalendarX2, CheckCircle2, ChevronRight, CircleDollarSign, Eye, EyeOff, FileClock, FilePlus2, HandCoins, Hourglass, PackageMinus, Receipt, Repeat, Send, ShieldAlert, ShoppingCart, Table2, TrendingUp, Truck, type LucideIcon } from "lucide-react";
 import { call } from "@/lib/api";
-import { data, dataHora, hojeISO, kz, qtd } from "@/lib/format";
+import { data, dataHora, hojeISO, qtd } from "@/lib/format";
+import { useKz, useOcultarValores } from "@/lib/privacidade";
 import { Badge, Button, Card, Delta, PageHeader, Stat, Table, Td, Th, cn } from "@/components/ui";
 import { BarChart } from "@/components/BarChart";
 import DocumentoModal from "@/components/DocumentoModal";
@@ -54,6 +55,9 @@ export default function Dashboard() {
   const [doc, setDoc] = useState<number | null>(null);
   const [tabela, setTabela] = useState(false);
   const { data: d } = useQuery({ queryKey: ["dashboard"], queryFn: () => call<Dash>("dashboard"), refetchInterval: 60_000 });
+  // «Ocultar valores» (escolhido aqui ou no ecrã de entrada): os kwanzas aparecem como ••••••
+  const kz = useKz();
+  const [ocultar, setOcultar] = useOcultarValores();
   // enquanto carrega não se mostram zeros nem "sem documentos" (pareceria que não há dados)
   const v = (x: number | undefined) => (d ? kz(x) : "…");
   const ant = d?.antiguidade;
@@ -110,6 +114,9 @@ export default function Dashboard() {
         subtitle={new Date().toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
         actions={
           <>
+            <Button variant="secondary" onClick={() => setOcultar(!ocultar)} title={ocultar ? "Mostrar os valores do painel" : "Ocultar os valores do painel"}>
+              {ocultar ? <Eye className="size-4" /> : <EyeOff className="size-4" />} {ocultar ? "Mostrar valores" : "Ocultar valores"}
+            </Button>
             <Button variant="secondary" onClick={() => nav("/documentos/novo/FT")}>
               <FilePlus2 className="size-4" /> Nova factura
             </Button>
@@ -200,7 +207,7 @@ export default function Dashboard() {
               </tbody>
             </Table>
           ) : d ? (
-            <BarChart dados={serie} formatar={kz} />
+            <BarChart dados={serie} formatar={kz} ocultarEixo={ocultar} />
           ) : (
             <div className="h-[230px] animate-pulse rounded-lg bg-sunken/60" />
           )}
@@ -348,6 +355,7 @@ function SoComServidorNovo() {
  * a ordem é a dos dados — faixas de antiguidade pela ordem natural, meios de pagamento do maior para o menor).
  */
 function ListaBarras({ linhas, total, vazio }: { linhas: { nome: string; valor: number }[]; total?: number; vazio: string }) {
+  const kz = useKz();
   const max = Math.max(0, ...linhas.map((l) => l.valor));
   const soma = total ?? linhas.reduce((s, l) => s + l.valor, 0);
   if (!max) return <p className="py-8 text-center text-[13px] text-ink-3">{vazio}</p>;

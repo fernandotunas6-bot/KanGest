@@ -76,6 +76,31 @@ entra sem o telemóvel.
   (túnel da Cloudflare), as contas que não a tenham ligada. Na rede da loja nada muda. Pela Internet o PIN nunca
   serve para entrar.
 
+## Esqueci-me da senha
+
+No ecrã de entrada, **Esqueci-me da senha** abre a recuperação em três passos: o utilizador, o código da aplicação de
+autenticação (ou um código de recuperação, que fica gasto) e a senha nova, com a política de senhas.
+
+- Só serve a quem tem a **verificação em dois passos** ligada; os outros pedem ao administrador uma senha provisória
+  (**Redefinir senha**). A mensagem de erro é a mesma em todos os casos — não diz se o utilizador existe nem se tem
+  os dois passos.
+- Um código errado conta como tentativa falhada para o bloqueio da conta; com a conta bloqueada não se recupera.
+- O código conferido dá **10 minutos** para escolher a senha, uma só vez. A senha nova deixa a conta desbloqueada e
+  sem senha provisória; os dois passos continuam ligados.
+- Só nos postos da loja (rede local): **pela Internet a senha não se recupera**.
+- Fica no registo: `Recuperação da senha` (código conferido) e `Senha alterada` («recuperada com a verificação em dois
+  passos»); um código de recuperação usado fica também na auditoria.
+
+## Ecrã de entrada
+
+À esquerda, a montra do KanGest; à direita, «Bem-vindo ao KanGest» com o utilizador e a senha (o olho mostra o que se
+escreveu; os campos vazios dizem «Este campo é obrigatório»), **Ocultar valores** e **Esqueci-me da senha**. Em baixo,
+as **Perguntas frequentes** (entrar, aparelhos e rede, segurança), **Contacte-nos** e o site.
+
+**Ocultar valores** fica guardado no aparelho: no painel, os valores em kwanzas aparecem como `••••••` (e o eixo do
+gráfico sem montantes), para quem está do outro lado do balcão não os ver. No painel, **Mostrar valores** volta a
+mostrá-los.
+
 ## Registo
 
 Ficam no **Registo de acessos**: `Entrada`, `Saída`, `Tentativa falhada` (com o utilizador escrito, mesmo que não exista),

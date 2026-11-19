@@ -119,20 +119,35 @@ pub enum NoLogin {
 
 /// O que a entrada precisa depois da senha certa. `codigo` é o código da aplicação ou um de recuperação.
 pub async fn no_login(st: &AppState, row: &sqlx::sqlite::SqliteRow, codigo_dado: Option<&str>) -> AppResult<NoLogin> {
-    let id: i64 = row.get("id");
-    let Some(segredo) = segredo_do_utilizador(row)? else {
+    if segredo_do_utilizador(row)?.is_none() {
         if crate::state::pela_internet() && auth::politica(st).await?.dois_passos_internet {
             return Err(AppError::msg(
                 "Para entrar pela Internet, esta conta precisa da verificação em dois passos. Ligue-a no KanGest da loja (menu do utilizador → Verificação em dois passos).",
             ));
         }
         return Ok(NoLogin::Seguir);
-    };
+    }
     let Some(dado) = codigo_dado.map(str::trim).filter(|c| !c.is_empty()) else { return Ok(NoLogin::PedirCodigo) };
+    Ok(match conferir_conta(st, row, dado, "Entrada").await? {
+        Some(true) => NoLogin::Seguir,
+        _ => NoLogin::Errado,
+    })
+}
+
+/// Confere o código da aplicação de autenticação ou um código de recuperação (que se gasta) da conta `row`.
+/// `None`: a conta não tem a verificação em dois passos. `para`: o que fica na auditoria quando se usa um código de
+/// recuperação («Entrada», «Recuperação da senha»).
+pub async fn conferir_conta(st: &AppState, row: &sqlx::sqlite::SqliteRow, dado: &str, para: &str) -> AppResult<Option<bool>> {
+    let id: i64 = row.get("id");
+    let Some(segredo) = segredo_do_utilizador(row)? else { return Ok(None) };
+    let dado = dado.trim();
+    if dado.is_empty() {
+        return Ok(Some(false));
+    }
     let ultimo: Option<i64> = row.try_get("totp_ultimo").ok().flatten();
     if let Some(p) = conferir(&segredo, dado, ultimo, passo_agora()) {
         sqlx::query("UPDATE utilizadores SET totp_ultimo = ? WHERE id = ?").bind(p).bind(id).execute(&st.pool).await?;
-        return Ok(NoLogin::Seguir);
+        return Ok(Some(true));
     }
     // código de recuperação: serve uma vez
     let mut lista: Vec<String> = row
@@ -147,12 +162,12 @@ pub async fn no_login(st: &AppState, row: &sqlx::sqlite::SqliteRow, codigo_dado:
         sqlx::query("UPDATE utilizadores SET totp_recuperacao = ? WHERE id = ?").bind(serde_json::to_string(&lista)?).bind(id).execute(&st.pool).await?;
         sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'DOIS_PASSOS', ?)")
             .bind(id)
-            .bind(format!("Entrada com um código de recuperação (restam {})", lista.len()))
+            .bind(format!("{para} com um código de recuperação (restam {})", lista.len()))
             .execute(&st.pool)
             .await?;
-        return Ok(NoLogin::Seguir);
+        return Ok(Some(true));
     }
-    Ok(NoLogin::Errado)
+    Ok(Some(false))
 }
 
 // ============================== métodos ==============================

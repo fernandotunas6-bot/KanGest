@@ -1718,11 +1718,18 @@ function Pagamento({
     }
   }
 
-  // numerário rápido: o que falta depois dos pontos
+  // numerário rápido (o que falta depois dos pontos): o valor certo e o que o cliente costuma entregar — as notas de
+  // 500, 1 000, 1 500, 2 000, 5 000 e 10 000 Kz e o total arredondado a essas notas; só o que chega, até 6 botões
   const restante = Math.max(0, total - emPontos);
-  const rapidos = [restante, Math.ceil(restante / 100000) * 100000, Math.ceil(restante / 500000) * 500000, Math.ceil(restante / 1000000) * 1000000]
-    .filter((v, i, a) => v > 0 && v >= restante && a.indexOf(v) === i)
-    .slice(0, 4);
+  const NOTAS_KZ = [500, 1000, 1500, 2000, 5000, 10000];
+  const rapidos =
+    restante > 0
+      ? [restante, ...[500, 1000, 2000, 5000, 10000].map((n) => Math.ceil(restante / (n * 100)) * n * 100), ...NOTAS_KZ.map((n) => n * 100)]
+          .filter((v) => v >= restante)
+          .sort((x, y) => x - y)
+          .filter((v, i, a) => a.indexOf(v) === i)
+          .slice(0, 6)
+      : [];
 
   return (
     <Modal
@@ -1821,7 +1828,7 @@ function Pagamento({
             </div>
             <div className="flex flex-col gap-3">
               <div className="text-[12px] font-medium uppercase tracking-wide text-ink-2">Numerário rápido</div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {rapidos.map((v) => (
                   <Button type="button" key={v} variant="secondary" size="lg" className="num" onClick={() => setValores({ ...(emPontos > 0 ? { DE: valores.DE } : {}), NU: (v / 100).toFixed(2).replace(".", ",") })}>
                     {kzNum(v)}

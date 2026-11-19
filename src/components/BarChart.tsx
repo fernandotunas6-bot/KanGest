@@ -31,7 +31,8 @@ const compacto = (v: number) => {
  * Barras ≤ 24px, topo arredondado 4px e base recta, 2px de ar entre barras,
  * grelha hairline sólida, tooltip por barra (hover e foco de teclado).
  */
-export function BarChart({ dados, formatar, altura = 220 }: { dados: Ponto[]; formatar: (v: number) => string; altura?: number }) {
+/** `ocultarEixo`: com «Ocultar valores», o eixo não mostra os montantes (só as barras, sem escala). */
+export function BarChart({ dados, formatar, altura = 220, ocultarEixo = false }: { dados: Ponto[]; formatar: (v: number) => string; altura?: number; ocultarEixo?: boolean }) {
   const [hover, setHover] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const [largura, setLargura] = useState(720);
@@ -62,7 +63,7 @@ export function BarChart({ dados, formatar, altura = 220 }: { dados: Ponto[]; fo
           <g key={t}>
             <line x1={m.l} x2={m.l + w} y1={y(t)} y2={y(t)} stroke="var(--color-grid)" strokeWidth={1} />
             <text x={m.l - 8} y={y(t)} dy="0.32em" textAnchor="end" className="num fill-ink-3 text-[11px]">
-              {compacto(t / 100)}
+              {ocultarEixo && t > 0 ? "•••" : compacto(t / 100)}
             </text>
           </g>
         ))}
