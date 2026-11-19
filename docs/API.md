@@ -39,7 +39,7 @@ Em **Chaves de acesso → Nova chave**:
 | Nome | O sistema que se liga: «Loja online», «Contabilidade»… |
 | Age em nome de | O utilizador da chave. Os documentos ficam com este operador. Crie um utilizador próprio para cada integração (ex.: «Loja Online»): assim as vendas aparecem separadas no relatório «Por operador». |
 | Posto | Série e armazém dos documentos. Um posto próprio com prefixo (ex.: `W`) dá documentos como `FR W2026/15` e o relatório «Por posto» mostra as vendas do canal. |
-| Permissões | O que a chave pode fazer (tabela abaixo). Há modelos para *Loja online*, *Contabilidade*, *Só consulta (BI)* e *Verificador de preços*. |
+| Permissões | O que a chave pode fazer (tabela abaixo). Há modelos para *Loja online*, *Contabilidade*, *Só consulta (BI)* e *Verificador de preços*. A *Loja online* traz tudo o que a ligação de um site precisa (§8): `api.artigos`, `api.stock`, `api.entidades`, `api.documentos`, `clientes`, `vendas.proforma`, `vendas.fatura_recibo`, `vendas.fatura`, `vendas.nota_credito`, `documentos.anular`, `pos.alterar_preco` e `relatorios.ver`. |
 | IPs permitidos | Vazio = qualquer. Ex.: `192.168.1.20, 10.0.0.0/8`. |
 | Pedidos por minuto | 120 por omissão; 0 = sem limite. |
 | Válida até | Vazio = sem validade. |
@@ -237,7 +237,8 @@ code da AGT para mostrar ao cliente).
 ## 7. Avisos automáticos (webhooks)
 
 Em vez de perguntar de minutos a minutos, o outro sistema pode ser **avisado**. Em **API e Integrações → Avisos
-automáticos → Novo aviso**, indique o endereço que recebe os avisos e os eventos:
+automáticos → Novo aviso**, indique o endereço que recebe os avisos e os eventos (um aviso novo vem com os quatro
+marcados, os que uma loja online quer):
 
 | Evento | Quando | `dados` |
 |---|---|---|

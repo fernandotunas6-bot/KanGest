@@ -83,11 +83,19 @@ interface EdicaoChave {
   ativa: boolean;
 }
 
-/** Modelos de permissões para os usos mais comuns (o administrador ajusta depois). */
+/**
+ * Modelos de permissões para os usos mais comuns (o administrador ajusta depois). A «Loja online» tem tudo o que a
+ * ligação de um site precisa (docs/API.md §8): NE ao encomendar, FR ao pagar, NC no reembolso, anular a NE de uma
+ * encomenda cancelada, o cliente com NIF, o preço do site (promoções) e as vendas por loja para o painel do site.
+ */
 const MODELOS: { label: string; permissoes: string[] }[] = [
   {
     label: "Loja online",
-    permissoes: ["api.artigos", "api.stock", "api.entidades", "api.documentos", "clientes", "vendas.fatura_recibo", "vendas.fatura", "vendas.proforma"],
+    permissoes: [
+      "api.artigos", "api.stock", "api.entidades", "api.documentos", "clientes",
+      "vendas.proforma", "vendas.fatura_recibo", "vendas.fatura", "vendas.nota_credito", "documentos.anular",
+      "pos.alterar_preco", "relatorios.ver",
+    ],
   },
   { label: "Contabilidade", permissoes: ["api.artigos", "api.entidades", "api.documentos", "relatorios.ver", "sistema.saft"] },
   { label: "Só consulta (BI)", permissoes: ["api.artigos", "api.stock", "api.entidades", "api.documentos", "relatorios.ver"] },
@@ -613,6 +621,9 @@ interface WebhooksDados {
 }
 type EdicaoAviso = { id?: number; nome: string; url: string; eventos: string[]; ativo: boolean };
 
+/** Os eventos que uma loja online quer (vendas e anulações ao vivo, stock, preços): os de um aviso novo. */
+const EVENTOS_LOJA_ONLINE = ["documento.emitido", "documento.anulado", "stock.alterado", "artigo.alterado"];
+
 const ESTADO_ENTREGA: Record<EntregaApi["estado"], { label: string; tom: "ok" | "accent" | "danger" }> = {
   ENTREGUE: { label: "Entregue", tom: "ok" },
   PENDENTE: { label: "Por enviar", tom: "accent" },
@@ -690,7 +701,7 @@ function Avisos() {
           <span className="font-medium">Avisos automáticos (webhooks)</span>
           <span className="text-[12.5px] text-ink-3">O KanGest avisa a loja online ou outro sistema quando há vendas, anulações e mudanças de stock ou de preços.</span>
         </div>
-        <Button size="sm" onClick={() => setEd({ nome: "", url: "https://", eventos: ["documento.emitido", "stock.alterado", "artigo.alterado"], ativo: true })}>
+        <Button size="sm" onClick={() => setEd({ nome: "", url: "https://", eventos: EVENTOS_LOJA_ONLINE, ativo: true })}>
           <Plus className="size-4" /> Novo aviso
         </Button>
       </div>
