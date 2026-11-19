@@ -4817,3 +4817,49 @@ async fn pagamento_em_moeda_estrangeira() {
     assert_eq!((usd["moeda"].as_str(), usd["valor"].as_i64()), (Some("USD"), Some(15_000)));
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Utilizador de uma loja (servidor central com várias livrarias): só entra nos postos dela e só vê os documentos,
+/// os relatórios e o painel dela; o administrador vê todas.
+#[tokio::test]
+async fn utilizador_de_uma_loja() {
+    let (st, pasta) = base_com_admin("utilizador_loja").await;
+    let lubango = rpc(&st, "tabela.guardar", json!({ "tabela": "armazens", "descricao": "Livraria do Lubango" })).await["id"].as_i64().unwrap();
+    let posto_lub = rpc(&st, "posto.guardar", json!({ "descricao": "Caixa do Lubango", "armazem_id": lubango, "serie_prefixo": "L" })).await["id"].as_i64().unwrap();
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Livro", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    let fr_sede = rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": art, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await["documento"]["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "armazem_id": lubango, "linhas": [{ "artigo_id": art, "quantidade": 2 }], "pagamentos": [{ "modo": "NU", "valor": 228000 }] })).await;
+    // o administrador vê todas as lojas: não se lhe põe uma
+    assert!(rpc_err(&st, "utilizadores.guardar", json!({ "nome": "Outro Admin", "login": "admin2", "perfil": "ADMIN", "senha": "segredo99", "armazem_id": lubango })).await.contains("administrador"));
+    assert!(rpc_err(&st, "utilizadores.guardar", json!({ "nome": "X", "login": "x", "perfil": "GESTOR", "senha": "segredo99", "armazem_id": 999 })).await.contains("inválida"));
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Gerente do Lubango", "login": "gerlub", "perfil": "GESTOR", "senha": "segredo99", "mudar_senha": false, "armazem_id": lubango })).await;
+    rpc(&st, "auth.logout", json!({})).await;
+
+    // num posto de outra loja não entra
+    assert!(rpc_err(&st, "auth.login", json!({ "login": "gerlub", "senha": "segredo99" })).await.contains("Livraria do Lubango"));
+    // num posto da loja dele entra, e a sessão diz a loja
+    st.carregar_posto(posto_lub).await.unwrap();
+    let s = rpc(&st, "auth.login", json!({ "login": "gerlub", "senha": "segredo99" })).await;
+    assert_eq!(s["armazem_id"], lubango);
+
+    // documentos: só os da loja; o da sede não se abre
+    let docs = rpc(&st, "documentos.listar", json!({ "tipo": "FR" })).await;
+    assert_eq!(docs.as_array().unwrap().len(), 1, "{docs}");
+    assert!(rpc_err(&st, "documentos.obter", json!({ "id": fr_sede })).await.contains("outra loja"));
+    // relatórios: a loja dele, peça o que pedir
+    let hoje = db::hoje();
+    let mes = rpc(&st, "relatorios.vendas", json!({ "de": hoje, "ate": hoje, "agrupar": "dia", "armazem_id": 1 })).await;
+    assert_eq!(mes[0]["total"], 228000, "{mes}");
+    let ano: i64 = hoje[..4].parse().unwrap();
+    let mes_n: usize = hoje[5..7].parse().unwrap();
+    assert_eq!(rpc(&st, "relatorios.sintese", json!({ "ano": ano })).await["meses"][mes_n - 1]["atual"], 228000);
+    // o painel inicial: as vendas de hoje da loja
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["vendas_hoje"], 228000);
+
+    // o administrador continua a ver tudo
+    rpc(&st, "auth.logout", json!({})).await;
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    assert_eq!(rpc(&st, "documentos.listar", json!({ "tipo": "FR" })).await.as_array().unwrap().len(), 2);
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["vendas_hoje"], 342000);
+    let _ = std::fs::remove_dir_all(&pasta);
+}

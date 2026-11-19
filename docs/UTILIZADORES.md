@@ -93,3 +93,15 @@ política de segurança, emitiu ou anulou documentos, importou dados…).
   `auth.alterarSenha`, `auth.desbloquear`, `seguranca.politica`. Todos os outros são recusados com a sessão bloqueada
   ou com senha provisória.
 - Tabelas: `perfis`, `acessos`; colunas de segurança em `utilizadores` (migração `0016_utilizadores_permissoes.sql`).
+
+## Utilizadores de uma só loja (servidor central)
+
+Num servidor central com várias livrarias (cada uma é um armazém, com os seus postos), cada utilizador pode ficar
+ligado a **uma loja**: Sistema → Utilizadores → a ficha → **Loja**. Com uma loja:
+
+- só entra nos **postos dessa loja** (num posto de outra loja, o login diz de que loja é o utilizador);
+- vê só os **documentos** dessa loja (a lista e a abertura de um documento);
+- os **relatórios** (vendas, síntese, stock) e o **painel** inicial são os dessa loja, peça o filtro que pedir.
+
+«Todas as lojas» (o normal) é como antes. Os administradores vêem sempre todas. As chaves da API agem pelo posto
+delas, não pela loja do utilizador.

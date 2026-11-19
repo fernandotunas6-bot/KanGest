@@ -1818,6 +1818,10 @@ pub async fn listar(st: &AppState, f: Filtro) -> AppResult<Value> {
     if let Some(v) = texto(f.grupo) {
         q.push(" AND t.grupo = ").push_bind(v);
     }
+    // um utilizador de uma loja só vê os documentos dela
+    if let Some(loja) = st.loja() {
+        q.push(" AND d.armazem_id = ").push_bind(loja);
+    }
     q.push(" ORDER BY d.data_hora DESC, d.id DESC LIMIT ").push_bind(f.limite.unwrap_or(1000));
     let rows = q.build().fetch_all(&st.pool).await?;
     Ok(db::rows_json(&rows))
@@ -1845,6 +1849,12 @@ pub async fn obter(st: &AppState, i: IdIn) -> AppResult<Value> {
     .fetch_optional(p)
     .await?
     .ok_or(AppError::NaoEncontrado)?;
+    // um utilizador de uma loja não abre os documentos das outras
+    if let Some(loja) = st.loja() {
+        if doc.try_get::<Option<i64>, _>("armazem_id").ok().flatten().is_some_and(|a| a != loja) {
+            return Err(AppError::msg("Este documento é de outra loja."));
+        }
+    }
     let linhas = sqlx::query("SELECT * FROM documento_linhas WHERE documento_id = ? ORDER BY linha").bind(i.id).fetch_all(p).await?;
     let pags = sqlx::query(
         "SELECT p.modo_codigo, m.descricao, p.valor, p.moeda, p.valor_moeda, p.cambio FROM documento_pagamentos p

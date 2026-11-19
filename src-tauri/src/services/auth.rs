@@ -188,6 +188,7 @@ async fn sessao_de(st: &AppState, row: &sqlx::sqlite::SqliteRow) -> Sessao {
         mudar_senha: row.get::<i64, _>("mudar_senha") == 1,
         bloqueada: false,
         perfil_descricao,
+        armazem_id: row.try_get::<Option<i64>, _>("armazem_id").ok().flatten(),
     }
 }
 
@@ -228,6 +229,13 @@ fn bloqueada_ate(row: &sqlx::sqlite::SqliteRow) -> Option<String> {
 async fn entrar(st: &AppState, row: &sqlx::sqlite::SqliteRow, como: &str) -> AppResult<Value> {
     let id: i64 = row.get("id");
     let login: String = row.get("login");
+    // um utilizador de uma loja só entra nos postos dessa loja
+    if let Some(loja) = row.try_get::<Option<i64>, _>("armazem_id").ok().flatten() {
+        if st.posto().armazem_id != loja {
+            let nome: String = sqlx::query_scalar("SELECT nome FROM armazens WHERE id = ?").bind(loja).fetch_optional(&st.pool).await?.unwrap_or_default();
+            return Err(AppError::msg(format!("Este utilizador é da loja «{nome}»: entre num posto dessa loja.")));
+        }
+    }
     sqlx::query("UPDATE utilizadores SET tentativas = 0, bloqueado_ate = NULL, ultimo_acesso = ? WHERE id = ?")
         .bind(db::agora())
         .bind(id)
@@ -444,6 +452,7 @@ pub async fn listar(st: &AppState) -> AppResult<Value> {
             "permissoes_proprias": proprias.is_some(),
             "permissoes": permissoes,
             "limite_desconto": r.get::<f64, _>("limite_desconto"),
+            "armazem_id": r.try_get::<Option<i64>, _>("armazem_id").ok().flatten(),
             "tem_pin": r.get::<Option<String>, _>("pin_hash").is_some(),
             "dois_passos": r.get::<Option<String>, _>("totp_segredo").is_some_and(|x| !x.is_empty()),
             "perfil": perfil,
@@ -473,6 +482,9 @@ pub struct UtilizadorIn {
     limite_desconto: Option<f64>,
     /// Obrigar a mudar a senha no próximo acesso (por omissão nos utilizadores novos).
     mudar_senha: Option<bool>,
+    /// A loja (armazém) do utilizador; vazio = todas.
+    #[serde(default)]
+    armazem_id: Option<i64>,
 }
 
 /// O PIN identifica a pessoa (entrada por PIN e autorizações de supervisor): não pode repetir-se.
@@ -518,6 +530,15 @@ pub async fn guardar(st: &AppState, u: UtilizadorIn) -> AppResult<Value> {
         }
         if pin_em_uso(st, pin, u.id).await? {
             return Err(AppError::msg("Este PIN já é usado por outro utilizador. Escolha outro."));
+        }
+    }
+    if let Some(a) = u.armazem_id {
+        let existe: Option<i64> = sqlx::query_scalar("SELECT id FROM armazens WHERE id = ?").bind(a).fetch_optional(&st.pool).await?;
+        if existe.is_none() {
+            return Err(AppError::msg("Loja (armazém) inválida."));
+        }
+        if u.perfil == "ADMIN" {
+            return Err(AppError::msg("Um administrador vê todas as lojas: deixe a loja vazia."));
         }
     }
     let ativo = u.ativo.unwrap_or(true) as i64;
@@ -581,6 +602,7 @@ pub async fn guardar(st: &AppState, u: UtilizadorIn) -> AppResult<Value> {
         }
         _ => {}
     }
+    sqlx::query("UPDATE utilizadores SET armazem_id = ? WHERE id = ?").bind(u.armazem_id).bind(id).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'UTILIZADOR', ?)")
         .bind(quem.id)
         .bind(format!("{} {} ({})", if u.id.is_some() { "Alterado" } else { "Criado" }, u.login.trim(), u.perfil))

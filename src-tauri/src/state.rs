@@ -146,6 +146,10 @@ pub struct Sessao {
     /// Nome do perfil para mostrar (ex.: «Caixa (POS)», «Armazém»).
     #[serde(default)]
     pub perfil_descricao: Option<String>,
+    /// A loja (armazém) do utilizador num servidor central: só entra nos postos dela e só vê os documentos, os
+    /// relatórios e o painel dela. `None` = todas as lojas.
+    #[serde(default)]
+    pub armazem_id: Option<i64>,
 }
 
 impl Sessao {
@@ -279,6 +283,11 @@ impl AppState {
 
 
     /// Exige uma permissão por operação.
+    /// A loja a que a sessão está limitada (utilizador de uma só loja), ou `None`.
+    pub fn loja(&self) -> Option<i64> {
+        self.sessao_opcional().and_then(|s| s.armazem_id)
+    }
+
     pub fn exigir_perm(&self, perm: &str) -> AppResult<Sessao> {
         let s = self.sessao()?;
         if !s.tem(perm) {
