@@ -5315,3 +5315,63 @@ async fn auditoria_com_antes_depois_e_selo() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// CRUD seguros: eliminar só o que nunca foi usado (o resto fica desactivado), acções em lote e avisos de duplicados.
+#[tokio::test]
+async fn eliminar_com_seguranca_e_accoes_em_lote() {
+    let (st, pasta) = base_com_admin("cruds").await;
+    let hoje = db::hoje();
+
+    // artigo nunca usado: elimina-se de vez
+    let novo = rpc(&st, "artigos.guardar", json!({ "descricao": "Artigo de teste", "taxa_iva_id": 1, "preco1": 10000, "codigo_barras": "7700001" })).await["id"].as_i64().unwrap();
+    assert_eq!(rpc(&st, "artigos.codigoUsado", json!({ "codigo": "7700001" })).await["id"], novo);
+    assert!(rpc(&st, "artigos.codigoUsado", json!({ "codigo": "7700001", "id": novo })).await.is_null());
+    assert_eq!(rpc(&st, "artigos.eliminar", json!({ "id": novo })).await["eliminado"], true);
+    let existe: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM artigos WHERE id = ?").bind(novo).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(existe, 0);
+    let h = rpc(&st, "auditoria.historico", json!({ "entidade": "artigos", "registo_id": novo })).await;
+    assert_eq!(h[0]["acao"], "ELIMINAR");
+    assert_eq!(h[0]["antes"]["descricao"], "Artigo de teste");
+
+    // artigo com movimentos: fica desactivado (e reactiva-se em lote)
+    let usado = rpc(&st, "artigos.guardar", json!({ "descricao": "Feijão 1kg", "taxa_iva_id": 1, "preco1": 87720 })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": usado, "quantidade": 5, "preco_unitario": 50000 }] })).await;
+    let r = rpc(&st, "artigos.eliminar", json!({ "id": usado })).await;
+    assert_eq!(r["desactivado"], true, "{r}");
+    assert_eq!(rpc(&st, "auditoria.historico", json!({ "entidade": "artigos", "registo_id": usado })).await[0]["acao"], "DESACTIVAR");
+    rpc(&st, "artigos.lote", json!({ "ids": [usado], "accao": "activar" })).await;
+    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": usado })).await["ativo"], 1);
+
+    // preços em lote: +10% no PVP 1, arredondado a 50 Kz (1 000,00 c/ IVA → 1 100,00)
+    let pvp = rpc(&st, "artigos.obter", json!({ "id": usado })).await["preco1_iva"].as_i64().unwrap();
+    assert_eq!(pvp, 100001, "PVP de partida");
+    let r = rpc(&st, "artigos.lote", json!({ "ids": [usado], "accao": "preco", "percentagem": 10, "arredondar": 50 })).await;
+    assert_eq!(r["alterados"], 1);
+    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": usado })).await["preco1_iva"], 110000);
+    assert!(rpc_err(&st, "artigos.lote", json!({ "ids": [usado], "accao": "preco", "percentagem": 0 })).await.contains("percentagem"));
+    let familia = rpc(&st, "tabela.guardar", json!({ "tabela": "familias", "descricao": "Mercearia" })).await["id"].as_i64().unwrap();
+    rpc(&st, "artigos.lote", json!({ "ids": [usado], "accao": "familia", "familia_id": familia })).await;
+    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": usado })).await["familia_id"], familia);
+    let alt = rpc(&st, "auditoria.listar", json!({ "de": hoje, "ate": hoje, "entidade": "artigos", "registo_id": usado, "evento": "ALTERAR" })).await;
+    assert!(alt.as_array().unwrap().iter().any(|l| l["antes"]["pvp1"].is_number() || l["antes"]["preco1"] == 87720), "{alt}");
+
+    // entidades: sem documentos elimina-se; com documentos desactiva-se e sai da lista
+    let sem = rpc(&st, "entidades.guardar", json!({ "nome": "Cliente Sem Nada", "nif": "5417000010" })).await["id"].as_i64().unwrap();
+    assert_eq!(rpc(&st, "entidades.nifUsado", json!({ "nif": "5417000010" })).await["id"], sem);
+    assert_eq!(rpc(&st, "entidades.eliminar", json!({ "id": sem })).await["eliminado"], true);
+    let com = rpc(&st, "entidades.guardar", json!({ "nome": "Cliente Com Proforma", "nif": "5417000011" })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "PP", "entidade_id": com, "linhas": [{ "artigo_id": usado, "quantidade": 1 }] })).await;
+    assert_eq!(rpc(&st, "entidades.eliminar", json!({ "id": com })).await["desactivado"], true);
+    let activos = rpc(&st, "entidades.listar", json!({ "tipo": "C", "q": "Proforma" })).await;
+    assert_eq!(activos.as_array().unwrap().len(), 0);
+    let todos = rpc(&st, "entidades.listar", json!({ "tipo": "C", "q": "Proforma", "inativos": true })).await;
+    assert_eq!(todos[0]["ativo"], 0);
+    // reactivar: recusado se o NIF já estiver noutra ficha activa
+    let outra = rpc(&st, "entidades.guardar", json!({ "nome": "Mesmo NIF", "nif": "5417000011" })).await["id"].as_i64().unwrap();
+    assert!(rpc_err(&st, "entidades.lote", json!({ "ids": [com], "accao": "activar" })).await.contains("Mesmo NIF"));
+    rpc(&st, "entidades.lote", json!({ "ids": [outra], "accao": "desactivar" })).await;
+    assert_eq!(rpc(&st, "entidades.lote", json!({ "ids": [com], "accao": "activar" })).await["alterados"], 1);
+    assert!(rpc_err(&st, "entidades.eliminar", json!({ "id": 1 })).await.contains("Consumidor Final"));
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

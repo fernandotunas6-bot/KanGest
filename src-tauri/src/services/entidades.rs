@@ -10,6 +10,9 @@ use crate::state::AppState;
 pub struct Filtro {
     tipo: Option<String>, // C | F
     q: Option<String>,
+    /// também as desactivadas
+    #[serde(default)]
+    inativos: Option<bool>,
 }
 
 pub async fn listar(st: &AppState, f: Filtro) -> AppResult<Value> {
@@ -21,13 +24,14 @@ pub async fn listar(st: &AppState, f: Filtro) -> AppResult<Value> {
             (SELECT COALESCE(SUM(d.credito_disponivel), 0) FROM documentos d
               WHERE d.entidade_id = e.id AND d.estado = 'N') AS credito
          FROM entidades e
-         WHERE e.ativo = 1
+         WHERE (?3 = 1 OR e.ativo = 1)
            AND (?1 IS NULL OR e.tipo = ?1 OR e.tipo = 'A')
-           AND (e.nome LIKE ?2 OR e.nif LIKE ?2 OR IFNULL(e.telefone,'') LIKE ?2)
-         ORDER BY e.id = 1 DESC, e.nome LIMIT 500",
+           AND (e.nome LIKE ?2 OR e.nif LIKE ?2 OR IFNULL(e.telefone,'') LIKE ?2 OR IFNULL(e.email,'') LIKE ?2)
+         ORDER BY e.id = 1 DESC, e.ativo DESC, e.nome LIMIT 2000",
     )
     .bind(f.tipo)
     .bind(format!("%{}%", f.q.unwrap_or_default().trim()))
+    .bind(f.inativos.unwrap_or(false) as i64)
     .fetch_all(&st.pool)
     .await?;
     Ok(db::rows_json(&rows))
@@ -217,4 +221,100 @@ pub async fn endereco_guardar(st: &AppState, e: EnderecoIn) -> AppResult<Value> 
             .last_insert_rowid(),
     };
     Ok(json!({ "id": id }))
+}
+
+// ============================== eliminar e acções em lote ==============================
+
+/// A permissão que uma entidade pede: clientes ou fornecedores (as duas coisas pede a de clientes).
+async fn exigir_da_entidade(st: &AppState, id: i64) -> AppResult<()> {
+    if id == 1 {
+        return Err(AppError::msg("O cliente \"Consumidor Final\" não pode ser eliminado nem desactivado."));
+    }
+    let tipo: String = sqlx::query_scalar("SELECT tipo FROM entidades WHERE id = ?").bind(id).fetch_optional(&st.pool).await?.ok_or(AppError::NaoEncontrado)?;
+    st.exigir_perm(if tipo == "F" { "fornecedores" } else { "clientes" })?;
+    Ok(())
+}
+
+/// Elimina uma entidade que nunca foi usada. Com documentos, avenças, viaturas, pontos ou outra ligação fica só
+/// **desactivada**: sai das listas e da escolha nos documentos, e os documentos antigos continuam com ela.
+pub async fn eliminar(st: &AppState, i: IdIn) -> AppResult<Value> {
+    exigir_da_entidade(st, i.id).await?;
+    let documentos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM documentos WHERE entidade_id = ?").bind(i.id).fetch_one(&st.pool).await?;
+    if documentos == 0 {
+        let mut tx = db::transacao(&st.pool).await?;
+        sqlx::query("DELETE FROM entidade_enderecos WHERE entidade_id = ?").bind(i.id).execute(&mut *tx).await?;
+        // as chaves estrangeiras recusam se houver outra ligação (avenças, viaturas, pontos…): então desactiva-se
+        if sqlx::query("DELETE FROM entidades WHERE id = ?").bind(i.id).execute(&mut *tx).await.is_ok() {
+            tx.commit().await?;
+            return Ok(json!({ "eliminado": true }));
+        }
+        tx.rollback().await?;
+    }
+    sqlx::query("UPDATE entidades SET ativo = 0 WHERE id = ?").bind(i.id).execute(&st.pool).await?;
+    Ok(json!({ "eliminado": false, "desactivado": true, "documentos": documentos }))
+}
+
+#[derive(Deserialize)]
+pub struct LoteIn {
+    ids: Vec<i64>,
+    /// activar | desactivar
+    accao: String,
+}
+
+/// Activar ou desactivar várias entidades de uma vez (cada uma fica na auditoria).
+pub async fn lote(st: &AppState, l: LoteIn) -> AppResult<Value> {
+    let ativo = match l.accao.as_str() {
+        "activar" => 1,
+        "desactivar" => 0,
+        _ => return Err(AppError::msg("Acção desconhecida.")),
+    };
+    if l.ids.is_empty() {
+        return Err(AppError::msg("Escolha pelo menos uma ficha."));
+    }
+    let mut alterados = 0;
+    for &id in &l.ids {
+        exigir_da_entidade(st, id).await?;
+        // ao reactivar, o NIF não pode estar já noutra ficha activa
+        if ativo == 1 {
+            let dup: Option<String> = sqlx::query_scalar(
+                "SELECT o.nome FROM entidades e JOIN entidades o ON o.nif = e.nif AND o.id <> e.id AND o.ativo = 1 WHERE e.id = ? AND e.nif <> '999999999'",
+            )
+            .bind(id)
+            .fetch_optional(&st.pool)
+            .await?;
+            if let Some(n) = dup {
+                return Err(AppError::msg(format!("Não se reactiva: o NIF já está na ficha activa \"{n}\".")));
+            }
+        }
+        let antes = super::auditoria::ficha(st, "entidades", id).await;
+        let n = sqlx::query("UPDATE entidades SET ativo = ? WHERE id = ? AND ativo <> ?").bind(ativo).bind(id).bind(ativo).execute(&st.pool).await?.rows_affected();
+        if n > 0 {
+            alterados += 1;
+            let agora = super::auditoria::ficha(st, "entidades", id).await;
+            super::auditoria::registar_ficha(st, "entidades", id, antes, agora, None).await?;
+        }
+    }
+    Ok(json!({ "alterados": alterados }))
+}
+
+/// A ficha activa que já tem este NIF (para avisar enquanto se escreve), ou `null`.
+#[derive(Deserialize)]
+pub struct NifIn {
+    nif: String,
+    #[serde(default)]
+    id: Option<i64>,
+}
+
+pub async fn nif_usado(st: &AppState, n: NifIn) -> AppResult<Value> {
+    st.sessao()?;
+    let nif: String = n.nif.chars().filter(|c| !c.is_whitespace() && *c != '-' && *c != '.').collect::<String>().to_uppercase();
+    if nif.is_empty() || nif == "999999999" {
+        return Ok(Value::Null);
+    }
+    let r: Option<(i64, String)> = sqlx::query_as("SELECT id, nome FROM entidades WHERE nif = ? AND id <> ? AND ativo = 1 LIMIT 1")
+        .bind(&nif)
+        .bind(n.id.unwrap_or(0))
+        .fetch_optional(&st.pool)
+        .await?;
+    Ok(r.map(|(id, nome)| json!({ "id": id, "nome": nome })).unwrap_or(Value::Null))
 }
