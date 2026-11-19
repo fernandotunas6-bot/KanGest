@@ -1,7 +1,7 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, ChevronsUpDown, X, type LucideIcon } from "lucide-react";
-import { forwardRef, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TdHTMLAttributes } from "react";
+import { createContext, forwardRef, useCallback, useContext, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TdHTMLAttributes } from "react";
 import { numero } from "@/lib/format";
 
 export const cn = (...c: ClassValue[]) => twMerge(clsx(c));
@@ -53,12 +53,21 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
   </select>
 ));
 
-export function Field({ label, hint, children, className }: { label: string; hint?: string; children: ReactNode; className?: string }) {
+/** Campo com rótulo. `erro` aparece a vermelho no lugar da dica (e o campo fica com a borda vermelha). */
+export function Field({ label, hint, erro, aviso, children, className }: { label: string; hint?: string; erro?: string | null; aviso?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <label className={cn("flex flex-col gap-1.5", className)}>
+    <label className={cn("flex flex-col gap-1.5", erro && "[&_.kg-campo]:border-danger [&_.kg-campo]:focus:ring-danger/15", className)}>
       <span className="text-[13px] font-medium text-ink-2">{label}</span>
       {children}
-      {hint && <span className="text-[12px] text-ink-3">{hint}</span>}
+      {erro ? (
+        <span role="alert" className="text-[12px] font-medium text-danger">
+          {erro}
+        </span>
+      ) : aviso ? (
+        <span className="text-[12px] font-medium text-accent-ink">{aviso}</span>
+      ) : (
+        hint && <span className="text-[12px] text-ink-3">{hint}</span>
+      )}
     </label>
   );
 }
@@ -93,6 +102,28 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
 }
 
 // ---------------- Modal ----------------
+/** Janelas abertas, da mais antiga para a mais recente: só a de cima responde ao Esc e ao Ctrl+S. */
+const pilhaModais: number[] = [];
+let proximoModal = 1;
+
+/** Dentro de um Modal: fechar como o «X» (com o aviso das alterações por guardar). */
+const FecharModal = createContext<() => void>(() => {});
+export const usePedirFecho = () => useContext(FecharModal);
+
+/** «Cancelar» de um Modal: avisa se houver alterações por guardar. */
+export function BotaoCancelar({ children = "Cancelar" }: { children?: ReactNode }) {
+  const fechar = usePedirFecho();
+  return (
+    <Button variant="secondary" onClick={fechar}>
+      {children}
+    </Button>
+  );
+}
+
+/**
+ * Janela por cima do ecrã. Com `sujo`, fechar (Esc, «X», fora da janela ou BotaoCancelar) pergunta antes de deitar fora
+ * as alterações. Com `onGuardar`, Ctrl+S (⌘S no Mac) guarda.
+ */
 export function Modal({
   open,
   onClose,
@@ -100,6 +131,8 @@ export function Modal({
   children,
   footer,
   width = "max-w-2xl",
+  sujo,
+  onGuardar,
 }: {
   open: boolean;
   onClose: () => void;
@@ -107,28 +140,144 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   width?: string;
+  /** há alterações por guardar */
+  sujo?: boolean;
+  onGuardar?: () => void;
 }) {
+  const [aSair, setASair] = useState(false);
+  const pedirFecho = useCallback(() => (sujo ? setASair(true) : onClose()), [sujo, onClose]);
+  const guardarRef = useRef(onGuardar);
+  guardarRef.current = onGuardar;
+  const [eu] = useState(() => proximoModal++);
   useEffect(() => {
     if (!open) return;
-    const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    pilhaModais.push(eu);
+    return () => {
+      const i = pilhaModais.lastIndexOf(eu);
+      if (i >= 0) pilhaModais.splice(i, 1);
+    };
+  }, [open, eu]);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: KeyboardEvent) => {
+      // uma janela por cima desta (ex.: uma confirmação) trata as suas teclas
+      if (pilhaModais[pilhaModais.length - 1] !== eu) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (aSair) setASair(false);
+        else pedirFecho();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && guardarRef.current) {
+        e.preventDefault();
+        setASair(false);
+        guardarRef.current();
+      }
+    };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [open, onClose]);
+  }, [open, pedirFecho, aSair, eu]);
+  useEffect(() => {
+    if (!sujo) setASair(false);
+  }, [sujo]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim p-2 pt-3 backdrop-blur-[2px] sm:p-6 sm:pt-[6vh]" onMouseDown={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={title} className={cn("w-full rounded-2xl border border-line bg-surface shadow-pop", width)} onMouseDown={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-6 sm:py-4">
-          <h2 className="min-w-0 text-[17px] font-semibold">{title}</h2>
-          <button onClick={onClose} className="rounded-md p-1 text-ink-3 hover:bg-sunken hover:text-ink" aria-label="Fechar">
-            <X className="size-5" />
-          </button>
+    <FecharModal.Provider value={pedirFecho}>
+      <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim p-2 pt-3 backdrop-blur-[2px] sm:p-6 sm:pt-[6vh]" onMouseDown={pedirFecho}>
+        <div role="dialog" aria-modal="true" aria-label={title} className={cn("w-full rounded-2xl border border-line bg-surface shadow-pop", width)} onMouseDown={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-6 sm:py-4">
+            <h2 className="min-w-0 text-[17px] font-semibold">{title}</h2>
+            <button onClick={pedirFecho} className="rounded-md p-1 text-ink-3 hover:bg-sunken hover:text-ink" aria-label="Fechar">
+              <X className="size-5" />
+            </button>
+          </div>
+          <div className="px-4 py-4 sm:px-6 sm:py-5">{children}</div>
+          {aSair ? (
+            // fica no fundo do ecrã mesmo numa ficha comprida (o resto da janela pode estar fora de vista)
+            <div
+              role="alertdialog"
+              aria-label="Alterações por guardar"
+              className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 rounded-b-2xl border-t border-accent/40 bg-accent-50 px-4 py-3.5 shadow-pop sm:px-6 sm:py-4"
+            >
+              <span className="mr-auto text-[13.5px] font-medium text-accent-ink">Há alterações por guardar. Sair sem as guardar?</span>
+              <Button variant="secondary" autoFocus onClick={() => setASair(false)}>
+                Continuar a editar
+              </Button>
+              <Button variant="danger" onClick={onClose}>
+                Sair sem guardar
+              </Button>
+              {onGuardar && (
+                <Button
+                  onClick={() => {
+                    setASair(false);
+                    onGuardar();
+                  }}
+                >
+                  Guardar
+                </Button>
+              )}
+            </div>
+          ) : (
+            footer && <div className="flex flex-wrap justify-end gap-2 rounded-b-2xl border-t border-line bg-bg/60 px-4 py-3.5 sm:px-6 sm:py-4">{footer}</div>
+          )}
         </div>
-        <div className="px-4 py-4 sm:px-6 sm:py-5">{children}</div>
-        {footer && <div className="flex flex-wrap justify-end gap-2 rounded-b-2xl border-t border-line bg-bg/60 px-4 py-3.5 sm:px-6 sm:py-4">{footer}</div>}
       </div>
-    </div>
+    </FecharModal.Provider>
   );
+}
+
+/** Pergunta antes de uma acção que não se desfaz (eliminar, desactivar…). */
+export function Confirmar({
+  titulo,
+  children,
+  confirmar,
+  perigo = true,
+  onConfirmar,
+  onClose,
+}: {
+  titulo: string;
+  children: ReactNode;
+  confirmar: string;
+  perigo?: boolean;
+  onConfirmar: () => Promise<unknown> | void;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={titulo}
+      width="max-w-md"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Voltar
+          </Button>
+          <Button
+            variant={perigo ? "danger" : "primary"}
+            loading={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onConfirmar();
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {confirmar}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-2 text-[14px] text-ink-2">{children}</div>
+    </Modal>
+  );
+}
+
+/** Atalho de teclado mostrado num botão («Ctrl S» / «⌘S»). */
+export function Atalho({ tecla }: { tecla: string }) {
+  const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.userAgent);
+  return <kbd className="ml-1 hidden rounded border border-white/30 px-1 font-sans text-[11px] font-normal opacity-80 sm:inline">{mac ? `⌘${tecla}` : `Ctrl ${tecla}`}</kbd>;
 }
 
 // ---------------- Table ----------------

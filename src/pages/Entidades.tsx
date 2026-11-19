@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { FileSpreadsheet, HandCoins, Plus, Printer, Search, Users } from "lucide-react";
+import { FileSpreadsheet, HandCoins, Plus, Printer, Search, Trash2, Users } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce } from "@/lib/hooks";
 import { kz, nifValido, parseKz, toInputKz } from "@/lib/format";
@@ -12,11 +12,17 @@ import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import type { Entidade } from "@/lib/types";
 import { AbasFicha } from "@/components/Auditoria";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { Atalho, Badge, BotaoCancelar, Button, Card, Confirmar, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { useJaUsado, useSujo } from "@/lib/ficha";
 
 export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
   const [q, setQ] = useState("");
   const [editar, setEditar] = useState<Partial<Entidade> | null>(null);
+  // cada ficha nova é outra (o «Guardar e novo» abre uma limpa)
+  const [vez, setVez] = useState(0);
+  const [estado, setEstado] = useState<"activos" | "inactivos" | "todos">("activos");
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const qc = useQueryClient();
   const dq = useDebounce(q);
   const nav = useNavigate();
   const [sp, setSp] = useSearchParams();
@@ -28,12 +34,41 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
     if (id !== 1) call<Entidade>("entidades.obter", { id }).then(setEditar, (e: Error) => toast.error(e.message));
   }, [sp, setSp]);
   const nome = tipo === "C" ? "Clientes" : "Fornecedores";
-  const lista = useQuery({ queryKey: ["entidades", tipo, dq], queryFn: () => call<Entidade[]>("entidades.listar", { tipo, q: dq }) });
-  const { ordenados, cab } = useOrdenacao(lista.data, (e, k: "nome" | "nif" | "localidade" | "saldo") =>
+  const lista = useQuery({
+    queryKey: ["entidades", tipo, dq, estado !== "activos"],
+    queryFn: () => call<Entidade[]>("entidades.listar", { tipo, q: dq, inativos: estado !== "activos" }),
+  });
+  const visiveis = estado === "inactivos" ? lista.data?.filter((e) => e.ativo === 0) : lista.data;
+  const seleccionados = (visiveis ?? []).filter((e) => sel.has(e.id));
+  const marcaveis = (visiveis ?? []).filter((e) => e.id !== 1);
+  const todosMarcados = marcaveis.length > 0 && marcaveis.every((e) => sel.has(e.id));
+  function marcar(id: number) {
+    setSel((x) => {
+      const n = new Set(x);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+  function nova() {
+    setVez((v) => v + 1);
+    setEditar({ tipo, nivel_preco: 1 });
+  }
+  async function emLote(accao: "activar" | "desactivar") {
+    try {
+      const r = await call<{ alterados: number }>("entidades.lote", { ids: seleccionados.map((e) => e.id), accao });
+      toast.success(`${r.alterados} ficha(s) ${accao === "activar" ? "reactivada(s)" : "desactivada(s)"}.`);
+      setSel(new Set());
+      qc.invalidateQueries({ queryKey: ["entidades"] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+  const { ordenados, cab } = useOrdenacao(visiveis, (e, k: "nome" | "nif" | "localidade" | "saldo") =>
     k === "nome" ? e.nome : k === "nif" ? e.nif : k === "localidade" ? e.localidade : (e.saldo ?? 0),
   );
   const empresa = useEmpresa();
-  const linhas = lista.data ?? [];
+  const linhas = visiveis ?? [];
   const totalDivida = linhas.reduce((s, e) => s + Math.max(0, e.saldo ?? 0), 0);
   function exportar() {
     exportarExcel(
@@ -61,25 +96,55 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
                 <HandCoins className="size-4" /> Emitir recibo
               </Button>
             )}
-            <Button onClick={() => setEditar({ tipo, nivel_preco: 1 })}>
+            <Button onClick={nova}>
               <Plus className="size-4" /> Novo {tipo === "C" ? "cliente" : "fornecedor"}
             </Button>
           </>
         }
       />
       <Card>
-        <div className="border-b border-line p-4">
-          <div className="relative">
+        <div className="flex flex-wrap gap-3 border-b border-line p-4">
+          <div className="relative min-w-60 flex-1">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
-            <Input className="pl-9" placeholder="Pesquisar por nome, NIF ou telefone…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Input className="pl-9" placeholder="Pesquisar por nome, NIF, telefone ou email…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
+          <Segmentado
+            className="w-full sm:w-72"
+            valor={estado}
+            onChange={(v) => {
+              setEstado(v);
+              setSel(new Set());
+            }}
+            opcoes={[
+              { id: "activos", label: "Activos" },
+              { id: "inactivos", label: "Inactivos" },
+              { id: "todos", label: "Todos" },
+            ]}
+          />
         </div>
-        {lista.data?.length === 0 ? (
-          <Empty icon={<Users className="size-6" />} title={`Sem ${nome.toLowerCase()}`} />
+        {seleccionados.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-line bg-brand-50/60 px-4 py-2.5 text-[13px]">
+            <span className="mr-2 font-medium text-brand-700">{seleccionados.length} seleccionado(s)</span>
+            <Button size="sm" variant="secondary" onClick={() => emLote("activar")}>
+              Reactivar
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => emLote("desactivar")}>
+              Desactivar
+            </Button>
+            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setSel(new Set())}>
+              Limpar a selecção
+            </Button>
+          </div>
+        )}
+        {visiveis?.length === 0 ? (
+          <Empty icon={<Users className="size-6" />} title={estado === "inactivos" ? `Sem ${nome.toLowerCase()} desactivados` : `Sem ${nome.toLowerCase()}`} />
         ) : (
           <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
+                <Th className="w-8">
+                  <input type="checkbox" aria-label="Seleccionar todos" checked={todosMarcados} onChange={() => setSel(todosMarcados ? new Set() : new Set(marcaveis.map((e) => e.id)))} />
+                </Th>
                 <Th {...cab("nome")}>Nome</Th>
                 <Th {...cab("nif")}>NIF</Th>
                 <Th>Contacto</Th>
@@ -91,9 +156,13 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
             </thead>
             <tbody>
               {ordenados?.map((e) => (
-                <tr key={e.id} className="cursor-pointer hover:bg-sunken/60" onClick={() => e.id !== 1 && setEditar(e)}>
+                <tr key={e.id} className={cn("cursor-pointer hover:bg-sunken/60", e.ativo === 0 && "opacity-60")} onClick={() => e.id !== 1 && setEditar(e)}>
+                  <Td onClick={(x) => x.stopPropagation()}>
+                    {e.id !== 1 && <input type="checkbox" aria-label={`Seleccionar ${e.nome}`} checked={sel.has(e.id)} onChange={() => marcar(e.id)} />}
+                  </Td>
                   <Td className="font-medium">
                     {e.nome} {e.id === 1 && <Badge className="ml-2">Sistema</Badge>}
+                    {e.ativo === 0 && <Badge className="ml-2">Inactivo</Badge>}
                   </Td>
                   <Td className="font-mono text-[12.5px]">{e.nif}</Td>
                   <Td className="text-ink-2">{[e.telefone, e.email].filter(Boolean).join(" · ") || "—"}</Td>
@@ -105,7 +174,7 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
           </Table>
         )}
       </Card>
-      {editar && <EntidadeForm inicial={editar} onClose={() => setEditar(null)} />}
+      {editar && <EntidadeForm key={`${editar.id ?? "nova"}-${vez}`} inicial={editar} onClose={() => setEditar(null)} onNovo={nova} />}
       <PrintPortal>
         <div className="p-2 text-[11px] text-black">
           <CabecalhoEmpresa empresa={empresa} titulo={`Lista de ${nome}`} />
@@ -141,20 +210,38 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
   );
 }
 
-function EntidadeForm({ inicial, onClose }: { inicial: Partial<Entidade>; onClose: () => void }) {
+function EntidadeForm({ inicial, onClose, onNovo }: { inicial: Partial<Entidade>; onClose: () => void; onNovo?: () => void }) {
   const [e, setE] = useState(inicial);
   const [limite, setLimite] = useState(toInputKz(inicial.limite_credito ?? 0));
   const [busy, setBusy] = useState(false);
+  const [erroNome, setErroNome] = useState<string | null>(null);
+  const [eliminar, setEliminar] = useState(false);
   const qc = useQueryClient();
   const set = (k: keyof Entidade, v: unknown) => setE((x) => ({ ...x, [k]: v }));
+  const sujo = useSujo({ e, limite });
+  // NIF que já está noutra ficha activa (avisa enquanto se escreve)
+  const nifOutro = useJaUsado<{ id: number; nome: string }>("entidades.nifUsado", "nif", e.nif, e.id, inicial.nif);
+  const nifOk = nifValido(e.nif, e.pais ?? "AO");
 
-  async function guardar() {
+  async function guardar(depois: "fechar" | "novo" = "fechar") {
+    if (busy) return;
+    if (!e.nome?.trim()) {
+      setErroNome("Escreva o nome ou a razão social.");
+      document.querySelector<HTMLInputElement>("[role=dialog] input[data-campo=nome]")?.focus();
+      return;
+    }
+    if (nifOutro) {
+      toast.error(`O NIF ${e.nif} já está na ficha «${nifOutro.nome}».`);
+      return;
+    }
     setBusy(true);
     try {
       await call("entidades.guardar", { ...e, limite_credito: parseKz(limite) });
       toast.success("Guardado.");
       qc.invalidateQueries({ queryKey: ["entidades"] });
-      onClose();
+      qc.invalidateQueries({ queryKey: ["auditoria-historico", "entidades"] });
+      if (depois === "novo" && onNovo) onNovo();
+      else onClose();
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -167,27 +254,75 @@ function EntidadeForm({ inicial, onClose }: { inicial: Partial<Entidade>; onClos
       open
       onClose={onClose}
       title={e.id ? e.nome ?? "Editar" : e.tipo === "F" ? "Novo fornecedor" : "Novo cliente"}
+      sujo={sujo}
+      onGuardar={() => guardar()}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button loading={busy} onClick={guardar}>
-            Guardar
+          {e.id ? (
+            <Button variant="ghost" className="mr-auto text-danger hover:bg-danger-50 hover:text-danger" onClick={() => setEliminar(true)}>
+              <Trash2 className="size-4" /> Eliminar
+            </Button>
+          ) : null}
+          <BotaoCancelar />
+          {!e.id && onNovo && (
+            <Button variant="secondary" loading={busy} onClick={() => guardar("novo")}>
+              Guardar e novo
+            </Button>
+          )}
+          <Button loading={busy} onClick={() => guardar()}>
+            Guardar <Atalho tecla="S" />
           </Button>
         </>
       }
     >
+      {eliminar && (
+        <Confirmar
+          titulo={`Eliminar «${e.nome ?? ""}»?`}
+          confirmar="Eliminar"
+          onClose={() => setEliminar(false)}
+          onConfirmar={async () => {
+            try {
+              const r = await call<{ eliminado: boolean; documentos?: number }>("entidades.eliminar", { id: e.id });
+              if (r.eliminado) toast.success("Ficha eliminada.");
+              else
+                toast.success("A ficha ficou desactivada", {
+                  description: `${r.documentos ? `Tem ${r.documentos} documento(s)` : "Tem movimentos ligados"}: sai das listas e da escolha nos documentos. Pode reactivá-la em «Inactivos».`,
+                  duration: 9000,
+                });
+              qc.invalidateQueries({ queryKey: ["entidades"] });
+              onClose();
+            } catch (err) {
+              toast.error((err as Error).message);
+            }
+          }}
+        >
+          <p>Se a ficha nunca foi usada, é apagada.</p>
+          <p>
+            Se já tem documentos, avenças, viaturas ou pontos, fica só <strong className="text-ink">desactivada</strong>: sai das listas e da escolha nos documentos, os
+            documentos antigos continuam com ela e pode reactivá-la em «Inactivos».
+          </p>
+          <p className="text-[13px] text-ink-3">Fica registado na auditoria.</p>
+        </Confirmar>
+      )}
       <AbasFicha entidade="entidades" id={e.id}>
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Nome / Razão social" className="col-span-2">
-            <Input autoFocus value={e.nome ?? ""} onChange={(x) => set("nome", x.target.value)} />
+          <Field label="Nome / Razão social" className="col-span-2" erro={erroNome}>
+            <Input
+              autoFocus
+              data-campo="nome"
+              value={e.nome ?? ""}
+              onChange={(x) => {
+                set("nome", x.target.value);
+                if (x.target.value.trim()) setErroNome(null);
+              }}
+            />
           </Field>
           <Field
             label="NIF"
-            hint={nifValido(e.nif, e.pais ?? "AO") ? "Vazio = 999999999 (consumidor final)" : "Em Angola: 10 algarismos (empresas) ou n.º do BI (ex.: 001234567LA041)"}
+            hint="Vazio = 999999999 (consumidor final)"
+            erro={!nifOk ? "NIF inválido. Em Angola: 10 algarismos (empresas) ou o n.º do BI (ex.: 001234567LA041)." : nifOutro ? `Este NIF já está na ficha «${nifOutro.nome}».` : null}
           >
-            <Input value={e.nif ?? ""} onChange={(x) => set("nif", x.target.value)} className={cn(!nifValido(e.nif, e.pais ?? "AO") && "border-danger")} />
+            <Input value={e.nif ?? ""} onChange={(x) => set("nif", x.target.value)} />
           </Field>
           <Field label="Tipo">
             <Select value={e.tipo} onChange={(x) => set("tipo", x.target.value)}>

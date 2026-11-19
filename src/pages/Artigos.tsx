@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Camera, Copy, Image as ImageIcon, Layers, Package, Plus, Search, Tags, Trash2 } from "lucide-react";
+import { Camera, Copy, FileSpreadsheet, Image as ImageIcon, Layers, Package, Plus, Search, Tags, Trash2 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { call } from "@/lib/api";
 import { useDebounce, useTabelas } from "@/lib/hooks";
 import { comIva, kz, parseKz, qtd, semIva, toInputKz } from "@/lib/format";
+import { exportarExcel, kzXL } from "@/lib/csv";
 import type { Artigo, Componente } from "@/lib/types";
 import { ArtigoPicker } from "@/components/Pickers";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { Atalho, Badge, BotaoCancelar, Button, Card, Confirmar, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { useJaUsado, useSujo } from "@/lib/ficha";
 import { atributosDe, ramoPorId, resumoAtributos, type Ramo } from "@/lib/ramos";
 import { prepararFoto, useMiniaturas } from "@/lib/fotos";
 import { InputData } from "@/components/InputData";
@@ -20,6 +22,12 @@ export default function Artigos() {
   const [familia, setFamilia] = useState<string>("");
   const [editar, setEditar] = useState<Partial<Artigo> | null>(null);
   const [origem, setOrigem] = useState<number | undefined>();
+  // cada ficha nova é outra (o «Guardar e novo» abre uma limpa)
+  const [vez, setVez] = useState(0);
+  const [estado, setEstado] = useState<"activos" | "inactivos" | "todos">("activos");
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const [lote, setLote] = useState<"familia" | "preco" | null>(null);
+  const qc = useQueryClient();
   const dq = useDebounce(q);
   const tabelas = useTabelas();
   const ramo = ramoPorId(tabelas.data?.ramo);
@@ -40,11 +48,64 @@ export default function Artigos() {
     );
   }, [sp, setSp, tem]);
   const lista = useQuery({
-    queryKey: ["artigos", dq, familia],
-    queryFn: () => call<Artigo[]>("artigos.listar", { q: dq, familia_id: familia ? Number(familia) : null, inativos: true }),
+    queryKey: ["artigos", dq, familia, estado !== "activos"],
+    queryFn: () => call<Artigo[]>("artigos.listar", { q: dq, familia_id: familia ? Number(familia) : null, inativos: estado !== "activos" }),
   });
-  const miniaturas = useMiniaturas(lista.data);
-  const { ordenados, cab } = useOrdenacao(lista.data, (a, k: "ref" | "desc" | "familia" | "iva" | "custo" | "pvp" | "stock") =>
+  const visiveis = estado === "inactivos" ? lista.data?.filter((a) => !a.ativo) : lista.data;
+  const miniaturas = useMiniaturas(visiveis);
+  const seleccionados = (visiveis ?? []).filter((a) => sel.has(a.id));
+  const todosMarcados = !!visiveis?.length && visiveis.every((a) => sel.has(a.id));
+  function marcar(id: number) {
+    setSel((x) => {
+      const n = new Set(x);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+  function novoArtigo() {
+    setOrigem(undefined);
+    setVez((v) => v + 1);
+    // valores por omissão do ramo (serviços à hora, farmácia com lotes, restauração sem stock…)
+    const n = ramo.novoArtigo ?? {};
+    const tipo = n.tipo ?? "P";
+    const unidade = tabelas.data?.unidades.find((u) => u.abreviatura === n.unidade)?.id ?? 1;
+    setEditar({ tipo, taxa_iva_id: 1, unidade_id: unidade, familia_id: 1, controla_stock: tipo === "P" && n.controla_stock !== false ? 1 : 0, controla_lote: n.controla_lote ? 1 : 0, ativo: 1 });
+  }
+  async function emLote(accao: string, extra: Record<string, unknown> = {}) {
+    try {
+      const r = await call<{ alterados: number }>("artigos.lote", { ids: seleccionados.map((a) => a.id), accao, ...extra });
+      toast.success(`${r.alterados} artigo(s) alterado(s).`);
+      setSel(new Set());
+      setLote(null);
+      qc.invalidateQueries({ queryKey: ["artigos"] });
+      qc.invalidateQueries({ queryKey: ["pos-artigos"] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+  function exportar() {
+    exportarExcel(
+      "artigos.xlsx",
+      [
+        ["Referência", "Descrição", "Código de barras", "Família", "Tipo", "IVA %", "Custo médio", "PVP 1 (c/ IVA)", "Stock", "Estado"],
+        ...(ordenados ?? []).map((a) => [
+          a.referencia,
+          a.descricao,
+          a.codigo_barras ?? "",
+          a.familia ?? "",
+          a.tipo === "S" ? "Serviço" : "Produto",
+          a.taxa_pct,
+          kzXL(a.custo_medio),
+          kzXL(a.preco1_iva),
+          a.tipo === "S" || !a.controla_stock ? "" : a.stock,
+          a.ativo ? "Activo" : "Inactivo",
+        ]),
+      ],
+      { titulo: "Artigos" },
+    );
+  }
+  const { ordenados, cab } = useOrdenacao(visiveis, (a, k: "ref" | "desc" | "familia" | "iva" | "custo" | "pvp" | "stock") =>
     k === "ref" ? a.referencia : k === "desc" ? a.descricao : k === "familia" ? a.familia : k === "iva" ? a.taxa_pct : k === "custo" ? a.custo_medio : k === "pvp" ? a.preco1_iva : a.tipo === "S" ? null : a.stock,
   );
 
@@ -55,22 +116,16 @@ export default function Artigos() {
         subtitle="Produtos e serviços, preços e IVA"
         actions={
           <div className="flex gap-2">
+            <Button variant="secondary" onClick={exportar} disabled={!visiveis?.length}>
+              <FileSpreadsheet className="size-4" /> Excel
+            </Button>
             <Link to="/etiquetas">
               <Button variant="secondary">
                 <Tags className="size-4" /> Etiquetas
               </Button>
             </Link>
             {tem("artigos.criar") && (
-              <Button
-                onClick={() => {
-                  setOrigem(undefined);
-                  // valores por omissão do ramo (serviços à hora, farmácia com lotes, restauração sem stock…)
-                  const n = ramo.novoArtigo ?? {};
-                  const tipo = n.tipo ?? "P";
-                  const unidade = tabelas.data?.unidades.find((u) => u.abreviatura === n.unidade)?.id ?? 1;
-                  setEditar({ tipo, taxa_iva_id: 1, unidade_id: unidade, familia_id: 1, controla_stock: tipo === "P" && n.controla_stock !== false ? 1 : 0, controla_lote: n.controla_lote ? 1 : 0, ativo: 1 });
-                }}
-              >
+              <Button onClick={novoArtigo}>
                 <Plus className="size-4" /> Novo artigo
               </Button>
             )}
@@ -78,8 +133,8 @@ export default function Artigos() {
         }
       />
       <Card>
-        <div className="flex gap-3 border-b border-line p-4">
-          <div className="relative flex-1">
+        <div className="flex flex-wrap gap-3 border-b border-line p-4">
+          <div className="relative min-w-60 flex-1">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
             <Input
               className="pl-9"
@@ -96,13 +151,60 @@ export default function Artigos() {
               </option>
             ))}
           </Select>
+          <Segmentado
+            className="w-full sm:w-72"
+            valor={estado}
+            onChange={(v) => {
+              setEstado(v);
+              setSel(new Set());
+            }}
+            opcoes={[
+              { id: "activos", label: "Activos" },
+              { id: "inactivos", label: "Inactivos" },
+              { id: "todos", label: "Todos" },
+            ]}
+          />
         </div>
-        {lista.data?.length === 0 ? (
-          <Empty icon={<Package className="size-6" />} title="Sem artigos" text="Crie o primeiro artigo para começar a vender." />
+        {seleccionados.length > 0 && tem("artigos.editar") && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-line bg-brand-50/60 px-4 py-2.5 text-[13px]">
+            <span className="mr-2 font-medium text-brand-700">{seleccionados.length} seleccionado(s)</span>
+            <Button size="sm" variant="secondary" onClick={() => emLote("activar")}>
+              Activar
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => emLote("desactivar")}>
+              Desactivar
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setLote("familia")}>
+              Mudar de família
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setLote("preco")}>
+              Ajustar preços
+            </Button>
+            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setSel(new Set())}>
+              Limpar a selecção
+            </Button>
+          </div>
+        )}
+        {visiveis?.length === 0 ? (
+          <Empty
+            icon={<Package className="size-6" />}
+            title={estado === "inactivos" ? "Sem artigos desactivados" : "Sem artigos"}
+            text={estado === "inactivos" ? undefined : dq || familia ? "Nenhum artigo com esta pesquisa." : "Crie o primeiro artigo para começar a vender."}
+          />
         ) : (
           <Table className="max-h-[calc(100vh-304px)]">
             <thead>
               <tr>
+                {tem("artigos.editar") && (
+                  <Th className="w-8">
+                    <input
+                      type="checkbox"
+                      aria-label="Seleccionar todos"
+                      checked={todosMarcados}
+                      onChange={() => setSel(todosMarcados ? new Set() : new Set((visiveis ?? []).map((a) => a.id)))}
+                    />
+                  </Th>
+                )}
                 <Th {...cab("ref")}>Referência</Th>
                 <Th {...cab("desc")}>Descrição</Th>
                 <Th {...cab("familia")}>Família</Th>
@@ -127,6 +229,11 @@ export default function Artigos() {
                     setOrigem(undefined);
                     setEditar(a);
                   }}>
+                  {tem("artigos.editar") && (
+                    <Td onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" aria-label={`Seleccionar ${a.descricao}`} checked={sel.has(a.id)} onChange={() => marcar(a.id)} />
+                    </Td>
+                  )}
                   <Td className="font-mono text-[12.5px] text-ink-2">{a.referencia}</Td>
                   <Td>
                     <div className="flex items-start gap-2.5">
@@ -138,6 +245,7 @@ export default function Artigos() {
                       {a.descricao}
                       {!!a.composto && <Badge tone="brand" className="ml-2">Kit</Badge>}
                       {!!a.controla_lote && <Badge tone="accent" className="ml-2">Lotes</Badge>}
+                      {!a.ativo && <Badge className="ml-2">Inactivo</Badge>}
                     </div>
                     {resumoAtributos(a, ramo) && <div className="text-[12px] text-ink-2">{resumoAtributos(a, ramo)}</div>}
                     {a.codigo_barras && <div className="font-mono text-[11.5px] text-ink-3">{a.codigo_barras}</div>}
@@ -169,10 +277,11 @@ export default function Artigos() {
       </Card>
       {editar && (
         <ArtigoForm
-          key={`${editar.id ?? "novo"}-${origem ?? ""}`}
+          key={`${editar.id ?? "novo"}-${origem ?? ""}-${vez}`}
           inicial={editar}
           origem={origem}
           onClose={() => setEditar(null)}
+          onNovo={tem("artigos.criar") ? novoArtigo : undefined}
           onClonar={
             tem("artigos.criar")
               ? (c) => {
@@ -183,7 +292,126 @@ export default function Artigos() {
           }
         />
       )}
+      {lote === "familia" && <LoteFamilia n={seleccionados.length} onAplicar={(familia_id) => emLote("familia", { familia_id })} onClose={() => setLote(null)} />}
+      {lote === "preco" && <LotePreco artigos={seleccionados} onAplicar={(percentagem, arredondar) => emLote("preco", { percentagem, arredondar })} onClose={() => setLote(null)} />}
     </>
+  );
+}
+
+function LoteFamilia({ n, onAplicar, onClose }: { n: number; onAplicar: (familia: number) => Promise<void>; onClose: () => void }) {
+  const familias = useTabelas().data?.familias ?? [];
+  const [f, setF] = useState<number | "">("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Mudar ${n} artigo(s) de família`}
+      width="max-w-md"
+      footer={
+        <>
+          <BotaoCancelar />
+          <Button
+            disabled={!f}
+            loading={busy}
+            onClick={async () => {
+              setBusy(true);
+              await onAplicar(Number(f));
+              setBusy(false);
+            }}
+          >
+            Mudar
+          </Button>
+        </>
+      }
+    >
+      <Field label="Nova família" hint="A subfamília dos artigos fica vazia (era da família antiga).">
+        <Select autoFocus value={f} onChange={(e) => setF(e.target.value ? Number(e.target.value) : "")}>
+          <option value="">Escolha…</option>
+          {familias.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.descricao}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    </Modal>
+  );
+}
+
+/** Ajustar o PVP 1 de vários artigos numa percentagem, com arredondamento e uma amostra do resultado. */
+function LotePreco({ artigos, onAplicar, onClose }: { artigos: Artigo[]; onAplicar: (pct: number, arredondar: number) => Promise<void>; onClose: () => void }) {
+  const [pct, setPct] = useState("");
+  const [arred, setArred] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const p = Number(pct.replace(",", "."));
+  const valido = pct.trim() !== "" && Number.isFinite(p) && p !== 0 && p > -100 && p <= 1000;
+  const novo = (pvp: number) => {
+    let v = Math.round(pvp * (1 + p / 100));
+    if (arred > 0) v = Math.floor((v + (arred * 100) / 2) / (arred * 100)) * arred * 100;
+    return Math.max(0, v);
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Ajustar o preço de ${artigos.length} artigo(s)`}
+      width="max-w-lg"
+      footer={
+        <>
+          <BotaoCancelar />
+          <Button
+            disabled={!valido}
+            loading={busy}
+            onClick={async () => {
+              setBusy(true);
+              await onAplicar(p, arred);
+              setBusy(false);
+            }}
+          >
+            Aplicar
+          </Button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Percentagem" hint="Ex.: 10 para subir 10%, -5 para baixar 5%">
+          <Input autoFocus inputMode="decimal" className="num text-right" value={pct} onChange={(e) => setPct(e.target.value)} placeholder="0" />
+        </Field>
+        <Field label="Arredondar o PVP a">
+          <Select value={arred} onChange={(e) => setArred(Number(e.target.value))}>
+            <option value={0}>Sem arredondar</option>
+            {[1, 5, 10, 50, 100, 500].map((v) => (
+              <option key={v} value={v}>
+                {v} Kz
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+      <p className="mt-3 text-[13px] text-ink-2">Muda o PVP 1 (com IVA); o preço sem IVA acompanha. Os outros níveis de preço não mudam. Cada artigo fica na auditoria.</p>
+      {valido && (
+        <table className="mt-3 w-full text-[13px]">
+          <thead>
+            <tr className="text-left text-[11.5px] uppercase tracking-wide text-ink-3">
+              <th className="py-1 font-medium">Artigo</th>
+              <th className="py-1 text-right font-medium">Agora</th>
+              <th className="py-1 text-right font-medium">Fica</th>
+            </tr>
+          </thead>
+          <tbody>
+            {artigos.slice(0, 5).map((a) => (
+              <tr key={a.id} className="border-t border-line/70">
+                <td className="py-1">{a.descricao}</td>
+                <td className="num py-1 text-right text-ink-2">{kz(a.preco1_iva)}</td>
+                <td className="num py-1 text-right font-medium">{kz(novo(a.preco1_iva))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {valido && artigos.length > 5 && <p className="mt-1 text-[12px] text-ink-3">… e mais {artigos.length - 5}.</p>}
+    </Modal>
   );
 }
 
@@ -199,13 +427,17 @@ function ArtigoForm({
   origem,
   onClose,
   onClonar,
+  onNovo,
 }: {
   inicial: Partial<Artigo>;
   origem?: number;
   onClose: () => void;
   onClonar?: (a: Partial<Artigo>) => void;
+  /** «Guardar e novo»: depois de guardar, abre uma ficha nova */
+  onNovo?: () => void;
 }) {
   const t = useTabelas().data;
+  const tem = useSession((s) => s.tem);
   const ramo = ramoPorId(t?.ramo);
   const qc = useQueryClient();
   const [a, setA] = useState<Partial<Artigo>>(inicial);
@@ -242,18 +474,40 @@ function ArtigoForm({
   const [comps, setComps] = useState<Componente[]>([]);
   // outros códigos de barras (embalagens): carregados da ficha; só se gravam depois de carregados
   const [codigos, setCodigos] = useState<{ codigo: string; descricao: string; quantidade: number }[] | null>(inicial.id ? null : []);
+  // o que veio do servidor (para saber se a lista de códigos ou de componentes foi mexida)
+  const [codigosBase, setCodigosBase] = useState<string>("[]");
+  const [compsBase, setCompsBase] = useState<string>("[]");
   useEffect(() => {
     if (!inicial.id) return;
     call<{ codigos: { codigo: string; descricao: string | null; quantidade: number }[] }>("artigos.obter", { id: inicial.id })
-      .then((x) => setCodigos(x.codigos.map((c) => ({ codigo: c.codigo, descricao: c.descricao ?? "", quantidade: c.quantidade }))))
+      .then((x) => {
+        const cs = x.codigos.map((c) => ({ codigo: c.codigo, descricao: c.descricao ?? "", quantidade: c.quantidade }));
+        setCodigos(cs);
+        setCodigosBase(JSON.stringify(cs));
+      })
       .catch(() => {});
   }, [inicial.id]);
   useEffect(() => {
     const fonte = inicial.id ?? origem;
-    if (fonte && inicial.composto) call<Componente[]>("artigos.componentes", { id: fonte }).then(setComps).catch(() => {});
+    if (fonte && inicial.composto)
+      call<Componente[]>("artigos.componentes", { id: fonte })
+        .then((cs) => {
+          setComps(cs);
+          if (inicial.id) setCompsBase(JSON.stringify(cs));
+        })
+        .catch(() => {});
   }, [inicial.id, origem, inicial.composto]);
   const custoKit = comps.reduce((s, c) => s + Math.round((c.custo_medio ?? 0) * c.quantidade), 0);
   const set = (k: keyof Artigo, v: unknown) => setA((x) => ({ ...x, [k]: v }));
+  const [erros, setErros] = useState<{ descricao?: string }>({});
+  const [eliminar, setEliminar] = useState(false);
+  const sujo =
+    useSujo({ a, pvp, custo, atrib }) || fotoNova !== null || (codigos !== null && JSON.stringify(codigos) !== codigosBase) || (!!inicial.id && JSON.stringify(comps) !== compsBase);
+  // referência e código de barras que já estão noutro artigo (avisa enquanto se escreve)
+  type Outro = { id: number; referencia: string; descricao: string; ativo: boolean };
+  const refUsada = useJaUsado<Outro>("artigos.codigoUsado", "codigo", a.referencia, a.id, inicial.referencia);
+  const cobarUsado = useJaUsado<Outro>("artigos.codigoUsado", "codigo", a.codigo_barras, a.id, inicial.codigo_barras);
+  const jaUsado = (o: Outro | null) => (o ? `Já está no artigo ${o.referencia} «${o.descricao}»${o.ativo ? "" : " (desactivado)"}.` : null);
 
   const preco1 = semIva(parseKz(pvp[0]), taxa);
   // margem sobre o custo de cada preço (Margem1–4 do KIGEST): preço s/ IVA = custo × (1 + margem)
@@ -278,7 +532,19 @@ function ArtigoForm({
           ? { tom: "neutral" as const, txt: "Terminada" }
           : { tom: "accent" as const, txt: `Em promoção −${promoPct}%` };
 
-  async function guardar() {
+  async function guardar(depois: "fechar" | "novo" = "fechar") {
+    if (busy) return;
+    const e: typeof erros = {};
+    if (!a.descricao?.trim()) e.descricao = "Escreva a descrição do artigo.";
+    setErros(e);
+    if (e.descricao) {
+      document.querySelector<HTMLInputElement>("[role=dialog] input[data-campo=descricao]")?.focus();
+      return;
+    }
+    if (refUsada || cobarUsado) {
+      toast.error(jaUsado(refUsada ?? cobarUsado) ?? "");
+      return;
+    }
     setBusy(true);
     try {
       const precos = pvp.map((p) => semIva(parseKz(p), taxa));
@@ -314,11 +580,30 @@ function ArtigoForm({
       toast.success("Artigo guardado.");
       qc.invalidateQueries({ queryKey: ["artigos"] });
       qc.invalidateQueries({ queryKey: ["pos-artigos"] });
-      onClose();
+      qc.invalidateQueries({ queryKey: ["auditoria-historico", "artigos"] });
+      if (depois === "novo" && onNovo) onNovo();
+      else onClose();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function confirmarEliminar() {
+    try {
+      const r = await call<{ eliminado: boolean; documentos?: number }>("artigos.eliminar", { id: a.id });
+      if (r.eliminado) toast.success("Artigo eliminado.");
+      else
+        toast.success("O artigo ficou desactivado", {
+          description: `Já tinha ${r.documentos ? `${r.documentos} documento(s)` : "movimentos de stock ou ligações"}: deixa de aparecer nas vendas e pode reactivá-lo na ficha (estado «Inactivos»).`,
+          duration: 9000,
+        });
+      qc.invalidateQueries({ queryKey: ["artigos"] });
+      qc.invalidateQueries({ queryKey: ["pos-artigos"] });
+      onClose();
+    } catch (e) {
+      toast.error((e as Error).message);
     }
   }
 
@@ -328,22 +613,44 @@ function ArtigoForm({
       onClose={onClose}
       title={a.id ? `Editar ${a.referencia}` : origem ? "Novo artigo (clonado)" : "Novo artigo"}
       width="max-w-3xl"
+      sujo={sujo}
+      onGuardar={() => guardar()}
       footer={
         <>
-          {a.id && onClonar && (
-            <Button variant="ghost" className="mr-auto" onClick={() => onClonar({ ...a, custo: parseKz(custo) })}>
-              <Copy className="size-4" /> Clonar
+          <span className="mr-auto flex gap-1">
+            {a.id && tem("artigos.editar") && (
+              <Button variant="ghost" className="text-danger hover:bg-danger-50 hover:text-danger" onClick={() => setEliminar(true)}>
+                <Trash2 className="size-4" /> Eliminar
+              </Button>
+            )}
+            {a.id && onClonar && (
+              <Button variant="ghost" onClick={() => onClonar({ ...a, custo: parseKz(custo) })}>
+                <Copy className="size-4" /> Clonar
+              </Button>
+            )}
+          </span>
+          <BotaoCancelar />
+          {!a.id && onNovo && (
+            <Button variant="secondary" loading={busy} onClick={() => guardar("novo")}>
+              Guardar e novo
             </Button>
           )}
-          <Button variant="secondary" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button loading={busy} onClick={guardar}>
-            Guardar
+          <Button loading={busy} onClick={() => guardar()}>
+            Guardar <Atalho tecla="S" />
           </Button>
         </>
       }
     >
+      {eliminar && (
+        <Confirmar titulo={`Eliminar «${a.descricao ?? ""}»?`} confirmar="Eliminar" onConfirmar={confirmarEliminar} onClose={() => setEliminar(false)}>
+          <p>Se o artigo nunca foi usado, é apagado.</p>
+          <p>
+            Se já tem vendas, compras, movimentos de stock, lotes ou entra num kit, fica só <strong className="text-ink">desactivado</strong>: deixa de aparecer nas vendas e na
+            pesquisa, os documentos antigos continuam a mostrá-lo e pode reactivá-lo na ficha.
+          </p>
+          <p className="text-[13px] text-ink-3">Fica registado na auditoria.</p>
+        </Confirmar>
+      )}
       <AbasFicha entidade="artigos" id={a.id}>
         <div className="mb-4 flex items-center gap-4">
           <div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-xl border border-dashed border-line-strong bg-sunken">
@@ -367,8 +674,16 @@ function ArtigoForm({
         </div>
 
         <div className="grid grid-cols-4 gap-4">
-          <Field label="Descrição" className="col-span-3">
-            <Input autoFocus value={a.descricao ?? ""} onChange={(e) => set("descricao", e.target.value)} />
+          <Field label="Descrição" className="col-span-3" erro={erros.descricao}>
+            <Input
+              autoFocus
+              data-campo="descricao"
+              value={a.descricao ?? ""}
+              onChange={(e) => {
+                set("descricao", e.target.value);
+                if (e.target.value.trim()) setErros((x) => ({ ...x, descricao: undefined }));
+              }}
+            />
           </Field>
           <Field label="Tipo">
             <Select value={a.tipo} onChange={(e) => set("tipo", e.target.value)}>
@@ -376,10 +691,10 @@ function ArtigoForm({
               <option value="S">Serviço</option>
             </Select>
           </Field>
-          <Field label="Referência" hint={a.id ? undefined : "Vazio = automática"}>
+          <Field label="Referência" hint={a.id ? undefined : "Vazio = automática"} erro={jaUsado(refUsada)}>
             <Input value={a.referencia ?? ""} onChange={(e) => set("referencia", e.target.value)} />
           </Field>
-          <Field label={ramo.rotuloCodigo ?? "Código de barras"} hint={ramo.id === "livraria" ? "ISBN-10 ou 13, com ou sem hífenes" : undefined}>
+          <Field label={ramo.rotuloCodigo ?? "Código de barras"} hint={ramo.id === "livraria" ? "ISBN-10 ou 13, com ou sem hífenes" : undefined} erro={jaUsado(cobarUsado)}>
             <Input value={a.codigo_barras ?? ""} onChange={(e) => set("codigo_barras", e.target.value)} />
           </Field>
           <Field label="Família">

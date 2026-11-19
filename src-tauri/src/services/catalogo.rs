@@ -855,3 +855,136 @@ pub async fn stock_recalcular(st: &AppState, r: RecalcIn) -> AppResult<Value> {
     }
     Ok(json!({ "diferencas": diferencas, "lotes": lotes, "aplicado": r.aplicar, "saldos_corrigidos": saldos }))
 }
+
+// ============================== eliminar e acções em lote ==============================
+
+/// Elimina um artigo que nunca foi usado. Um artigo com documentos, movimentos de stock, lotes, avenças, ordens da
+/// oficina, promoções, ou que entra num kit, fica só **desactivado**: deixa de aparecer nas vendas e na pesquisa, os
+/// documentos antigos continuam a mostrá-lo, e pode reactivar-se na ficha.
+pub async fn artigos_eliminar(st: &AppState, i: IdIn) -> AppResult<Value> {
+    st.exigir_perm("artigos.editar")?;
+    let existe: Option<i64> = sqlx::query_scalar("SELECT id FROM artigos WHERE id = ?").bind(i.id).fetch_optional(&st.pool).await?;
+    existe.ok_or(AppError::NaoEncontrado)?;
+    let documentos: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT documento_id) FROM documento_linhas WHERE artigo_id = ?").bind(i.id).fetch_one(&st.pool).await?;
+    let outros: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM movimentos_stock WHERE artigo_id = ?1) + (SELECT COUNT(*) FROM lotes WHERE artigo_id = ?1)
+              + (SELECT COUNT(*) FROM artigo_componentes WHERE componente_id = ?1) + (SELECT COUNT(*) FROM avenca_linhas WHERE artigo_id = ?1)
+              + (SELECT COUNT(*) FROM of_ordem_linhas WHERE artigo_id = ?1) + (SELECT COUNT(*) FROM promocao_regras WHERE artigo_id = ?1)",
+    )
+    .bind(i.id)
+    .fetch_one(&st.pool)
+    .await?;
+    if documentos == 0 && outros == 0 {
+        let mut tx = db::transacao(&st.pool).await?;
+        sqlx::query("DELETE FROM stock WHERE artigo_id = ? AND quantidade = 0").bind(i.id).execute(&mut *tx).await?;
+        // as chaves estrangeiras ainda podem recusar (uma ligação que não está acima): então desactiva-se
+        if sqlx::query("DELETE FROM artigos WHERE id = ?").bind(i.id).execute(&mut *tx).await.is_ok() {
+            tx.commit().await?;
+            return Ok(json!({ "eliminado": true }));
+        }
+        tx.rollback().await?;
+    }
+    sqlx::query("UPDATE artigos SET ativo = 0 WHERE id = ?").bind(i.id).execute(&st.pool).await?;
+    Ok(json!({ "eliminado": false, "desactivado": true, "documentos": documentos }))
+}
+
+#[derive(Deserialize)]
+pub struct ArtigosLoteIn {
+    ids: Vec<i64>,
+    /// activar | desactivar | familia | preco
+    accao: String,
+    familia_id: Option<i64>,
+    /// percentagem a somar ao PVP 1 (negativa para baixar)
+    percentagem: Option<f64>,
+    /// arredondar o PVP novo a múltiplos deste valor, em kwanzas (0 = ao cêntimo)
+    arredondar: Option<i64>,
+}
+
+/// O mesmo a vários artigos de uma vez: activar, desactivar, mudar de família ou ajustar o PVP 1 numa percentagem.
+/// Cada artigo alterado fica na auditoria com o antes e o depois.
+pub async fn artigos_lote(st: &AppState, l: ArtigosLoteIn) -> AppResult<Value> {
+    st.exigir_perm("artigos.editar")?;
+    if l.ids.is_empty() {
+        return Err(AppError::msg("Escolha pelo menos um artigo."));
+    }
+    if l.ids.len() > 5000 {
+        return Err(AppError::msg("De uma vez, no máximo 5 000 artigos."));
+    }
+    let pct = l.percentagem.unwrap_or(0.0);
+    match l.accao.as_str() {
+        "activar" | "desactivar" => {}
+        "familia" => {
+            let f = l.familia_id.ok_or_else(|| AppError::msg("Escolha a família."))?;
+            let existe: Option<i64> = sqlx::query_scalar("SELECT id FROM familias WHERE id = ?").bind(f).fetch_optional(&st.pool).await?;
+            existe.ok_or_else(|| AppError::msg("A família escolhida já não existe."))?;
+        }
+        "preco" => {
+            if !pct.is_finite() || pct == 0.0 || pct <= -100.0 || pct > 1000.0 {
+                return Err(AppError::msg("Indique uma percentagem entre -99,99% e 1 000% (diferente de zero)."));
+            }
+        }
+        _ => return Err(AppError::msg("Acção desconhecida.")),
+    }
+    let passo = l.arredondar.unwrap_or(0).clamp(0, 100_000) * 100;
+    let mut alterados = 0;
+    for &id in &l.ids {
+        let Some(antes) = super::auditoria::ficha(st, "artigos", id).await else { continue };
+        match l.accao.as_str() {
+            "activar" => sqlx::query("UPDATE artigos SET ativo = 1 WHERE id = ?").bind(id).execute(&st.pool).await?,
+            "desactivar" => sqlx::query("UPDATE artigos SET ativo = 0 WHERE id = ?").bind(id).execute(&st.pool).await?,
+            "familia" => sqlx::query("UPDATE artigos SET familia_id = ?, subfamilia_id = NULL WHERE id = ? AND familia_id IS NOT ?")
+                .bind(l.familia_id)
+                .bind(id)
+                .bind(l.familia_id)
+                .execute(&st.pool)
+                .await?,
+            _ => {
+                let (preco1, pvp1, taxa): (i64, Option<i64>, f64) =
+                    sqlx::query_as("SELECT a.preco1, a.pvp1, t.percentagem FROM artigos a JOIN taxas_iva t ON t.id = a.taxa_iva_id WHERE a.id = ?").bind(id).fetch_one(&st.pool).await?;
+                let sem_iva = |pvp: i64| (pvp as f64 * 100.0 / (100.0 + taxa)).round() as i64;
+                let actual = match pvp1 {
+                    Some(p) if sem_iva(p) == preco1 => p,
+                    _ => (preco1 as f64 * (1.0 + taxa / 100.0)).round() as i64,
+                };
+                let mut novo = (actual as f64 * (1.0 + pct / 100.0)).round() as i64;
+                if passo > 0 {
+                    novo = ((novo + passo / 2) / passo) * passo;
+                }
+                let novo = novo.max(0);
+                sqlx::query("UPDATE artigos SET preco1 = ?, pvp1 = ? WHERE id = ?").bind(sem_iva(novo)).bind(novo).bind(id).execute(&st.pool).await?
+            }
+        };
+        let agora = super::auditoria::ficha(st, "artigos", id).await;
+        if agora.as_ref() != Some(&antes) {
+            alterados += 1;
+        }
+        super::auditoria::registar_ficha(st, "artigos", id, Some(antes), agora, None).await?;
+    }
+    Ok(json!({ "alterados": alterados }))
+}
+
+#[derive(Deserialize)]
+pub struct CodigoUsadoIn {
+    codigo: String,
+    #[serde(default)]
+    id: Option<i64>,
+}
+
+/// O artigo que já usa esta referência ou código de barras (para avisar enquanto se escreve na ficha), ou `null`.
+pub async fn codigo_usado(st: &AppState, c: CodigoUsadoIn) -> AppResult<Value> {
+    st.sessao()?;
+    let codigo = c.codigo.trim();
+    if codigo.is_empty() {
+        return Ok(Value::Null);
+    }
+    let r: Option<(i64, String, String, i64)> = sqlx::query_as(
+        "SELECT a.id, a.referencia, a.descricao, a.ativo FROM artigos a
+          WHERE a.id <> ?1 AND (a.referencia = ?2 OR a.codigo_barras = ?2 OR EXISTS (SELECT 1 FROM artigo_codigos c WHERE c.artigo_id = a.id AND c.codigo = ?2))
+          LIMIT 1",
+    )
+    .bind(c.id.unwrap_or(0))
+    .bind(codigo)
+    .fetch_optional(&st.pool)
+    .await?;
+    Ok(r.map(|(id, referencia, descricao, ativo)| json!({ "id": id, "referencia": referencia, "descricao": descricao, "ativo": ativo == 1 })).unwrap_or(Value::Null))
+}

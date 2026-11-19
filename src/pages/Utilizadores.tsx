@@ -7,7 +7,7 @@ import { call } from "@/lib/api";
 import { dataHora, hojeISO } from "@/lib/format";
 import { GRUPOS_PERMISSOES, TODAS_PERMISSOES } from "@/lib/permissoes";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Atalho, Badge, BotaoCancelar, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 import { InputData } from "@/components/InputData";
 import { useTabelas } from "@/lib/hooks";
 import { Avatar } from "@/components/MeuPerfil";
@@ -286,7 +286,17 @@ function ListaUtilizadores() {
       )}
 
       {u && (
-        <Modal open onClose={() => setU(null)} title={u.id ? `Editar ${u.nome}` : "Novo utilizador"} width="max-w-4xl" footer={<Button onClick={guardar}>Guardar</Button>}>
+        <Modal open onClose={() => setU(null)} title={u.id ? `Editar ${u.nome}` : "Novo utilizador"} width="max-w-4xl"
+          onGuardar={guardar}
+          footer={
+            <>
+              <BotaoCancelar />
+              <Button onClick={guardar}>
+                Guardar <Atalho tecla="S" />
+              </Button>
+            </>
+          }
+        >
           <AbasFicha entidade="utilizadores" id={u.id}>
             <div className="grid grid-cols-3 gap-4">
               <Field label="Nome" className="col-span-2">

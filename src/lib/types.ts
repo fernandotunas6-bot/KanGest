@@ -179,6 +179,8 @@ export interface Entidade {
   saldo?: number;
   /** Crédito a favor (adiantamentos e notas de crédito por usar), em cêntimos. */
   credito?: number;
+  /** 0 = desactivada (eliminada depois de ter documentos) */
+  ativo?: number;
 }
 
 export interface Tabelas {

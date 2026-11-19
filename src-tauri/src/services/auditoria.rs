@@ -93,6 +93,8 @@ pub(super) fn alvo(metodo: &str, params: &Value) -> Option<Alvo> {
     }
     match metodo {
         "artigos.guardar" => id("artigos"),
+        "artigos.eliminar" => a("artigos", "id", "id", Some("ELIMINAR")),
+        "entidades.eliminar" => a("entidades", "id", "id", Some("ELIMINAR")),
         "entidades.guardar" => id("entidades"),
         "entidades.enderecoGuardar" => id("entidade_enderecos"),
         "utilizadores.guardar" => id("utilizadores"),
@@ -311,7 +313,28 @@ pub(super) async fn depois(st: &AppState, a: &Alvo, params: &Value, antes: Optio
         texto_chave(v).map(|c| if a.tabela == "moedas" { c.to_uppercase() } else { c })
     });
     let agora = ler(st, a, chave.as_deref()).await;
-    let acao = a.acao.unwrap_or(if antes.is_none() { "CRIAR" } else { "ALTERAR" });
+    let motivo = params.get("motivo").and_then(|m| m.as_str());
+    registar_mudanca(st, *a, chave.as_deref(), antes, agora, motivo).await
+}
+
+/// Uma ficha lida pela chave (para quem regista mudanças por conta própria, como as acções em lote).
+pub(super) async fn ficha(st: &AppState, tabela: &'static str, id: i64) -> Option<Value> {
+    ler(st, &Alvo { tabela, chave: "id", param: "id", acao: None }, Some(&id.to_string())).await
+}
+
+/// Regista uma mudança numa ficha com chave `id` (acções em lote): o mesmo que o `dispatch` faz num método só.
+pub(super) async fn registar_ficha(st: &AppState, tabela: &'static str, id: i64, antes: Option<Value>, agora: Option<Value>, acao: Option<&'static str>) -> AppResult<()> {
+    registar_mudanca(st, Alvo { tabela, chave: "id", param: "id", acao }, Some(&id.to_string()), antes, agora, None).await
+}
+
+async fn registar_mudanca(st: &AppState, a: Alvo, chave: Option<&str>, antes: Option<Value>, agora: Option<Value>, motivo: Option<&str>) -> AppResult<()> {
+    // «eliminar» uma ficha já usada desactiva-a: fica como desactivação
+    let acao = match (a.acao, &agora) {
+        (Some("ELIMINAR"), Some(_)) => "DESACTIVAR",
+        (Some(x), _) => x,
+        (None, _) if antes.is_none() => "CRIAR",
+        (None, _) => "ALTERAR",
+    };
     let (va, vd) = match (&antes, &agora) {
         (Some(x), Some(y)) => {
             let (ma, md) = diferencas(x, y);
@@ -334,7 +357,7 @@ pub(super) async fn depois(st: &AppState, a: &Alvo, params: &Value, antes: Optio
         if let Some(nome) = ficha.and_then(nome_ficha) {
             detalhe.push_str(&format!(" «{nome}»"));
         }
-        if let Some(c) = chave.as_deref().filter(|_| a.chave == "id" && a.tabela != "empresa") {
+        if let Some(c) = chave.filter(|_| a.chave == "id" && a.tabela != "empresa") {
             detalhe.push_str(&format!(" (n.º {c})"));
         }
     }
@@ -344,7 +367,7 @@ pub(super) async fn depois(st: &AppState, a: &Alvo, params: &Value, antes: Optio
             detalhe.push_str(&format!(": {}", campos.join(", ")));
         }
     }
-    if let Some(motivo) = params.get("motivo").and_then(|m| m.as_str()).map(str::trim).filter(|m| !m.is_empty()) {
+    if let Some(motivo) = motivo.map(str::trim).filter(|m| !m.is_empty()) {
         detalhe.push_str(&format!(" — motivo: {motivo}"));
     }
     let registo_id = if a.tabela == "config" { None } else { chave };
@@ -355,7 +378,7 @@ pub(super) async fn depois(st: &AppState, a: &Alvo, params: &Value, antes: Optio
             acao,
             detalhe: &detalhe,
             entidade: Some(a.tabela),
-            registo_id: registo_id.as_deref(),
+            registo_id,
             antes: va.as_ref(),
             depois: vd.as_ref(),
             posto_id: Some(st.posto().id),
