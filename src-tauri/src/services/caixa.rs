@@ -60,7 +60,18 @@ async fn resumo(st: &AppState, sid: i64) -> AppResult<Value> {
     .bind(sid)
     .fetch_all(p)
     .await?;
-    let numerario: i64 = por_modo.iter().filter(|r| r.get::<String, _>("codigo") == "NU").map(|r| r.get::<i64, _>("total")).sum();
+    // numerário recebido noutras moedas: fica na gaveta em dólares/euros, não em kwanzas; o troco desses
+    // pagamentos saiu dos kwanzas (Kz na gaveta = numerário líquido − equivalente bruto do que entrou em moeda)
+    let estrangeiras = sqlx::query(
+        "SELECT dp.moeda, SUM(dp.valor_moeda) AS valor, CAST(SUM(ROUND(dp.valor_moeda * dp.cambio)) AS INTEGER) AS kz
+         FROM documentos d JOIN documento_pagamentos dp ON dp.documento_id = d.id
+         WHERE d.caixa_sessao_id = ? AND d.estado = 'N' AND dp.moeda IS NOT NULL GROUP BY dp.moeda ORDER BY dp.moeda",
+    )
+    .bind(sid)
+    .fetch_all(p)
+    .await?;
+    let em_moeda_kz: i64 = estrangeiras.iter().map(|r| r.get::<i64, _>("kz")).sum();
+    let numerario: i64 = por_modo.iter().filter(|r| r.get::<String, _>("codigo") == "NU").map(|r| r.get::<i64, _>("total")).sum::<i64>() - em_moeda_kz;
     let inicial: i64 = s.get("valor_inicial");
     let esperado = inicial + numerario + entradas - saidas;
     let aberta = s.get::<String, _>("estado") == "ABERTA";
@@ -101,6 +112,7 @@ async fn resumo(st: &AppState, sid: i64) -> AppResult<Value> {
         "movimentos": db::rows_json(&movimentos),
         "artigos": db::rows_json(&artigos),
         "numerario_esperado": esperado,
+        "moedas_estrangeiras": db::rows_json(&estrangeiras),
         "conferencia": conferencia,
         "cego": false,
     });
@@ -110,6 +122,7 @@ async fn resumo(st: &AppState, sid: i64) -> AppResult<Value> {
         v["numerario_esperado"] = Value::Null;
         v["total_vendido"] = Value::Null;
         v["artigos"] = json!([]);
+        v["moedas_estrangeiras"] = json!([]);
         if let Some(modos) = v["por_modo"].as_array_mut() {
             for m in modos {
                 m["total"] = Value::Null;

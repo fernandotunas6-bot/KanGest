@@ -84,9 +84,9 @@ def url_de(cfg, ficheiro):
     return cfg["site"] + "/" + ("" if ficheiro == "index.html" else ficheiro.removesuffix(".html"))
 
 
-def cabecalhos(scripts_em_linha, site):
+def cabecalhos(scripts_em_linha, site, licencas):
     """Cabeçalhos de segurança do Cloudflare Pages (_headers). Os scripts em linha entram na CSP pelo hash SHA-256;
-    os formulários vão para o formsubmit.co; a Web Analytics da Cloudflare pode ser ligada no painel do Pages."""
+    os formulários vão para o formsubmit.co, a página de entrada consulta o servidor de licenças; a Web Analytics da Cloudflare pode ser ligada no painel do Pages."""
     import base64
     hashes = " ".join(sorted(f"'sha256-{base64.b64encode(hashlib.sha256(s.encode()).digest()).decode()}'" for s in scripts_em_linha))
     # o endereço público do site também conta como «próprio»: a página 404 carrega por ele (<base href>)
@@ -97,7 +97,7 @@ def cabecalhos(scripts_em_linha, site):
         f"style-src {proprio} 'unsafe-inline'",
         f"img-src {proprio} data:",
         f"font-src {proprio}",
-        "connect-src 'self' https://formsubmit.co https://cloudflareinsights.com",
+        f"connect-src 'self' https://formsubmit.co https://cloudflareinsights.com {licencas}",
         "form-action 'self' https://formsubmit.co",
         "frame-ancestors 'none'",
         # a página 404 usa <base href> com o endereço público do site
@@ -174,7 +174,7 @@ def main():
     urls = "\n".join(f"  <url><loc>{url_de(cfg, p)}</loc><lastmod>{hoje}</lastmod></url>" for p in paginas)
     (SAIDA / "sitemap.xml").write_text(f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}\n</urlset>\n')
     (SAIDA / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {cfg['site']}/sitemap.xml\n")
-    (SAIDA / "_headers").write_text(cabecalhos(scripts_em_linha, cfg["site"]))
+    (SAIDA / "_headers").write_text(cabecalhos(scripts_em_linha, cfg["site"], cfg["web"]["licencas"]))
     print(f"Site gerado em {SAIDA.relative_to(RAIZ)}/: {len(paginas)} páginas + 404, sitemap e robots ({versao_ficheiros}).")
 
 

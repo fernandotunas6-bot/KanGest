@@ -146,6 +146,7 @@ Com limite por minuto, cada resposta traz `X-RateLimit-Limit` e `X-RateLimit-Rem
 | GET | `/artigos/{id}` | `api.artigos` | Um artigo (stock no `armazem_id` pedido ou no do posto da chave) |
 | GET | `/artigos/codigo/{código}` | `api.artigos` | Pelo código de barras, pela referência, por um código de embalagem ou por uma etiqueta da balança (`leitura.quantidade` diz quanto vale a leitura) |
 | POST | `/artigos` | `artigos.criar` | Criar (`descricao`, `taxa_iva_id`, `preco1` ou `preco1_iva`…) |
+| GET | `/artigos/{id}/foto` | `api.artigos` | A fotografia do artigo (WebP, JPEG ou PNG); `tem_foto` no artigo diz se existe |
 | PUT/PATCH | `/artigos/{id}` | `artigos.editar` | Alterar só os campos enviados |
 
 Cada artigo traz `atributos`, os dados do ramo de actividade da empresa ([RAMOS.md](RAMOS.md)) — por exemplo

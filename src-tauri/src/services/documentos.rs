@@ -77,7 +77,16 @@ pub struct CustoIn {
 pub struct PagamentoIn {
     modo: String,
     valor: i64,
+    /// Numerário em moeda estrangeira (ex.: "USD"): o valor em Kz calcula-se aqui, ao câmbio do dia (Moedas).
+    #[serde(default)]
+    moeda: Option<String>,
+    /// Recebido na moeda estrangeira (cêntimos dessa moeda).
+    #[serde(default)]
+    valor_moeda: Option<i64>,
 }
+
+/// Recebido numa moeda estrangeira: (moeda, valor na moeda em cêntimos, câmbio).
+type Estrangeira = Option<(String, i64, f64)>;
 
 #[derive(Deserialize)]
 pub struct LiquidarIn {
@@ -154,6 +163,73 @@ pub struct EmitirIn {
 pub struct ManualIn {
     numero: String,
     data: String,
+}
+
+/// Pagamentos do pedido → (modo, valor em Kz) e, em paralelo, o recebido noutra moeda (numerário estrangeiro ao câmbio
+/// do dia). Fora de `emitir` de propósito: a função de emissão já é muito grande e cada variável a mais pesa na pilha
+/// das compilações de desenvolvimento.
+async fn ler_pagamentos(
+    tx: &mut Transaction<'_, Sqlite>,
+    pedidos: &[PagamentoIn],
+    pago_no_acto: bool,
+) -> AppResult<(Vec<(String, i64)>, Vec<Estrangeira>)> {
+    let mut pagamentos: Vec<(String, i64)> = Vec::new();
+    let mut estrangeiras: Vec<Estrangeira> = Vec::new();
+    for pg in pedidos {
+        match pg.moeda.as_deref().map(str::trim).filter(|m| !m.is_empty() && *m != "AOA") {
+            None if pg.valor > 0 => {
+                pagamentos.push((pg.modo.clone(), pg.valor));
+                estrangeiras.push(None);
+            }
+            None => {}
+            Some(m) => {
+                let vm = pg.valor_moeda.unwrap_or(0);
+                if vm <= 0 {
+                    continue;
+                }
+                if pg.modo != "NU" {
+                    return Err(AppError::msg("Moeda estrangeira só em numerário (o troco sai em kwanzas)."));
+                }
+                if !pago_no_acto {
+                    return Err(AppError::msg("A moeda estrangeira recebe-se em documentos pagos no acto (factura/recibo, recibo)."));
+                }
+                let cambio: Option<f64> = sqlx::query_scalar("SELECT cambio FROM moedas WHERE codigo = ? AND ativo = 1").bind(m).fetch_optional(&mut **tx).await?;
+                let cambio = cambio.filter(|c| *c > 0.0).ok_or_else(|| AppError::msg(format!("Defina o câmbio do dia de {m} em Tabelas → Moedas.")))?;
+                pagamentos.push(("NU".into(), (vm as f64 * cambio).round() as i64));
+                estrangeiras.push(Some((m.to_string(), vm, cambio)));
+            }
+        }
+    }
+    Ok((pagamentos, estrangeiras))
+}
+
+async fn gravar_pagamentos(tx: &mut Transaction<'_, Sqlite>, doc_id: i64, pagamentos: &[(String, i64)], estrangeiras: &[Estrangeira]) -> AppResult<()> {
+    for (k, (modo, valor)) in pagamentos.iter().enumerate() {
+        let e = estrangeiras.get(k).cloned().flatten();
+        sqlx::query("INSERT INTO documento_pagamentos (documento_id, modo_codigo, valor, moeda, valor_moeda, cambio) VALUES (?, ?, ?, ?, ?, ?)")
+            .bind(doc_id)
+            .bind(modo)
+            .bind(valor)
+            .bind(e.as_ref().map(|x| x.0.clone()))
+            .bind(e.as_ref().map(|x| x.1))
+            .bind(e.as_ref().map(|x| x.2))
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Troco: sai do numerário em kwanzas; se não chegar (ex.: pagou só em dólares), da linha em moeda estrangeira.
+fn tirar_troco(pagamentos: &mut [(String, i64)], estrangeiras: &[Estrangeira], troco: i64) -> AppResult<()> {
+    let kz = pagamentos.iter().zip(estrangeiras).position(|(p, e)| p.0 == "NU" && e.is_none() && p.1 >= troco);
+    let qualquer = pagamentos.iter().position(|p| p.0 == "NU" && p.1 >= troco);
+    match kz.or(qualquer) {
+        Some(k) => {
+            pagamentos[k].1 -= troco;
+            Ok(())
+        }
+        None => Err(AppError::msg("O troco só pode ser dado em numerário.")),
+    }
 }
 
 /// Escolhe a série do documento: a indicada, a série por defeito do tipo (em vigor) ou a automática do posto.
@@ -1214,7 +1290,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     }
 
     // ---------- pagamentos ----------
-    let mut pagamentos: Vec<(String, i64)> = i.pagamentos.iter().filter(|p| p.valor > 0).map(|p| (p.modo.clone(), p.valor)).collect();
+    let (mut pagamentos, mut estrangeiras) = Box::pin(ler_pagamentos(&mut tx, &i.pagamentos, tipo.pago_no_acto)).await?;
     // Compensação de saldo (CS): usa adiantamentos e notas de crédito ainda por utilizar — nos recibos e pagamentos
     // e, como nos grandes POS, para pagar uma Factura/Recibo do cliente (o POS oferece-a ao cliente identificado).
     let compensacao: i64 = pagamentos.iter().filter(|p| p.0 == "CS").map(|p| p.1).sum();
@@ -1257,13 +1333,11 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         }
         troco = entregue - a_pagar;
         if troco > 0 {
-            match pagamentos.iter_mut().find(|p| p.0 == "NU") {
-                Some(p) if p.1 >= troco => p.1 -= troco,
-                _ => return Err(AppError::msg("O troco só pode ser dado em numerário.")),
-            }
+            tirar_troco(&mut pagamentos, &estrangeiras, troco)?;
         }
     } else {
         pagamentos.clear();
+        estrangeiras.clear();
     }
     // pagamento com pontos de fidelização (SAF-T: «DE»): só em vendas e recibos de um cliente identificado
     let fidelizacao = super::fidelizacao::cfg(&mut *tx).await?;
@@ -1568,14 +1642,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         }
     }
 
-    for (modo, valor) in &pagamentos {
-        sqlx::query("INSERT INTO documento_pagamentos (documento_id, modo_codigo, valor) VALUES (?, ?, ?)")
-            .bind(doc_id)
-            .bind(modo)
-            .bind(valor)
-            .execute(&mut *tx)
-            .await?;
-    }
+    Box::pin(gravar_pagamentos(&mut tx, doc_id, &pagamentos, &estrangeiras)).await?;
     for (codigo, descricao, pct, base, valor) in &retencoes {
         sqlx::query("INSERT INTO documento_retencoes (documento_id, codigo, descricao, percentagem, base, valor) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(doc_id)
@@ -1780,7 +1847,7 @@ pub async fn obter(st: &AppState, i: IdIn) -> AppResult<Value> {
     .ok_or(AppError::NaoEncontrado)?;
     let linhas = sqlx::query("SELECT * FROM documento_linhas WHERE documento_id = ? ORDER BY linha").bind(i.id).fetch_all(p).await?;
     let pags = sqlx::query(
-        "SELECT p.modo_codigo, m.descricao, p.valor FROM documento_pagamentos p
+        "SELECT p.modo_codigo, m.descricao, p.valor, p.moeda, p.valor_moeda, p.cambio FROM documento_pagamentos p
          JOIN modos_pagamento m ON m.codigo = p.modo_codigo WHERE p.documento_id = ?",
     )
     .bind(i.id)

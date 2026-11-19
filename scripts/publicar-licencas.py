@@ -25,6 +25,9 @@ DATA_COMPAT = "2026-10-01"
 
 
 def _contexto_tls():
+    """SSL_CERT_FILE, quando definido (ex.: atrás de um proxy da empresa), tem prioridade."""
+    if os.environ.get("SSL_CERT_FILE") and os.path.exists(os.environ["SSL_CERT_FILE"]):
+        return ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
     try:
         import certifi
         return ssl.create_default_context(cafile=certifi.where())

@@ -4596,3 +4596,61 @@ async fn verificacao_em_dois_passos() {
     assert!(n >= 4, "{n}");
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Fotografias dos artigos: conferidas, miniaturas em lote para o POS e a imagem pela API.
+#[tokio::test]
+async fn fotografias_dos_artigos() {
+    let (st, pasta) = base_com_admin("fotos").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Sumo de múcua", "taxa_iva_id": 1, "preco1": 50000 })).await["id"].as_i64().unwrap();
+    let webp = |extra: &str| format!("data:image/webp;base64,{}", B64.encode([b"RIFF\x10\x00\x00\x00WEBPVP8 ".as_slice(), extra.as_bytes()].concat()));
+    assert!(rpc_err(&st, "fotos.guardar", json!({ "artigo_id": a, "miniatura": "data:image/svg+xml;base64,PHN2Zz4=", "imagem": webp("x") })).await.contains("WebP, JPEG ou PNG"));
+    assert!(rpc_err(&st, "fotos.guardar", json!({ "artigo_id": 9999, "miniatura": webp("m"), "imagem": webp("i") })).await.contains("encontr"));
+    rpc(&st, "fotos.guardar", json!({ "artigo_id": a, "miniatura": webp("m"), "imagem": webp("imagem grande") })).await;
+    let lista = rpc(&st, "artigos.listar", json!({ "q": "múcua" })).await;
+    let versao = lista[0]["foto"].as_str().unwrap().to_string();
+    assert!(!versao.is_empty(), "a lista diz que há foto (e de quando, para a cache)");
+    let m = rpc(&st, "fotos.miniaturas", json!({ "ids": [a, 9999] })).await;
+    assert_eq!(m.as_object().unwrap().len(), 1);
+    assert_eq!(m[a.to_string()], webp("m"));
+    assert_eq!(rpc(&st, "fotos.obter", json!({ "artigo_id": a })).await["imagem"], webp("imagem grande"));
+    // trocar a foto muda a versão; apagar tira-a
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    rpc(&st, "fotos.guardar", json!({ "artigo_id": a, "miniatura": webp("m2"), "imagem": webp("i2") })).await;
+    assert_ne!(rpc(&st, "artigos.listar", json!({ "q": "múcua" })).await[0]["foto"].as_str().unwrap(), versao);
+    rpc(&st, "fotos.apagar", json!({ "artigo_id": a })).await;
+    assert!(rpc(&st, "artigos.listar", json!({ "q": "múcua" })).await[0]["foto"].is_null());
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Numerário em moeda estrangeira no POS: valor em Kz ao câmbio do dia, troco em Kz e gaveta conferida por moeda.
+#[tokio::test]
+async fn pagamento_em_moeda_estrangeira() {
+    let (st, pasta) = base_com_admin("moeda_pos").await;
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Garrafão de água", "tipo": "S", "taxa_iva_id": 1, "preco1": 5_000_000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 10_000_000 })).await;
+    let venda = |pags: Value| json!({ "tipo": "FR", "linhas": [{ "artigo_id": art, "quantidade": 1 }], "pagamentos": pags });
+    // sem câmbio definido não se aceita
+    assert!(rpc_err(&st, "documentos.emitir", venda(json!([{ "modo": "NU", "valor": 0, "moeda": "USD", "valor_moeda": 10_000 }]))).await.contains("câmbio"));
+    rpc(&st, "moedas.guardar", json!({ "codigo": "USD", "descricao": "Dólar americano", "simbolo": "US$", "cambio": 900.0 })).await;
+    assert!(rpc_err(&st, "documentos.emitir", venda(json!([{ "modo": "CC", "valor": 0, "moeda": "USD", "valor_moeda": 10_000 }]))).await.contains("numerário"));
+
+    // total 57 000 Kz (50 000 + IVA 14%) pago com 100 US$ (= 90 000 Kz): troco de 33 000 Kz
+    let d = rpc(&st, "documentos.emitir", venda(json!([{ "modo": "NU", "valor": 0, "moeda": "USD", "valor_moeda": 10_000 }]))).await;
+    assert_eq!(d["documento"]["total"], 5_700_000);
+    assert_eq!(d["documento"]["troco"], 3_300_000);
+    let pg = &d["pagamentos"][0];
+    assert_eq!((pg["modo_codigo"].as_str(), pg["valor"].as_i64(), pg["moeda"].as_str(), pg["valor_moeda"].as_i64()), (Some("NU"), Some(5_700_000), Some("USD"), Some(10_000)));
+
+    // misto: 50 US$ (45 000 Kz) + 20 000 Kz em notas para 57 000 Kz → troco 8 000 Kz das notas
+    let d2 = rpc(&st, "documentos.emitir", venda(json!([{ "modo": "NU", "valor": 0, "moeda": "USD", "valor_moeda": 5_000 }, { "modo": "NU", "valor": 2_000_000 }]))).await;
+    assert_eq!(d2["documento"]["troco"], 800_000);
+    let soma: i64 = d2["pagamentos"].as_array().unwrap().iter().map(|p| p["valor"].as_i64().unwrap()).sum();
+    assert_eq!(soma, 5_700_000, "os pagamentos somam o total (SAF-T)");
+
+    // gaveta: kwanzas = 100 000 inicial − 33 000 de troco + 20 000 − 8 000 = 79 000; dólares = 150 US$
+    let c = rpc(&st, "caixa.estado", Value::Null).await;
+    assert_eq!(c["numerario_esperado"], 7_900_000, "{c}");
+    let usd = &c["moedas_estrangeiras"][0];
+    assert_eq!((usd["moeda"].as_str(), usd["valor"].as_i64()), (Some("USD"), Some(15_000)));
+    let _ = std::fs::remove_dir_all(&pasta);
+}

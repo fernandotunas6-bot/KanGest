@@ -72,7 +72,7 @@ schemas = {
         "promo_atual": {"type": "number", "description": "Desconto (%) da promoção em vigor hoje (0 = nenhuma)."},
         "qtd_minima": {"type": "number"}, "qtd_maxima": {"type": "number"},
         "controla_stock": {"type": "boolean"}, "permite_negativo": {"type": "boolean"}, "controla_lote": {"type": "boolean"},
-        "composto": {"type": "boolean"}, "ativo": {"type": "boolean"},
+        "composto": {"type": "boolean"}, "ativo": {"type": "boolean"}, "tem_foto": {"type": "boolean", "description": "Tem fotografia (GET /artigos/{id}/foto)."},
         "atributos": {"type": "object", "additionalProperties": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}]},
             "description": "Dados do ramo de actividade (ex.: livraria {autor, editora, ano}; moda {tamanho, cor, modelo}; electrónica {marca, modelo, garantia_meses}).",
             "example": {"autor": "Pepetela", "editora": "Dom Quixote", "ano": 1980}},
@@ -233,6 +233,8 @@ P["/artigos/{id}"] = {
 }
 P["/artigos/codigo/{codigo}"] = {"get": op("Procurar pelo código de barras ou pela referência", "api.artigos", "Leitores de código de barras, verificadores de preço.", tag="Artigos",
     params=[{"name": "codigo", "in": "path", "required": True, "schema": {"type": "string"}}, pref("armazem_id")], respostas={**ok(ref("Artigo")), "404": rref("NaoEncontrado")})}
+P["/artigos/{id}/foto"] = {"parameters": [id_path], "get": op("Fotografia do artigo", "api.artigos", "A imagem em si (WebP, JPEG ou PNG), para a loja online. `tem_foto` no artigo diz se existe.", tag="Artigos",
+    respostas={"200": {"description": "Imagem", "content": {"image/webp": {"schema": {"type": "string", "format": "binary"}}, "image/jpeg": {"schema": {"type": "string", "format": "binary"}}, "image/png": {"schema": {"type": "string", "format": "binary"}}}}, "404": rref("NaoEncontrado")})}
 P["/stock"] = {"get": op("Existências por artigo e armazém", "api.stock", "Artigos com controlo de stock (sem kits nem serviços), com o detalhe por armazém e o reservado por notas de encomenda.", tag="Stock",
     params=paginacao + [qp("artigo_id", "integer", "Só este artigo."), qp("armazem_id", "integer", "Só este armazém (omitido = todos)."), pref("q"), qp("abaixo_minimo", "boolean", "Só os que estão no mínimo ou abaixo.")],
     respostas=ok(lista(ref("Stock"))))}
