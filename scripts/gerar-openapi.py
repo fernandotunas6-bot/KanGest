@@ -72,7 +72,7 @@ schemas = {
         "promo_atual": {"type": "number", "description": "Desconto (%) da promoção em vigor hoje (0 = nenhuma)."},
         "qtd_minima": {"type": "number"}, "qtd_maxima": {"type": "number"},
         "controla_stock": {"type": "boolean"}, "permite_negativo": {"type": "boolean"}, "controla_lote": {"type": "boolean"},
-        "composto": {"type": "boolean"}, "ativo": {"type": "boolean"},
+        "composto": {"type": "boolean"}, "ativo": {"type": "boolean"}, "tem_foto": {"type": "boolean", "description": "Tem fotografia (GET /artigos/{id}/foto)."},
         "atributos": {"type": "object", "additionalProperties": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}]},
             "description": "Dados do ramo de actividade (ex.: livraria {autor, editora, ano}; moda {tamanho, cor, modelo}; electrónica {marca, modelo, garantia_meses}).",
             "example": {"autor": "Pepetela", "editora": "Dom Quixote", "ano": 1980}},
@@ -163,7 +163,8 @@ schemas = {
         "motivo": {"type": "string", "description": "Obrigatório nas notas de crédito e de débito."},
         "referencia": {"type": "string", "description": "V/ Referência: n.º da encomenda no outro sistema (sai impresso)."},
         "observacoes": {"type": "string"}, "data_vencimento": {"type": "string", "format": "date"}, "prazo": {"type": "string"},
-        "armazem_id": {"type": "integer"}, "armazem_destino_id": {"type": "integer"}, "serie": {"type": "string"},
+        "armazem_id": {"type": "integer", "description": "Armazém do stock (omitido = o do posto da chave; num documento com origem, o da origem). Num servidor central, a loja: a NE de uma encomenda a levantar numa loja reserva o stock dessa loja."},
+        "armazem_destino_id": {"type": "integer"}, "serie": {"type": "string"},
         "vendedor_id": {"type": "integer"}, "endereco_entrega": {"type": "string"}, "transporte": {"type": "object"},
         "moeda": {"type": "string", "example": "AOA"}, "cambio": {"type": "number"}, "valor": dict(kz, description="Recibo de adiantamento."),
         "doc_externo": {"type": "string", "description": "Compras: n.º do documento do fornecedor."}, "doc_externo_data": {"type": "string", "format": "date"},
@@ -218,7 +219,7 @@ P["/"] = {"get": op("Empresa, chave e posto", None, "Confirma a chave: devolve a
         "empresa": {"type": "object", "properties": {"nome": {"type": "string"}, "nif": {"type": "string"}}},
         "chave": {"type": "object", "properties": {"id": {"type": "integer"}, "nome": {"type": "string"}, "prefixo": {"type": "string"}, "permissoes": {"type": "array", "items": {"type": "string"}}, "limite_minuto": {"type": "integer"}, "utilizador": {"type": "string"}}},
         "posto": {"type": "object", "properties": {"id": {"type": "integer"}, "descricao": {"type": "string"}, "armazem_id": {"type": "integer"}, "serie_prefixo": {"type": "string"}}}}}))}
-P["/tabelas"] = {"get": op("Tabelas auxiliares", None, "Famílias, subfamílias, unidades, taxas de IVA, motivos de isenção, armazéns, modos de pagamento, tipos de documento, prazos, retenções e moedas.", tag="Geral", respostas=ok({"type": "object"}))}
+P["/tabelas"] = {"get": op("Tabelas auxiliares", None, "Famílias, subfamílias, unidades, taxas de IVA, motivos de isenção, armazéns, postos (com o armazém e o prefixo de série), modos de pagamento, tipos de documento, prazos, retenções e moedas.", tag="Geral", respostas=ok({"type": "object"}))}
 P["/artigos"] = {
     "get": op("Listar artigos", "api.artigos", "Sem a permissão api.custos, os custos não são enviados.", tag="Artigos",
               params=paginacao + [pref("q"), qp("familia_id", "integer", "Família."), pref("armazem_id"), pref("inativos"), pref("alterado_desde")], respostas=ok(lista(ref("Artigo")))),
@@ -233,6 +234,8 @@ P["/artigos/{id}"] = {
 }
 P["/artigos/codigo/{codigo}"] = {"get": op("Procurar pelo código de barras ou pela referência", "api.artigos", "Leitores de código de barras, verificadores de preço.", tag="Artigos",
     params=[{"name": "codigo", "in": "path", "required": True, "schema": {"type": "string"}}, pref("armazem_id")], respostas={**ok(ref("Artigo")), "404": rref("NaoEncontrado")})}
+P["/artigos/{id}/foto"] = {"parameters": [id_path], "get": op("Fotografia do artigo", "api.artigos", "A imagem em si (WebP, JPEG ou PNG), para a loja online. `tem_foto` no artigo diz se existe.", tag="Artigos",
+    respostas={"200": {"description": "Imagem", "content": {"image/webp": {"schema": {"type": "string", "format": "binary"}}, "image/jpeg": {"schema": {"type": "string", "format": "binary"}}, "image/png": {"schema": {"type": "string", "format": "binary"}}}}, "404": rref("NaoEncontrado")})}
 P["/stock"] = {"get": op("Existências por artigo e armazém", "api.stock", "Artigos com controlo de stock (sem kits nem serviços), com o detalhe por armazém e o reservado por notas de encomenda.", tag="Stock",
     params=paginacao + [qp("artigo_id", "integer", "Só este artigo."), qp("armazem_id", "integer", "Só este armazém (omitido = todos)."), pref("q"), qp("abaixo_minimo", "boolean", "Só os que estão no mínimo ou abaixo.")],
     respostas=ok(lista(ref("Stock"))))}
@@ -256,7 +259,9 @@ P["/documentos"] = {
     "get": op("Listar documentos", "api.documentos", tag="Documentos",
               params=paginacao + [qp("tipo", "string", "Um ou mais tipos separados por vírgulas.", exemplo="FT,FR"), qp("grupo", "string", "VENDAS, COMPRAS ou STOCK."),
                                   qp("de", "string", "Data de emissão desde."), qp("ate", "string", "Data de emissão até."), qp("entidade_id", "integer", "Cliente/fornecedor."),
-                                  qp("estado", "string", "N, A ou F."), qp("desta_chave", "boolean", "Só os emitidos por esta chave."), qp("linhas", "boolean", "Incluir linhas e pagamentos.")],
+                                  qp("estado", "string", "N, A ou F."), qp("desta_chave", "boolean", "Só os emitidos por esta chave."), qp("linhas", "boolean", "Incluir linhas e pagamentos."),
+                                  qp("referencia", "string", "V/ Referência exacta: o n.º da encomenda no outro sistema.", exemplo="ENC-1001"),
+                                  qp("posto_id", "integer", "Só deste posto."), qp("armazem_id", "integer", "Só deste armazém (a loja, num servidor central).")],
               respostas=ok(lista(ref("Documento")))),
     "post": op("Emitir documento", "a do tipo: vendas.fatura_recibo (FR), vendas.fatura (FT, GT), vendas.proforma (PP, OR, NE), vendas.nota_credito (NC), vendas.nota_debito (ND), tesouraria.recibo (RC), compras.fatura (compras), stock.entrada (ES), stock.saida (SS, CI), stock.transferencia (TS)",
                "Emite com as regras do programa: série do posto da chave, assinatura AGT, stock, conta corrente e Facturação Electrónica. Os documentos da API não entram no caixa de nenhum posto.\n\nCabeçalho opcional **Idempotency-Key** (até 100 caracteres): o mesmo pedido repetido com a mesma chave devolve o documento já emitido (200, `Idempotent-Replayed: true`).",
@@ -267,11 +272,21 @@ P["/documentos"] = {
 P["/documentos/{id}"] = {"parameters": [id_path], "get": op("Obter documento", "api.documentos", tag="Documentos", respostas={**ok(ref("Documento")), "404": rref("NaoEncontrado")})}
 P["/documentos/{id}/anular"] = {"parameters": [id_path], "post": op("Anular documento", "documentos.anular", "Com a Facturação Electrónica ligada, os documentos comunicados à AGT não se anulam: emite-se uma nota de crédito.", tag="Documentos",
     corpo={"type": "object", "required": ["motivo"], "properties": {"motivo": {"type": "string", "minLength": 5}}}, respostas={**ok(ref("Documento")), "404": rref("NaoEncontrado"), "422": rref("Validacao")})}
-P["/relatorios/vendas"] = {"get": op("Resumo de vendas", "relatorios.ver", "Vendas do período agrupadas (notas de crédito a abater). O lucro só aparece com api.custos.", tag="Relatórios e fiscal",
+filtros_vendas = [qp("posto_id", "integer", "Só deste posto."), qp("armazem_id", "integer", "Só deste armazém (a loja, num servidor central)."),
+                  {"name": "canal", "in": "query", "description": "api = documentos emitidos por chaves da API (loja online…); balcao = programa e POS.", "schema": {"type": "string", "enum": ["api", "balcao"]}}]
+P["/relatorios/vendas"] = {"get": op("Resumo de vendas", "relatorios.ver", "Vendas do período agrupadas (notas de crédito a abater). O lucro só aparece com api.custos.\n\n`agrupar=artigo` traz também `artigo_id` e `referencia` e vem por total decrescente (com `limite`, os mais vendidos); `mes_posto` e `mes_armazem` dão uma linha por mês e por loja (`mes`, `posto_id`/`armazem_id`).", tag="Relatórios e fiscal",
     params=[qp("de", "string", "Desde (AAAA-MM-DD).", True), qp("ate", "string", "Até (AAAA-MM-DD).", True),
-            {"name": "agrupar", "in": "query", "schema": {"type": "string", "default": "dia", "enum": ["dia", "mes", "artigo", "familia", "operador", "cliente", "pagamento", "vendedor", "posto", "documento", "iva", "iva_dia", "iva_familia", "artigo_operador", "artigo_entidade"]}},
-            qp("entidade_id", "integer", "Só este cliente.")],
+            {"name": "agrupar", "in": "query", "schema": {"type": "string", "default": "dia", "enum": ["dia", "mes", "artigo", "familia", "operador", "cliente", "pagamento", "vendedor", "posto", "armazem", "mes_posto", "mes_armazem", "documento", "iva", "iva_dia", "iva_familia", "artigo_operador", "artigo_entidade"]}},
+            qp("entidade_id", "integer", "Só este cliente."), *filtros_vendas, qp("limite", "integer", "Só as primeiras linhas (1 a 1000).")],
     respostas=ok({"type": "object", "properties": {"de": {"type": "string"}, "ate": {"type": "string"}, "agrupar": {"type": "string"}, "dados": {"type": "array", "items": {"type": "object"}}}}))}
+P["/relatorios/sintese"] = {"get": op("Síntese do ano", "relatorios.ver", "Vendas de cada mês do ano ao lado do ano anterior (com o histórico importado do KIGEST). `mes_em_curso` assinala o mês ainda aberto.", tag="Relatórios e fiscal",
+    params=[qp("ano", "integer", "Ano (omitido = o actual).", exemplo=2026), *filtros_vendas],
+    respostas=ok({"type": "object", "properties": {"ano": {"type": "integer"}, "anterior": {"type": "integer"}, "mes_em_curso": {"type": "integer", "nullable": True},
+        "meses": {"type": "array", "items": {"type": "object", "properties": {"mes": {"type": "integer"}, "atual": dict(kz, nullable=True), "anterior": dict(kz, nullable=True), "docs_atual": {"type": "integer"}, "docs_anterior": {"type": "integer"}}}}}}))}
+P["/relatorios/stock"] = {"get": op("Relatórios de stock", "relatorios.ver", "Stock de um armazém: existências, ruptura, abaixo do mínimo, excesso, parado (dias sem saída), validade (lotes a expirar em `dias`), preços e previsão de venda. Os valores ao custo só saem com api.custos.", tag="Relatórios e fiscal",
+    params=[{"name": "situacao", "in": "query", "schema": {"type": "string", "default": "existencias", "enum": ["existencias", "ruptura", "minimo", "excesso", "parado", "validade", "precos", "previsao"]}},
+            pref("armazem_id"), qp("dias", "integer", "parado: dias sem saída; validade: dias até expirar (30 por omissão).")],
+    respostas=ok({"type": "object", "properties": {"situacao": {"type": "string"}, "armazem_id": {"type": "integer"}, "dados": {"type": "array", "items": {"type": "object"}}}}))}
 P["/saft"] = {"get": op("Exportar SAF-T (AO)", "sistema.saft", "Devolve o XML (não grava ficheiros no computador do KanGest).", tag="Relatórios e fiscal",
     params=[qp("de", "string", "Desde (AAAA-MM-DD).", True), qp("ate", "string", "Até (AAAA-MM-DD).", True),
             {"name": "tipo", "in": "query", "schema": {"type": "string", "default": "facturacao", "enum": ["facturacao", "aquisicao", "estado"]}}],

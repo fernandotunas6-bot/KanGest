@@ -14,7 +14,7 @@ import { qrcode, qrSvgPath } from "@/lib/qrcode";
 import { ramoPorId } from "@/lib/ramos";
 import { EscolherRamo } from "@/components/EscolherRamo";
 import { useTabelas } from "@/lib/hooks";
-import { dataHora, parseKz, toInputKz } from "@/lib/format";
+import { anfitriaoUrl, dataHora, parseKz, toInputKz } from "@/lib/format";
 import type { Empresa, EscPos, Posto, PostoOpcoes, VisorOpcoes } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
@@ -1258,7 +1258,7 @@ function RamoActividade() {
 
 /** Endereço para abrir no browser dos telemóveis e tablets, com o código QR para não ter de o escrever. */
 function AcessoBrowser({ r }: { r: EstadoRede }) {
-  const urls = r.enderecos.map((e) => `http://${e}${r.servidor_activo === 80 ? "" : `:${r.servidor_activo}`}/`);
+  const urls = r.enderecos.map((e) => `http://${anfitriaoUrl(e)}${r.servidor_activo === 80 ? "" : `:${r.servidor_activo}`}/`);
   const q = urls[0] ? qrcode(urls[0], "M") : null;
   const lado = q ? q.tamanho + 8 : 0;
   return (
@@ -1641,7 +1641,7 @@ function Rede() {
           {v.modo !== "local" && (
             <div className="grid grid-cols-3 gap-4 pt-2">
               {v.modo === "cliente" && (
-                <Field label="Endereço do servidor" className="col-span-2" hint="O IP da máquina que guarda a base de dados">
+                <Field label="Endereço do servidor" className="col-span-2" hint="O IP da máquina que guarda a base de dados: IPv4 (192.168.1.10), IPv6 (2001:db8::10) ou um nome">
                   <Input className="font-mono" placeholder="192.168.1.10" value={v.servidor ?? ""} onChange={(e) => set({ servidor: e.target.value })} />
                 </Field>
               )}

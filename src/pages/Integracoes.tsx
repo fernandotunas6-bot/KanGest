@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Ban, BellRing, Copy, FileJson, KeyRound, Monitor, Network, Pencil, Plug, Plus, RefreshCw, Send, ShieldCheck, Trash2 } from "lucide-react";
 import { call, copiarTexto } from "@/lib/api";
-import { dataHora } from "@/lib/format";
+import { anfitriaoUrl, dataHora } from "@/lib/format";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 
 interface PermissaoApi {
@@ -126,7 +126,7 @@ export default function Integracoes() {
   const base = useMemo(() => {
     if (!e) return "";
     const host = e.rede ? (e.enderecos[0] ?? "IP-DESTA-MÁQUINA") : "127.0.0.1";
-    return `http://${host}:${e.a_servir ?? e.porta}/api/v1`;
+    return `http://${anfitriaoUrl(host)}:${e.a_servir ?? e.porta}/api/v1`;
   }, [e]);
 
   function nova() {

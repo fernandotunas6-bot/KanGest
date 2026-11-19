@@ -141,11 +141,12 @@ Com limite por minuto, cada resposta traz `X-RateLimit-Limit` e `X-RateLimit-Rem
 | GET | `/saude` | — | A API responde? (sem chave) |
 | GET | `/openapi.json` | — | Especificação OpenAPI (sem chave) |
 | GET | `/` | qualquer chave | Empresa, chave (permissões efectivas), utilizador e posto |
-| GET | `/tabelas` | qualquer chave | Famílias, unidades, IVA, isenções, armazéns, modos de pagamento, tipos de documento, prazos, retenções, moedas |
+| GET | `/tabelas` | qualquer chave | Famílias, unidades, IVA, isenções, armazéns, postos (com o armazém e o prefixo de série), modos de pagamento, tipos de documento, prazos, retenções, moedas |
 | GET | `/artigos` | `api.artigos` | Lista (`q`, `familia_id`, `armazem_id`, `inativos`, `alterado_desde`, `desde_id`, `limite`) |
 | GET | `/artigos/{id}` | `api.artigos` | Um artigo (stock no `armazem_id` pedido ou no do posto da chave) |
 | GET | `/artigos/codigo/{código}` | `api.artigos` | Pelo código de barras, pela referência, por um código de embalagem ou por uma etiqueta da balança (`leitura.quantidade` diz quanto vale a leitura) |
 | POST | `/artigos` | `artigos.criar` | Criar (`descricao`, `taxa_iva_id`, `preco1` ou `preco1_iva`…) |
+| GET | `/artigos/{id}/foto` | `api.artigos` | A fotografia do artigo (WebP, JPEG ou PNG); `tem_foto` no artigo diz se existe |
 | PUT/PATCH | `/artigos/{id}` | `artigos.editar` | Alterar só os campos enviados |
 
 Cada artigo traz `atributos`, os dados do ramo de actividade da empresa ([RAMOS.md](RAMOS.md)) — por exemplo
@@ -162,12 +163,26 @@ A pesquisa `q` também os procura.
 | GET | `/clientes/{id}/pendentes` | `api.entidades` | Documentos em dívida |
 | POST | `/clientes`, `/fornecedores` | `clientes` / `fornecedores` | Criar |
 | PUT/PATCH | `/clientes/{id}`, `/fornecedores/{id}` | `clientes` / `fornecedores` | Alterar só os campos enviados |
-| GET | `/documentos` | `api.documentos` | Lista (`tipo=FT,FR`, `grupo`, `de`, `ate`, `entidade_id`, `estado`, `desta_chave=1`, `linhas=1`, `desde_id`, `limite`) |
+| GET | `/documentos` | `api.documentos` | Lista (`tipo=FT,FR`, `grupo`, `de`, `ate`, `entidade_id`, `estado`, `referencia` — o n.º da encomenda —, `posto_id`, `armazem_id`, `desta_chave=1`, `linhas=1`, `desde_id`, `limite`) |
 | GET | `/documentos/{id}` | `api.documentos` | Documento completo (linhas, pagamentos, IVA, AGT) |
 | POST | `/documentos` | a do tipo (§2) | Emitir |
 | POST | `/documentos/{id}/anular` | `documentos.anular` | Anular, com `{"motivo": "…"}` |
-| GET | `/relatorios/vendas` | `relatorios.ver` | Resumo (`de`, `ate`, `agrupar` = dia, mes, artigo, familia, operador, cliente, pagamento, vendedor, posto, documento, iva…) |
+| GET | `/relatorios/vendas` | `relatorios.ver` | Resumo (`de`, `ate`, `agrupar` = dia, mes, artigo, familia, operador, cliente, pagamento, vendedor, posto, armazem, mes_posto, mes_armazem, documento, iva…; filtros `posto_id`, `armazem_id`, `canal`, `entidade_id`; `limite`) |
+| GET | `/relatorios/sintese` | `relatorios.ver` | Os 12 meses de um ano ao lado do ano anterior (`ano`, mais os filtros `posto_id`, `armazem_id`, `canal`) |
+| GET | `/relatorios/stock` | `relatorios.ver` | Stock de um armazém (`situacao` = existencias, ruptura, minimo, excesso, parado, validade, precos, previsao; `armazem_id`; `dias`) |
 | GET | `/saft` | `sistema.saft` | XML do SAF-T (`de`, `ate`, `tipo` = facturacao, aquisicao ou estado) |
+
+**Relatórios por loja e por canal.** Os filtros servem a todos os agrupamentos:
+
+- `canal=api` só conta os documentos emitidos por chaves da API (a loja online e outras integrações); `canal=balcao`
+  conta os do programa e do POS (com o histórico importado do KIGEST).
+- `posto_id` / `armazem_id`: uma loja. Num **servidor central** cada loja é um armazém (e os seus postos); com **um
+  KanGest por loja**, cada loja tem a sua API e não precisa de filtro.
+- `agrupar=mes_armazem` (ou `mes_posto`) dá uma linha por mês e por loja, com `mes`, `armazem_id` e `armazem`: é o
+  quadro «lojas × meses». `agrupar=artigo` traz `artigo_id` e `referencia` e vem do mais vendido para o menos
+  vendido — `limite=10` dá o top 10.
+- `/relatorios/sintese?ano=2026&armazem_id=2` devolve os 12 meses de 2026 dessa loja ao lado dos de 2025 (`atual`,
+  `anterior`, `docs_atual`…) e o `mes_em_curso`.
 
 ## 6. Emitir documentos
 
@@ -201,6 +216,9 @@ code da AGT para mostrar ao cliente).
 - **`Idempotency-Key`** (até 100 caracteres, por exemplo o n.º da encomenda): se a ligação cair e o sistema repetir o
   pedido com a mesma chave, o KanGest devolve o documento já emitido (200, cabeçalho `Idempotent-Replayed: true`) em
   vez de emitir outro. Use-a sempre nas vendas.
+- **Armazém** (`armazem_id`): omitido, é o do posto da chave. Num servidor central com várias lojas, indique o da loja
+  (por exemplo, onde o cliente vai levantar a encomenda). Um documento com origem fica, sem `armazem_id`, no armazém
+  da origem: a FR de uma NE sai do stock que a NE reservou e a nota de crédito devolve à loja onde se vendeu.
 - **Documento de origem** (`doc_origem_id`: nota de crédito, conversão de proforma ou de nota de encomenda): envie as
   linhas sem preço — o preço e o desconto vêm da origem. Sem `pos.alterar_preco` / `pos.desconto`, cada artigo tem de
   estar na origem e um preço ou desconto diferente é recusado.
@@ -220,16 +238,17 @@ automáticos → Novo aviso**, indique o endereço que recebe os avisos e os eve
 
 | Evento | Quando | `dados` |
 |---|---|---|
-| `documento.emitido` | Qualquer documento novo (vendas, compras, recibos, stock), no programa, no POS ou pela API | O documento com as linhas (sem custos) e `url` para o pedir à API |
+| `documento.emitido` | Qualquer documento novo (vendas, compras, recibos, stock), no programa, no POS ou pela API | O documento com as linhas (sem custos), o `posto_id`, o `armazem_id` (a loja), o `api_chave_id` (vazio = balcão) e `url` para o pedir à API |
 | `documento.anulado` | Um documento é anulado | O mesmo, com `estado: "A"` e o motivo |
-| `stock.alterado` | Entradas, saídas, vendas, transferências, inventário | O artigo, a `quantidade` total e o detalhe por armazém, no momento do envio |
+| `stock.alterado` | Entradas, saídas, vendas, transferências, inventário; e notas de encomenda (NE) emitidas, anuladas ou facturadas, que mudam o reservado | O artigo, a `quantidade`, o `reservado` e o `disponivel` (existência − reservado), no total e por armazém, no momento do envio |
 | `artigo.alterado` | Artigo criado ou alterado (descrição, preços, promoção, activo) | O artigo com os preços sem e com IVA (sem custos) |
 
 Cada aviso é um `POST` com JSON:
 
 ```json
 { "id": 381, "evento": "stock.alterado", "criado_em": "2026-11-15T10:42:07",
-  "dados": { "id": 12, "referencia": "ARZ5", "quantidade": 47, "armazens": [{ "armazem_id": 1, "armazem": "Principal", "quantidade": 47 }] } }
+  "dados": { "id": 12, "referencia": "ARZ5", "quantidade": 47, "reservado": 2, "disponivel": 45,
+             "armazens": [{ "armazem_id": 1, "armazem": "Principal", "quantidade": 47, "reservado": 2, "disponivel": 45 }] } }
 ```
 
 - Cabeçalhos: `X-KanGest-Evento`, `X-KanGest-Entrega` (o `id`, igual nas novas tentativas: use-o para não tratar o
@@ -237,6 +256,8 @@ Cada aviso é um `POST` com JSON:
 - Responda com `2xx` em menos de 15 segundos. Sem resposta ou com erro, o KanGest volta a tentar ao fim de 1, 5, 15 e
   30 minutos e de 1, 3, 6 e 12 horas; depois a entrega fica «Falhada» e reenvia-se no ecrã.
 - Vários movimentos do mesmo artigo seguidos dão **um** aviso de stock, com a quantidade do momento do envio.
+- Uma loja online deve vender o **`disponivel`** do armazém (ou dos armazéns) que a servem: as encomendas já feitas
+  e por facturar (NE) estão no `reservado`.
 - **Confirme sempre a assinatura**: `v1` é o HMAC-SHA256 de `"<t>.<corpo>"` com o segredo do aviso (botão da chave).
   Recuse avisos com `t` de há mais de 5 minutos.
 
@@ -277,13 +298,29 @@ endereço da loja tem de ser alcançável a partir do computador do KanGest (é 
 
 **Loja online** (WooCommerce, Shopify ou loja própria, através de um pequeno programa de ligação):
 
-1. Com **avisos automáticos** (§7) de `artigo.alterado` e `stock.alterado`, a loja actualiza-se no momento. Sem eles,
-   de 10 em 10 minutos: `GET /artigos?alterado_desde=<última hora vista>` (página a página) para preços, descrições e
-   artigos desactivados; `GET /stock/movimentos?desde_id=<último id visto>` para o stock.
-2. Encomenda paga: `POST /documentos` (FR) com `Idempotency-Key` = n.º da encomenda e `referencia` = n.º da encomenda.
+1. **Catálogo e stock no site.** Com **avisos automáticos** (§7) de `artigo.alterado` e `stock.alterado`, a loja
+   actualiza-se no momento; o aviso de stock traz a quantidade de cada armazém (cada loja). Sem eles, ou para
+   recuperar avisos perdidos, de 10 em 10 minutos: `GET /artigos?alterado_desde=<última hora vista>` (página a
+   página) para preços, descrições e artigos desactivados; `GET /stock/movimentos?desde_id=<último id visto>` para o
+   stock. Liga-se cada produto do site ao artigo pela `referencia` (ou pelo código de barras / ISBN).
+2. **Encomenda feita:** `POST /documentos` com uma **NE** (nota de encomenda), `referencia` = n.º da encomenda e
+   `Idempotency-Key` = `ne-<n.º>`. O stock fica reservado (`reservado` em `/stock`). Num servidor central, envie o
+   `armazem_id` da loja do levantamento (ou da que serve a província da entrega).
+3. **Pagamento confirmado:** `POST /documentos` com a **FR**, `doc_origem_id` = id da NE, as mesmas linhas sem preços,
+   os pagamentos e `Idempotency-Key` = `fr-<n.º>`. Sai do stock da loja da NE e a NE fica facturada (`estado: "F"`).
    Guarde `numero_doc` e mostre ao cliente o QR (`fe.url_consulta`).
-3. Encomenda a pagar na entrega: `NE` ao receber (o stock fica reservado) e, ao entregar, `FR` com `doc_origem_id` da
-   NE e as mesmas linhas (sem preços). A NE fica facturada.
+4. **Encomenda cancelada:** `POST /documentos/{id da NE}/anular` com o motivo — a reserva desaparece. Depois de
+   facturada, a devolução é uma nota de crédito (`NC` com `doc_origem_id` da FR).
+5. **Onde está a encomenda?** `GET /documentos?referencia=<n.º>` devolve a NE e a FR dessa encomenda.
+6. **Cliente com NIF:** envie `cliente` (`nif`, `nome`, `email`, `telefone`) no documento: o KanGest procura-o pelo
+   NIF e cria-o se não existir (permissão `clientes`). Sem NIF, a venda é a Consumidor Final.
+7. **Relatórios no painel do site:** `GET /relatorios/vendas?de=…&ate=…&agrupar=mes&canal=balcao` dá as vendas ao
+   balcão de cada mês (para pôr ao lado das do site); `agrupar=mes_armazem` faz o mesmo para todas as lojas de um
+   servidor central; `agrupar=artigo&limite=10` os mais vendidos; `/relatorios/sintese` o ano contra o anterior.
+
+Permissões da chave da loja online: `api.artigos`, `api.stock`, `api.documentos`, `vendas.proforma` (NE),
+`vendas.fatura_recibo` (FR), `documentos.anular`, `clientes` e, para os relatórios, `relatorios.ver`. Crie um
+utilizador e um posto próprios (prefixo `W`): as vendas do site ficam numa série própria (`FR W2026/15`).
 
 **Contabilidade:** no início de cada mês, `GET /saft?de=2026-10-01&ate=2026-10-31` (e `tipo=aquisicao` para as
 compras); ou `GET /documentos?de=…&ate=…&linhas=1` para importar documento a documento.
@@ -334,7 +371,7 @@ while True:
 - As rotas chamam os mesmos métodos do `rpc` (`services::dispatch`) dentro do contexto da chave (`state::CONTEXTO`):
   sessão com as permissões efectivas da chave e o posto da chave. As leituras próprias da API são consultas próprias
   (ordenadas por `id`, com os custos retirados sem `api.custos`).
-- Rota nova: acrescentar em `rotear` e `rota_existe`, no gerador `scripts/gerar-openapi.py` (que escreve
+- Rota nova: acrescentar em `ROTAS` e em `rotear`, no gerador `scripts/gerar-openapi.py` (que escreve
   `docs/openapi.json`, incluído no executável) e neste documento. Permissão nova para chaves: `PERMISSOES_API`.
 - Testes: `cargo test api` (unitários e o teste de integração `api_integracao`, que liga a API numa porta livre e faz
   os pedidos por HTTP). O servidor de demonstração da auditoria (`servidor_demo`) também liga a API na porta 7800.

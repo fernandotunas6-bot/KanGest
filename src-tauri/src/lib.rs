@@ -1,6 +1,7 @@
 mod agt;
 pub mod api;
 mod db;
+mod enderecos;
 mod error;
 pub mod http;
 pub mod internet;
@@ -15,6 +16,11 @@ mod web;
 pub mod webhooks;
 
 use std::sync::Arc;
+
+/// Pilha das threads que atendem pedidos (aplicação, postos em rede, browser, API). A emissão de documentos é uma
+/// função assíncrona muito grande e, nas compilações de desenvolvimento, chega perto dos 2 MB de pilha por omissão
+/// das threads; com 8 MB há margem larga (nas compilações oficiais usa muito menos).
+pub(crate) const PILHA_PEDIDOS: usize = 8 * 1024 * 1024;
 
 use serde_json::Value;
 use tauri::Manager;
@@ -52,6 +58,15 @@ fn posto_local(dir: &std::path::Path) -> i64 {
 }
 
 pub fn run() {
+    // o runtime assíncrono da aplicação com threads de pilha maior (ver PILHA_PEDIDOS)
+    match tokio::runtime::Builder::new_multi_thread().enable_all().thread_stack_size(PILHA_PEDIDOS).thread_name("kangest-rt").build() {
+        Ok(rt) => {
+            tauri::async_runtime::set(rt.handle().clone());
+            // o runtime vive enquanto o programa viver
+            std::mem::forget(rt);
+        }
+        Err(e) => eprintln!("Runtime assíncrono por omissão (não foi possível criar o próprio: {e})"),
+    }
     tauri::Builder::default()
         .setup(|app| {
             // selo de integridade do executável (só nas compilações oficiais; corre numa thread à parte)

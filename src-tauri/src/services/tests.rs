@@ -3595,6 +3595,9 @@ async fn recibo_digital_por_email_e_whatsapp() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// A API tem um só servidor e um só estado na aplicação: os testes que a ligam correm um de cada vez.
+static API_UMA_DE_CADA_VEZ: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Pedido HTTP simples à API: (código, cabeçalhos, corpo em JSON — ou em texto se não for JSON).
 fn api_http(porta: u16, metodo: &str, caminho: &str, chave: Option<&str>, corpo: Option<&Value>, extra: &[(&str, &str)]) -> (u16, String, Value) {
     use std::io::{Read, Write};
@@ -3626,6 +3629,7 @@ fn api_http(porta: u16, metodo: &str, caminho: &str, chave: Option<&str>, corpo:
 /// limite de pedidos, emissão com idempotência, cliente por NIF, artigos por referência, SAF-T e registo.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn api_integracao() {
+    let _so_uma_api = API_UMA_DE_CADA_VEZ.lock().await;
     let pasta = std::env::temp_dir().join(format!("kigest-api-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&pasta);
     std::fs::create_dir_all(&pasta).unwrap();
@@ -3978,6 +3982,121 @@ async fn api_integracao() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// Loja online pela API (o caso da Livraria Adventista): encomenda (NE) na loja do levantamento com o stock reservado,
+/// procurada pelo n.º da encomenda, facturada ao pagar (FR a partir da NE, no armazém da NE) ou anulada; vendas por
+/// canal, por loja e por mês, mais vendidos, síntese do ano e existências de uma loja.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn api_loja_online() {
+    let _so_uma_api = API_UMA_DE_CADA_VEZ.lock().await;
+    let pasta = std::env::temp_dir().join(format!("kigest-api-loja-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Livraria, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+
+    let livro = rpc(&st, "artigos.guardar", json!({ "descricao": "O Desejado de Todas as Nações", "referencia": "LIV-001", "taxa_iva_id": 1, "preco1": 500000, "custo": 300000 })).await["id"].as_i64().unwrap();
+    let lubango = rpc(&st, "tabela.guardar", json!({ "tabela": "armazens", "descricao": "Livraria do Lubango" })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": livro, "quantidade": 20, "preco_unitario": 300000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "armazem_id": lubango, "linhas": [{ "artigo_id": livro, "quantidade": 5, "preco_unitario": 300000 }] })).await;
+    // uma venda ao balcão (sem chave): conta no canal «balcao»
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": livro, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 570000 }] })).await;
+    let posto = rpc(&st, "posto.guardar", json!({ "descricao": "Loja online", "armazem_id": 1, "serie_prefixo": "W" })).await["id"].as_i64().unwrap();
+    let admin = rpc(&st, "utilizadores.listar", Value::Null).await.as_array().unwrap().iter().find(|u| u["login"] == "admin").unwrap()["id"].as_i64().unwrap();
+    let perms = json!(["api.artigos", "api.stock", "api.documentos", "vendas.proforma", "vendas.fatura_recibo", "documentos.anular", "relatorios.ver"]);
+    let k = rpc(&st, "api.chaveCriar", json!({ "nome": "Livraria online", "utilizador_id": admin, "posto_id": posto, "permissoes": perms })).await["chave"].as_str().unwrap().to_string();
+    let so_stock = rpc(&st, "api.chaveCriar", json!({ "nome": "Só stock", "utilizador_id": admin, "permissoes": ["api.stock"] })).await["chave"].as_str().unwrap().to_string();
+
+    let porta = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let arc = std::sync::Arc::new(st);
+    crate::api::registar_estado(arc.clone());
+    rpc(&arc, "api.guardar", json!({ "ativo": true, "porta": porta, "rede": false })).await;
+    let http = |m: &str, c: &str, b: Option<&Value>| api_http(porta, m, c, Some(&k), b, &[]);
+    let emitir = |b: &Value, idem: &str| api_http(porta, "POST", "/api/v1/documentos", Some(&k), Some(b), &[("Idempotency-Key", idem)]);
+    let lubango_de = |artigo: i64| {
+        let sk = http("GET", &format!("/api/v1/stock?artigo_id={artigo}"), None).2;
+        sk["dados"][0]["armazens"].as_array().unwrap().iter().find(|a| a["armazem_id"] == lubango).cloned().unwrap()
+    };
+
+    // as lojas: armazéns e postos (num servidor central, cada loja é um armazém)
+    let t = http("GET", "/api/v1/tabelas", None).2;
+    assert!(t["armazens"].as_array().unwrap().iter().any(|a| a["id"] == lubango));
+    assert!(t["postos"].as_array().unwrap().iter().any(|p| p["id"] == posto && p["serie_prefixo"] == "W"), "{t}");
+
+    // ---- encomenda feita no site, a levantar no Lubango: NE no armazém dessa loja, com o stock reservado ----
+    let ne_corpo = |enc: &str| json!({ "tipo": "NE", "referencia": enc, "armazem_id": lubango, "linhas": [{ "referencia": "LIV-001", "quantidade": 2 }] });
+    let (s, _, ne) = emitir(&ne_corpo("ENC-2001"), "ne-ENC-2001");
+    assert_eq!(s, 201, "{ne}");
+    let ne_id = ne["id"].as_i64().unwrap();
+    assert_eq!(ne["armazem_id"], lubango);
+    let l = lubango_de(livro);
+    assert_eq!((l["quantidade"].as_f64(), l["reservado"].as_f64(), l["disponivel"].as_f64()), (Some(5.0), Some(2.0), Some(3.0)), "{l}");
+    // o site encontra a encomenda pelo n.º dela
+    let achados = http("GET", "/api/v1/documentos?referencia=ENC-2001", None).2;
+    assert_eq!(achados["dados"].as_array().unwrap().len(), 1, "{achados}");
+    assert_eq!((achados["dados"][0]["tipo_codigo"].as_str(), achados["dados"][0]["id"].as_i64()), (Some("NE"), Some(ne_id)));
+    assert_eq!(http("GET", &format!("/api/v1/documentos?armazem_id={lubango}&tipo=NE"), None).2["dados"].as_array().unwrap().len(), 1);
+
+    // ---- pagamento confirmado: FR a partir da NE (sem preços), sai do stock do Lubango, a NE fica facturada ----
+    let fr_corpo = json!({ "tipo": "FR", "doc_origem_id": ne_id, "referencia": "ENC-2001", "linhas": [{ "referencia": "LIV-001", "quantidade": 2 }], "pagamentos": [{ "modo": "TB", "valor": 1140000 }] });
+    let (s, _, fr) = emitir(&fr_corpo, "fr-ENC-2001");
+    assert_eq!((s, fr["total"].as_i64(), fr["armazem_id"].as_i64()), (201, Some(1140000), Some(lubango)), "{fr}");
+    assert!(fr["numero_doc"].as_str().unwrap().starts_with("FR W"), "série do posto da loja online: {fr}");
+    let (s, cab, _) = emitir(&fr_corpo, "fr-ENC-2001");
+    assert!(s == 200 && cab.contains("Idempotent-Replayed: true"), "repetir o pedido não factura duas vezes");
+    let l = lubango_de(livro);
+    assert_eq!((l["quantidade"].as_f64(), l["reservado"].as_f64()), (Some(3.0), Some(0.0)), "{l}");
+    assert_eq!(http("GET", &format!("/api/v1/documentos/{ne_id}"), None).2["estado"], "F");
+    assert_eq!(http("GET", "/api/v1/documentos?referencia=ENC-2001", None).2["dados"].as_array().unwrap().len(), 2);
+
+    // ---- encomenda cancelada: anula-se a NE e a reserva desaparece ----
+    let (_, _, ne2) = emitir(&ne_corpo("ENC-2002"), "ne-ENC-2002");
+    assert_eq!(lubango_de(livro)["reservado"].as_f64(), Some(2.0));
+    let (s, _, an) = http("POST", &format!("/api/v1/documentos/{}/anular", ne2["id"]), Some(&json!({ "motivo": "Encomenda cancelada no site" })));
+    assert_eq!((s, an["estado"].as_str()), (200, Some("A")), "{an}");
+    assert_eq!(lubango_de(livro)["reservado"].as_f64(), Some(0.0));
+
+    // ---- relatórios: canal, loja e mês ----
+    let hoje = db::hoje();
+    let rel = |q: &str| http("GET", &format!("/api/v1/relatorios/vendas?de={hoje}&ate={hoje}&{q}"), None);
+    let total = |q: &str| rel(q).2["dados"].as_array().unwrap().iter().map(|l| l["total"].as_i64().unwrap()).sum::<i64>();
+    assert_eq!(total("agrupar=mes&canal=api"), 1140000, "a loja online");
+    assert_eq!(total("agrupar=mes&canal=balcao"), 570000, "o balcão");
+    assert_eq!(total(&format!("agrupar=dia&armazem_id={lubango}")), 1140000);
+    let (s, _, v) = rel("agrupar=mes&canal=site");
+    assert_eq!((s, v["erro"]["codigo"].as_str()), (400, Some("pedido_invalido")));
+    let por_loja = rel("agrupar=mes_armazem").2;
+    assert_eq!(por_loja["dados"].as_array().unwrap().len(), 2, "{por_loja}");
+    let lub = por_loja["dados"].as_array().unwrap().iter().find(|l| l["armazem_id"] == lubango).unwrap();
+    assert_eq!((lub["mes"].as_str(), lub["armazem"].as_str(), lub["total"].as_i64()), (Some(&hoje[..7]), Some("Livraria do Lubango"), Some(1140000)));
+    assert_eq!(rel("agrupar=mes_posto&canal=api").2["dados"][0]["posto_id"], posto);
+    // mais vendidos: com a referência e o id do artigo (para ligar ao catálogo do site), sem lucro sem api.custos
+    let top = rel("agrupar=artigo&limite=1").2;
+    let t0 = &top["dados"][0];
+    assert_eq!((t0["referencia"].as_str(), t0["artigo_id"].as_i64(), t0["quantidade"].as_f64()), (Some("LIV-001"), Some(livro), Some(3.0)), "{top}");
+    assert!(t0.get("lucro").is_none());
+    // síntese do ano (um registo por loja e por ano, com os 12 meses)
+    let mes = hoje[5..7].parse::<usize>().unwrap();
+    let si = http("GET", &format!("/api/v1/relatorios/sintese?ano={}&armazem_id={lubango}", &hoje[..4]), None).2;
+    assert_eq!(si["meses"][mes - 1]["atual"], 1140000, "{si}");
+    assert_eq!(http("GET", &format!("/api/v1/relatorios/sintese?ano={}&canal=balcao", &hoje[..4]), None).2["meses"][mes - 1]["atual"], 570000);
+    // existências de uma loja (sem valores ao custo sem api.custos)
+    let ex = http("GET", &format!("/api/v1/relatorios/stock?situacao=existencias&armazem_id={lubango}"), None).2;
+    let linha = ex["dados"].as_array().unwrap().iter().find(|l| l["referencia"] == "LIV-001").unwrap();
+    assert_eq!(linha["quantidade"].as_f64(), Some(3.0), "{ex}");
+    assert!(linha.get("valor_custo").is_none() && linha.get("custo_medio").is_none(), "{linha}");
+    assert_eq!(http("GET", "/api/v1/relatorios/stock?situacao=inventada", None).0, 400);
+    assert_eq!(api_http(porta, "GET", "/api/v1/relatorios/stock", Some(&so_stock), None, &[]).0, 403, "sem relatorios.ver");
+
+    rpc(&arc, "api.guardar", json!({ "ativo": false, "porta": porta, "rede": false })).await;
+    arc.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 /// Receptor HTTP de avisos para os testes: guarda (caminho, cabeçalhos, corpo); responde 500 em /falha e 200 no resto.
 /// Avisos recebidos pelo receptor de teste: (caminho do pedido, cabeçalhos, corpo).
 type AvisosRecebidos = std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>;
@@ -4075,6 +4194,7 @@ async fn webhooks_api() {
     let fr_aviso = corpos.iter().find(|c| c["evento"] == "documento.emitido" && c["dados"]["tipo_codigo"] == "FR").expect("aviso da FR");
     assert_eq!((fr_aviso["dados"]["numero_doc"].as_str(), fr_aviso["dados"]["total"].as_i64()), (fr["documento"]["numero_doc"].as_str(), Some(171000)));
     assert_eq!(fr_aviso["dados"]["linhas"][0]["referencia"], "CAF250");
+    assert_eq!((fr_aviso["dados"]["armazem_id"].as_i64(), fr_aviso["dados"]["posto_id"].as_i64()), (Some(1), Some(1)), "a loja (armazém) e o posto da venda");
     assert!(fr_aviso["dados"]["linhas"][0].get("custo").is_none(), "os avisos não levam custos");
     let stock = corpos.iter().find(|c| c["evento"] == "stock.alterado").expect("aviso de stock");
     assert_eq!(stock["dados"]["quantidade"].as_f64(), Some(7.0), "o aviso leva o stock no momento do envio (8 − 1)");
@@ -4104,6 +4224,20 @@ async fn webhooks_api() {
     assert_eq!((t["aceite"].as_bool(), t["codigo_http"].as_i64()), (Some(true), Some(200)), "{t}");
     let t = rpc(&st, "api.webhookTestar", json!({ "id": falha })).await;
     assert_eq!((t["aceite"].as_bool(), t["codigo_http"].as_i64()), (Some(false), Some(500)));
+
+    // ---- reservas: uma NE muda o disponível sem mexer na existência, e o aviso de stock diz quanto ----
+    let ultimo_stock = || -> Value {
+        recebidos.lock().unwrap().iter().rev().filter_map(|x| serde_json::from_str::<Value>(&x.2).ok()).find(|c| c["evento"] == "stock.alterado").expect("aviso de stock")
+    };
+    let ne = rpc(&st, "documentos.emitir", json!({ "tipo": "NE", "linhas": [{ "artigo_id": art, "quantidade": 2 }] })).await;
+    crate::webhooks::ciclo(&st).await.unwrap();
+    let s1 = ultimo_stock();
+    assert_eq!((s1["dados"]["quantidade"].as_f64(), s1["dados"]["reservado"].as_f64(), s1["dados"]["disponivel"].as_f64()), (Some(8.0), Some(2.0), Some(6.0)), "{s1}");
+    assert_eq!((s1["dados"]["armazens"][0]["reservado"].as_f64(), s1["dados"]["armazens"][0]["disponivel"].as_f64()), (Some(2.0), Some(6.0)));
+    rpc(&st, "documentos.anular", json!({ "id": ne["documento"]["id"], "motivo": "encomenda cancelada" })).await;
+    crate::webhooks::ciclo(&st).await.unwrap();
+    let s2 = ultimo_stock();
+    assert_eq!((s2["dados"]["reservado"].as_f64(), s2["dados"]["disponivel"].as_f64()), (Some(0.0), Some(8.0)), "a encomenda anulada liberta a reserva: {s2}");
 
     // ---- segredo novo; desactivar; apagar ----
     let novo = rpc(&st, "api.webhookSegredo", json!({ "id": w["id"] })).await["segredo"].as_str().unwrap().to_string();
@@ -4623,5 +4757,63 @@ async fn verificacao_em_dois_passos() {
     rpc(&st, "utilizadores.doisPassosRepor", json!({ "id": ana })).await;
     let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auditoria WHERE acao = 'DOIS_PASSOS'").fetch_one(&st.pool).await.unwrap();
     assert!(n >= 4, "{n}");
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Fotografias dos artigos: conferidas, miniaturas em lote para o POS e a imagem pela API.
+#[tokio::test]
+async fn fotografias_dos_artigos() {
+    let (st, pasta) = base_com_admin("fotos").await;
+    let a = rpc(&st, "artigos.guardar", json!({ "descricao": "Sumo de múcua", "taxa_iva_id": 1, "preco1": 50000 })).await["id"].as_i64().unwrap();
+    let webp = |extra: &str| format!("data:image/webp;base64,{}", B64.encode([b"RIFF\x10\x00\x00\x00WEBPVP8 ".as_slice(), extra.as_bytes()].concat()));
+    assert!(rpc_err(&st, "fotos.guardar", json!({ "artigo_id": a, "miniatura": "data:image/svg+xml;base64,PHN2Zz4=", "imagem": webp("x") })).await.contains("WebP, JPEG ou PNG"));
+    assert!(rpc_err(&st, "fotos.guardar", json!({ "artigo_id": 9999, "miniatura": webp("m"), "imagem": webp("i") })).await.contains("encontr"));
+    rpc(&st, "fotos.guardar", json!({ "artigo_id": a, "miniatura": webp("m"), "imagem": webp("imagem grande") })).await;
+    let lista = rpc(&st, "artigos.listar", json!({ "q": "múcua" })).await;
+    let versao = lista[0]["foto"].as_str().unwrap().to_string();
+    assert!(!versao.is_empty(), "a lista diz que há foto (e de quando, para a cache)");
+    let m = rpc(&st, "fotos.miniaturas", json!({ "ids": [a, 9999] })).await;
+    assert_eq!(m.as_object().unwrap().len(), 1);
+    assert_eq!(m[a.to_string()], webp("m"));
+    assert_eq!(rpc(&st, "fotos.obter", json!({ "artigo_id": a })).await["imagem"], webp("imagem grande"));
+    // trocar a foto muda a versão; apagar tira-a
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    rpc(&st, "fotos.guardar", json!({ "artigo_id": a, "miniatura": webp("m2"), "imagem": webp("i2") })).await;
+    assert_ne!(rpc(&st, "artigos.listar", json!({ "q": "múcua" })).await[0]["foto"].as_str().unwrap(), versao);
+    rpc(&st, "fotos.apagar", json!({ "artigo_id": a })).await;
+    assert!(rpc(&st, "artigos.listar", json!({ "q": "múcua" })).await[0]["foto"].is_null());
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Numerário em moeda estrangeira no POS: valor em Kz ao câmbio do dia, troco em Kz e gaveta conferida por moeda.
+#[tokio::test]
+async fn pagamento_em_moeda_estrangeira() {
+    let (st, pasta) = base_com_admin("moeda_pos").await;
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Garrafão de água", "tipo": "S", "taxa_iva_id": 1, "preco1": 5_000_000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 10_000_000 })).await;
+    let venda = |pags: Value| json!({ "tipo": "FR", "linhas": [{ "artigo_id": art, "quantidade": 1 }], "pagamentos": pags });
+    // sem câmbio definido não se aceita
+    assert!(rpc_err(&st, "documentos.emitir", venda(json!([{ "modo": "NU", "valor": 0, "moeda": "USD", "valor_moeda": 10_000 }]))).await.contains("câmbio"));
+    rpc(&st, "moedas.guardar", json!({ "codigo": "USD", "descricao": "Dólar americano", "simbolo": "US$", "cambio": 900.0 })).await;
+    assert!(rpc_err(&st, "documentos.emitir", venda(json!([{ "modo": "CC", "valor": 0, "moeda": "USD", "valor_moeda": 10_000 }]))).await.contains("numerário"));
+
+    // total 57 000 Kz (50 000 + IVA 14%) pago com 100 US$ (= 90 000 Kz): troco de 33 000 Kz
+    let d = rpc(&st, "documentos.emitir", venda(json!([{ "modo": "NU", "valor": 0, "moeda": "USD", "valor_moeda": 10_000 }]))).await;
+    assert_eq!(d["documento"]["total"], 5_700_000);
+    assert_eq!(d["documento"]["troco"], 3_300_000);
+    let pg = &d["pagamentos"][0];
+    assert_eq!((pg["modo_codigo"].as_str(), pg["valor"].as_i64(), pg["moeda"].as_str(), pg["valor_moeda"].as_i64()), (Some("NU"), Some(5_700_000), Some("USD"), Some(10_000)));
+
+    // misto: 50 US$ (45 000 Kz) + 20 000 Kz em notas para 57 000 Kz → troco 8 000 Kz das notas
+    let d2 = rpc(&st, "documentos.emitir", venda(json!([{ "modo": "NU", "valor": 0, "moeda": "USD", "valor_moeda": 5_000 }, { "modo": "NU", "valor": 2_000_000 }]))).await;
+    assert_eq!(d2["documento"]["troco"], 800_000);
+    let soma: i64 = d2["pagamentos"].as_array().unwrap().iter().map(|p| p["valor"].as_i64().unwrap()).sum();
+    assert_eq!(soma, 5_700_000, "os pagamentos somam o total (SAF-T)");
+
+    // gaveta: kwanzas = 100 000 inicial − 33 000 de troco + 20 000 − 8 000 = 79 000; dólares = 150 US$
+    let c = rpc(&st, "caixa.estado", Value::Null).await;
+    assert_eq!(c["numerario_esperado"], 7_900_000, "{c}");
+    let usd = &c["moedas_estrangeiras"][0];
+    assert_eq!((usd["moeda"].as_str(), usd["valor"].as_i64()), (Some("USD"), Some(15_000)));
     let _ = std::fs::remove_dir_all(&pasta);
 }

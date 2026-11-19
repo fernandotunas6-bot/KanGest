@@ -67,6 +67,7 @@ pub async fn tabela_guardar(st: &AppState, t: TabelaIn) -> AppResult<Value> {
 
 const ARTIGO_SELECT: &str = "
     SELECT a.*, t.percentagem AS taxa_pct, t.descricao AS taxa_desc, u.abreviatura AS unidade,
+           (SELECT fo.alterado_em FROM artigo_fotos fo WHERE fo.artigo_id = a.id) AS foto,
            f.descricao AS familia, sf.descricao AS subfamilia,
            COALESCE(s.quantidade, 0) AS stock,
            CASE WHEN a.pvp1 IS NOT NULL AND CAST(ROUND(a.pvp1 * 100.0 / (100 + t.percentagem)) AS INTEGER) = a.preco1 THEN a.pvp1

@@ -93,13 +93,10 @@ fn testar_url(servico: &str, url: &str, ficheiro: bool) -> Value {
 
 /// O servidor de email só se testa até abrir a ligação (sem enviar nada).
 fn testar_tcp(servico: &str, host: &str, porta: u16) -> Value {
-    use std::net::{TcpStream, ToSocketAddrs};
     let inicio = Instant::now();
-    let r = (host, porta)
-        .to_socket_addrs()
-        .map_err(|e| format!("Não foi possível resolver {host}: {e}"))
-        .and_then(|mut a| a.next().ok_or_else(|| format!("Não foi possível resolver {host}")))
-        .and_then(|a| TcpStream::connect_timeout(&a, Duration::from_secs(10)).map_err(|e| format!("Sem ligação a {host}:{porta}: {e}")));
+    // um nome com IPv6 e IPv4 tenta os dois, pela ordem do sistema
+    let alvo = crate::enderecos::alvo(host, porta);
+    let r = crate::enderecos::ligar(&alvo, Duration::from_secs(10)).map_err(|e| format!("Sem ligação a {alvo}: {e}"));
     let ms = inicio.elapsed().as_millis() as u64;
     let endereco = format!("{host}:{porta}");
     match r {

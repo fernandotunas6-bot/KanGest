@@ -36,6 +36,8 @@ sha2 = { version = "0.10", features = ["oid"] }
 minisign-verify = "0.2"
 # Ficheiros exportados do KIGEST (.kigest = JSON por linhas em gzip).
 flate2 = "1"
+# Portas em IPv4 e IPv6 ao mesmo tempo (IPV6_V6ONLY desligado também no Windows).
+socket2 = "0.6"
 
 # Crypto e hashing ficam muito lentos sem optimizações em debug.
 [profile.dev.package.rsa]

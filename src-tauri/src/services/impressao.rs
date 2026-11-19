@@ -549,9 +549,25 @@ fn render(cfg: &Config, d: &Value, via: &str) -> Vec<u8> {
         t.linha("Modo de Pagamento");
         t.centrar(false);
         t.separador();
+        // numerário noutra moeda: o que se entregou nessa moeda (ao câmbio); as notas em Kz levam o troco
+        let bruto = |p: &Value| (p["valor_moeda"].as_i64().unwrap_or(0) as f64 * p["cambio"].as_f64().unwrap_or(0.0)).round() as i64;
+        let estrangeiros: Vec<&Value> = pagamentos.iter().filter(|p| p["moeda"].is_string()).collect();
+        let outros: i64 = pagamentos.iter().filter(|p| !p["moeda"].is_string() && txt(p, "modo_codigo") != "NU").map(|p| num(p, "valor")).sum();
+        let notas_kz = (entregue - outros - estrangeiros.iter().map(|p| bruto(p)).sum::<i64>()).max(0);
         for p in pagamentos {
-            let extra = if txt(p, "modo_codigo") == "NU" { troco } else { 0 };
-            t.par(&txt(p, "descricao"), &kz(num(p, "valor") + extra));
+            if let Some(m) = p["moeda"].as_str() {
+                t.par(&format!("Numerario {m} {}", kz(num(p, "valor_moeda"))), &kz(bruto(p)));
+                t.linha(&format!("  cambio {:.2} Kz/{m}", p["cambio"].as_f64().unwrap_or(0.0)));
+            } else {
+                let valor = if txt(p, "modo_codigo") != "NU" {
+                    num(p, "valor")
+                } else if estrangeiros.is_empty() {
+                    num(p, "valor") + troco
+                } else {
+                    notas_kz
+                };
+                t.par(&txt(p, "descricao"), &kz(valor));
+            }
         }
     }
     // pontos de fidelização: ganhos e usados neste documento e o saldo do cliente
@@ -687,15 +703,15 @@ fn enviar(cfg: &Config, bytes: &[u8]) -> AppResult<()> {
 }
 
 fn rede(destino: &str, bytes: &[u8]) -> AppResult<()> {
-    use std::net::{TcpStream, ToSocketAddrs};
+    use std::net::ToSocketAddrs;
     use std::time::Duration;
-    let alvo = if destino.contains(':') { destino.to_string() } else { format!("{destino}:9100") };
-    let addr = alvo
-        .to_socket_addrs()
+    // IPv4, IPv6 (`fd00::50` ou `[fd00::50]:9100`) ou nome
+    let alvo = crate::enderecos::alvo(destino, 9100);
+    alvo.to_socket_addrs()
         .map_err(|e| AppError::msg(format!("Endereço de impressora inválido ({alvo}): {e}")))?
         .next()
         .ok_or_else(|| AppError::msg(format!("Endereço de impressora inválido: {alvo}")))?;
-    let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(4))
+    let mut s = crate::enderecos::ligar(&alvo, Duration::from_secs(4))
         .map_err(|e| AppError::msg(format!("Sem resposta da impressora em {alvo}: {e}")))?;
     s.set_write_timeout(Some(Duration::from_secs(5))).ok();
     s.write_all(bytes).map_err(|e| AppError::msg(format!("Falha a enviar para {alvo}: {e}")))?;

@@ -30,6 +30,7 @@ mod setup;
 pub mod sistema;
 mod suspensos;
 mod ficheiros;
+pub mod fotos;
 mod inventario;
 mod ligacao;
 mod quadro;
@@ -69,6 +70,18 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
     // novo aumenta a pilha que ele usa (nas compilações de desenvolvimento chegava ao limite da pilha).
     if let Some(resto) = metodo.strip_prefix("avencas.") {
         return Box::pin(avencas::despachar(st, resto, params)).await;
+    }
+    if let Some(resto) = metodo.strip_prefix("fotos.") {
+        return Box::pin(async move {
+            match resto {
+                "guardar" => fotos::guardar(st, p(params)?).await,
+                "apagar" => fotos::apagar(st, p(params)?).await,
+                "obter" => fotos::obter(st, p(params)?).await,
+                "miniaturas" => fotos::miniaturas(st, p(params)?).await,
+                _ => Err(AppError::msg(format!("Método desconhecido: fotos.{resto}"))),
+            }
+        })
+        .await;
     }
     match metodo {
         // ---- públicos ----
