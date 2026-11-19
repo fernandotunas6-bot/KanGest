@@ -76,7 +76,7 @@ class Falha extends Error {
 // ------------------------------------------------------------------ protecção
 
 /** Pedidos por IP e por hora. O registo envia emails; a confirmação testa códigos; o painel conta só as falhas. */
-export const LIMITES = { registo: 20, confirmar: 60, renovar: 600, admin: 30, web: 60 };
+export const LIMITES = { registo: 20, confirmar: 60, renovar: 600, admin: 30, web: 60, portal: 120 };
 const janelaHora = () => new Date().toISOString().slice(0, 13);
 
 /** Conta um pedido do IP (CF-Connecting-IP) e recusa acima do limite. Sem IP (testes locais), não limita. */
@@ -522,6 +522,24 @@ async function webDesactivar(env, c) {
   return { ok: true, mensagem: `O endereço ${s.nome}.${env.WEB_DOMINIO ?? ""} foi desligado.` };
 }
 
+/**
+ * Página de entrada comum (site → Entrar): a partir do nome que a empresa escolheu, diz o endereço do KanGest web dela
+ * e se o computador da loja está ligado (estado do túnel na Cloudflare). Público: só revela o que o DNS já revela.
+ */
+async function webEndereco(env, dado) {
+  if (!webConfigurado(env)) throw new Falha("O acesso ao KanGest pela Internet ainda não está disponível.", 503);
+  const nome = String(dado ?? "").trim().toLowerCase();
+  if (!/^[a-z0-9-]{3,30}$/.test(nome)) throw new Falha("Escreva o endereço da empresa: 3 a 30 letras, algarismos ou hífenes.");
+  const s = await env.DB.prepare("SELECT nome, tunel_id FROM subdominios WHERE nome = ?").bind(nome).first();
+  if (!s) throw new Falha(`Não há nenhuma empresa com o endereço ${nome}.${env.WEB_DOMINIO}. Confirme-o com o administrador do KanGest da empresa.`, 404);
+  let ligado = null;
+  try {
+    const t = await cf(env, "GET", `/accounts/${env.CF_CONTA}/cfd_tunnel/${s.tunel_id}`);
+    ligado = t?.status === "healthy" || t?.status === "degraded";
+  } catch { /* sem estado: a página deixa entrar na mesma */ }
+  return { ok: true, nome: s.nome, endereco: `https://${s.nome}.${env.WEB_DOMINIO}`, ligado };
+}
+
 // ------------------------------------------------------------------ painel do produtor
 
 function autorizado(env, req) {
@@ -698,6 +716,16 @@ async function tratar(req, env) {
   if (m === "POST" && caminho === "/v1/renovar") {
     await limitar(env, req, "renovar");
     return json(await renovar(env, await corpoJson(req)));
+  }
+  if (m === "GET" && caminho === "/v1/web/endereco") {
+    const cabec = { ...CORS, "cache-control": "no-store" };
+    try {
+      await limitar(env, req, "portal");
+      return json(await webEndereco(env, url.searchParams.get("nome")), 200, cabec);
+    } catch (e) {
+      if (!(e instanceof Falha)) throw e;
+      return json({ ok: false, erro: e.message }, e.estado, cabec);
+    }
   }
   if (m === "POST" && caminho.startsWith("/v1/web/")) {
     const f = { estado: webEstado, activar: webActivar, desactivar: webDesactivar }[caminho.slice("/v1/web/".length)];

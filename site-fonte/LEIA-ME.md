@@ -30,6 +30,12 @@ pedidos de download e de contacto chegam a esse endereço pelo FormSubmit e quem
 automaticamente (o FormSubmit pede uma confirmação no primeiro envio). Sem contactos, a página de contacto mostra
 alternativas em vez do formulário, e o pedido de download mostra os links na própria página.
 
+## Página de entrada (KanGest web)
+
+`paginas/entrar.html` e o botão **Entrar** do topo: o nome da empresa leva ao KanGest web dela. Em `config.json`,
+`web.licencas` é o servidor de licenças que dá os endereços (também entra na CSP, em `connect-src`) e `web.dominio` o
+domínio dos endereços das empresas (vazio até haver domínio). Ver [docs/CLOUDFLARE.md](../docs/CLOUDFLARE.md) §3.
+
 ## Nova versão do KanGest
 
 Em `config.json`, mude `versao`, os três links de `downloads` e os tamanhos; gere e publique.

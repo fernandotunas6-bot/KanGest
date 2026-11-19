@@ -265,6 +265,7 @@ assert.equal((await pedir("GET", "/nada")).estado, 404);
   const pedidosCf = [];
   const fetchOriginal = globalThis.fetch;
   let n = 0;
+  let estadoTunel = "healthy";
   globalThis.fetch = async (url, op = {}) => {
     const u = String(url);
     assert.ok(u.startsWith("https://api.cloudflare.com/client/v4/"), u);
@@ -277,6 +278,7 @@ assert.equal((await pedir("GET", "/nada")).estado, 404);
     else if (op.method === "POST" && caminho.endsWith("/dns_records")) { result = { id: `dns-${++n}`, ...corpo }; pedidosCf.push(JSON.stringify(corpo)); }
     else if (op.method === "PUT") pedidosCf.push(JSON.stringify(corpo));
     else if (op.method === "GET" && caminho.endsWith("/token")) result = "token-do-tunel";
+    else if (op.method === "GET" && /\/cfd_tunnel\/[^/]+$/.test(caminho)) result = { id: caminho.split("/").pop(), status: estadoTunel };
     return new Response(JSON.stringify({ success: true, result }), { headers: { "content-type": "application/json" } });
   };
   const envWeb = { ...env, WEB_DOMINIO: "kangest.ao", CF_CONTA: "conta1", CF_ZONA: "zona1", CF_API_TOKEN: "token-do-produtor" };
@@ -309,6 +311,23 @@ assert.equal((await pedir("GET", "/nada")).estado, 404);
   assert.ok(pedidosCf.some((x) => x.includes('"type":"CNAME"') && x.includes('"content":"tunel-1.cfargotunnel.com"') && x.includes('"proxied":true')));
   r = await web("estado", eu);
   assert.deepEqual([r.corpo.disponivel, r.corpo.nome, r.corpo.endereco, r.corpo.neste_computador], [true, "kianda", "https://kianda.kangest.ao", true]);
+
+  // página de entrada: endereço da empresa pelo nome, e se o computador da loja está ligado; público, com CORS
+  const entrar = async (nome, e = envWeb) => {
+    const x = await worker.fetch(new Request("https://licencas.teste/v1/web/endereco?nome=" + encodeURIComponent(nome)), e);
+    assert.equal(x.headers.get("access-control-allow-origin"), "*");
+    return { estado: x.status, corpo: await x.json() };
+  };
+  r = await entrar(" Kianda ");
+  assert.equal(r.estado, 200, JSON.stringify(r.corpo));
+  assert.deepEqual([r.corpo.endereco, r.corpo.ligado], ["https://kianda.kangest.ao", true]);
+  estadoTunel = "down";
+  assert.equal((await entrar("kianda")).corpo.ligado, false);
+  estadoTunel = "healthy";
+  r = await entrar("nao-existe");
+  assert.equal(r.estado, 404); assert.match(r.corpo.erro, /nao-existe\.kangest\.ao/);
+  assert.equal((await entrar("a b")).estado, 400);
+  assert.equal((await entrar("kianda", env)).estado, 503);
 
   // activar outra vez (ex.: reinstalação) reaproveita o túnel e o DNS
   pedidosCf.length = 0;

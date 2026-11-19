@@ -21,5 +21,9 @@
     "portal": "https://portal-siga.com",
     "docs": "https://docs.portal-siga.com"
   },
-  "livraria": "https://livrariaadventista.ao"
+  "livraria": "https://livrariaadventista.ao",
+  "web": {
+    "licencas": "https://kangest-licencas.valentinocanguele.workers.dev",
+    "dominio": ""
+  }
 }
