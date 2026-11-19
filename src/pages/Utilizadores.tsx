@@ -9,6 +9,7 @@ import { GRUPOS_PERMISSOES, TODAS_PERMISSOES } from "@/lib/permissoes";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 import { InputData } from "@/components/InputData";
+import { useTabelas } from "@/lib/hooks";
 
 interface Utilizador {
   id: number;
@@ -20,6 +21,8 @@ interface Utilizador {
   permissoes: string[];
   permissoes_proprias: boolean;
   limite_desconto: number;
+  /** A loja (armazém) do utilizador num servidor central; null = todas. */
+  armazem_id: number | null;
   tem_pin: boolean;
   dois_passos: boolean;
   mudar_senha: boolean;
@@ -142,6 +145,7 @@ function ListaUtilizadores() {
   const perfis = useQuery({ queryKey: ["perfis"], queryFn: () => call<Perfil[]>("perfis.listar") });
   const politica = useQuery({ queryKey: ["seguranca"], queryFn: () => call<Politica>("seguranca.obter") });
   const [u, setU] = useState<Edicao | null>(null);
+  const tabelas = useTabelas();
   const [senhaNova, setSenhaNova] = useState<{ login: string; senha: string } | null>(null);
   const atualizar = () => qc.invalidateQueries({ queryKey: ["utilizadores"] });
 
@@ -157,6 +161,7 @@ function ListaUtilizadores() {
         senha: u.senha || undefined,
         pin: u.pin || undefined,
         limite_desconto: u.limite_desconto ?? 0,
+        armazem_id: u.armazem_id ?? null,
         permissoes: u.personalizar ? (u.permissoes ?? []) : null,
         mudar_senha: u.senha ? !!u.obrigarMudar : undefined,
       });
@@ -298,6 +303,15 @@ function ListaUtilizadores() {
             <Field label="Limite de desconto (%)" hint="0 = sem limite">
               <Input type="number" min={0} max={100} className="num text-right" value={u.limite_desconto ?? 0} onChange={(e) => setU({ ...u, limite_desconto: Number(e.target.value) })} />
             </Field>
+            {(tabelas.data?.armazens?.length ?? 0) > 1 && (
+              <Field label="Loja" hint="Com uma loja, só entra nos postos dela e só vê os documentos, os relatórios e o painel dela" className="col-span-2">
+                <Select value={u.armazem_id ?? ""} disabled={u.perfil === "ADMIN"}
+                  onChange={(e) => setU({ ...u, armazem_id: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">Todas as lojas</option>
+                  {tabelas.data?.armazens.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
+                </Select>
+              </Field>
+            )}
             <div className="col-span-2 flex flex-wrap items-end gap-x-6 gap-y-2 pb-2">
               {(!u.id || u.senha) && (
                 <label className="flex items-center gap-2">

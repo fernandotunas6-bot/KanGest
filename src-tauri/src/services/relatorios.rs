@@ -24,38 +24,40 @@ fn canal_valido(c: &Option<String>) -> AppResult<()> {
 pub async fn dashboard(st: &AppState) -> AppResult<Value> {
     st.sessao()?;
     let p = &st.pool;
+    // um utilizador de uma loja vê o painel dessa loja (o id vem da sessão: é um inteiro, não texto do pedido)
+    let loja = st.loja().map(|a| format!(" AND d.armazem_id = {a}")).unwrap_or_default();
     let hoje = db::hoje();
     let mes = format!("{}-01", &hoje[..7]);
     let (vendas_hoje, docs_hoje): (i64, i64) = sqlx::query_as(&format!(
-        "SELECT COALESCE(SUM({SINAL} * d.total), 0), COUNT(*) FROM documentos d WHERE {VENDAS} AND d.data_emissao = ?"
+        "SELECT COALESCE(SUM({SINAL} * d.total), 0), COUNT(*) FROM documentos d WHERE {VENDAS} AND d.data_emissao = ?{loja}"
     ))
     .bind(&hoje)
     .fetch_one(p)
     .await?;
     let (vendas_mes, docs_mes, iva_mes): (i64, i64, i64) = sqlx::query_as(&format!(
         "SELECT COALESCE(SUM({SINAL} * d.total), 0), COUNT(*), COALESCE(SUM({SINAL} * d.total_iva), 0)
-         FROM documentos d WHERE {VENDAS} AND d.data_emissao >= ?"
+         FROM documentos d WHERE {VENDAS} AND d.data_emissao >= ?{loja}"
     ))
     .bind(&mes)
     .fetch_one(p)
     .await?;
-    let (a_receber, a_pagar): (i64, i64) = sqlx::query_as(
+    let (a_receber, a_pagar): (i64, i64) = sqlx::query_as(&format!(
         "SELECT COALESCE(SUM(CASE WHEN t.grupo = 'VENDAS' THEN d.valor_pendente END), 0),
                 COALESCE(SUM(CASE WHEN t.grupo = 'COMPRAS' THEN d.valor_pendente END), 0)
-         FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo WHERE d.estado = 'N' AND d.valor_pendente > 0",
-    )
+         FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo WHERE d.estado = 'N' AND d.valor_pendente > 0{loja}",
+    ))
     .fetch_one(p)
     .await?;
     let stock_baixo: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM artigos a LEFT JOIN stock s ON s.artigo_id = a.id AND s.armazem_id = ?
          WHERE a.controla_stock = 1 AND a.ativo = 1 AND COALESCE(s.quantidade, 0) <= a.qtd_minima",
     )
-    .bind(st.posto().armazem_id)
+    .bind(st.loja().unwrap_or(st.posto().armazem_id))
     .fetch_one(p)
     .await?;
     let serie = sqlx::query(&format!(
         "SELECT d.data_emissao AS dia, SUM({SINAL} * d.total) AS total, COUNT(*) AS docs
-         FROM documentos d WHERE {VENDAS} AND d.data_emissao >= date(?, '-29 day')
+         FROM documentos d WHERE {VENDAS} AND d.data_emissao >= date(?, '-29 day'){loja}
          GROUP BY d.data_emissao ORDER BY d.data_emissao"
     ))
     .bind(&hoje)
@@ -64,23 +66,23 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
     let top = sqlx::query(&format!(
         "SELECT l.referencia, l.descricao, SUM({SINAL} * l.quantidade) AS quantidade, SUM({SINAL} * l.total) AS total
          FROM documento_linhas l JOIN documentos d ON d.id = l.documento_id
-         WHERE {VENDAS} AND d.data_emissao >= ? GROUP BY l.referencia, l.descricao ORDER BY total DESC LIMIT 8"
+         WHERE {VENDAS} AND d.data_emissao >= ?{loja} GROUP BY l.referencia, l.descricao ORDER BY total DESC LIMIT 8"
     ))
     .bind(&mes)
     .fetch_all(p)
     .await?;
-    let ultimos = sqlx::query(
+    let ultimos = sqlx::query(&format!(
         "SELECT d.id, d.numero_doc, d.entidade_nome, d.total, d.data_hora, d.estado FROM documentos d
-         JOIN tipos_documento t ON t.codigo = d.tipo_codigo WHERE t.classe IN ('VENDA','RECIBO')
-         ORDER BY d.data_hora DESC, d.id DESC LIMIT 8",
-    )
+         JOIN tipos_documento t ON t.codigo = d.tipo_codigo WHERE t.classe IN ('VENDA','RECIBO'){loja}
+         ORDER BY d.data_hora DESC, d.id DESC LIMIT 8"
+    ))
     .fetch_all(p)
     .await?;
 
     // Comparação com o período anterior: ontem e o mês passado até ao mesmo dia
     // (até ao último dia, quando o mês passado é mais curto: 31/03 compara com 01/02–28/02).
     let vendas_ontem: i64 = sqlx::query_scalar(&format!(
-        "SELECT COALESCE(SUM({SINAL} * d.total), 0) FROM documentos d WHERE {VENDAS} AND d.data_emissao = date(?, '-1 day')"
+        "SELECT COALESCE(SUM({SINAL} * d.total), 0) FROM documentos d WHERE {VENDAS} AND d.data_emissao = date(?, '-1 day'){loja}"
     ))
     .bind(&hoje)
     .fetch_one(p)
@@ -88,7 +90,7 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
     let vendas_mes_anterior: i64 = sqlx::query_scalar(&format!(
         "SELECT COALESCE(SUM({SINAL} * d.total), 0) FROM documentos d WHERE {VENDAS}
            AND d.data_emissao >= date(?1, 'start of month', '-1 month')
-           AND d.data_emissao <= min(date(?1, '-1 month'), date(?1, 'start of month', '-1 day'))"
+           AND d.data_emissao <= min(date(?1, '-1 month'), date(?1, 'start of month', '-1 day')){loja}"
     ))
     .bind(&hoje)
     .fetch_one(p)
@@ -96,7 +98,7 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
 
     // Antiguidade dos saldos de clientes (dias desde o vencimento), como o «Aged Receivable» do Odoo
     // e os mapas de antiguidade do Primavera. A soma das faixas é o «A receber».
-    let antiguidade = sqlx::query(
+    let antiguidade = sqlx::query(&format!(
         "SELECT COALESCE(SUM(CASE WHEN dias <= 0 THEN v END), 0) AS por_vencer,
                 COALESCE(SUM(CASE WHEN dias BETWEEN 1 AND 30 THEN v END), 0) AS d1_30,
                 COALESCE(SUM(CASE WHEN dias BETWEEN 31 AND 60 THEN v END), 0) AS d31_60,
@@ -106,15 +108,15 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
          FROM (SELECT d.valor_pendente AS v,
                       CAST(julianday(?) - julianday(COALESCE(d.data_vencimento, d.data_emissao)) AS INTEGER) AS dias
                FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo
-               WHERE d.estado = 'N' AND d.valor_pendente > 0 AND t.grupo = 'VENDAS')",
-    )
+               WHERE d.estado = 'N' AND d.valor_pendente > 0 AND t.grupo = 'VENDAS'{loja})"
+    ))
     .bind(&hoje)
     .fetch_one(p)
     .await?;
-    let (compras_vencidas, valor_compras_vencidas): (i64, i64) = sqlx::query_as(
+    let (compras_vencidas, valor_compras_vencidas): (i64, i64) = sqlx::query_as(&format!(
         "SELECT COUNT(*), COALESCE(SUM(d.valor_pendente), 0) FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo
-         WHERE d.estado = 'N' AND d.valor_pendente > 0 AND t.grupo = 'COMPRAS' AND COALESCE(d.data_vencimento, d.data_emissao) < ?",
-    )
+         WHERE d.estado = 'N' AND d.valor_pendente > 0 AND t.grupo = 'COMPRAS' AND COALESCE(d.data_vencimento, d.data_emissao) < ?{loja}"
+    ))
     .bind(&hoje)
     .fetch_one(p)
     .await?;
@@ -339,7 +341,8 @@ pub async fn vendas(st: &AppState, f: VendasIn) -> AppResult<Value> {
         .bind(&f.ate)
         .bind(f.entidade_id)
         .bind(f.posto_id)
-        .bind(f.armazem_id)
+        // um utilizador de uma loja só vê as vendas dela, peça o que pedir
+        .bind(st.loja().or(f.armazem_id))
         .bind(&f.canal)
         .fetch_all(&st.pool)
         .await?;
@@ -380,7 +383,7 @@ pub async fn sintese(st: &AppState, s: SinteseIn) -> AppResult<Value> {
     .bind(format!("{}-01-01", s.ano - 1))
     .bind(format!("{}-01-01", s.ano + 1))
     .bind(s.posto_id)
-    .bind(s.armazem_id)
+    .bind(st.loja().or(s.armazem_id))
     .bind(&s.canal)
     .fetch_all(&st.pool)
     .await?;
@@ -422,7 +425,7 @@ pub struct StockIn {
 /// Relatórios de stock do GC: ruptura, abaixo do mínimo, excesso, validade e artigos parados.
 pub async fn stock(st: &AppState, f: StockIn) -> AppResult<Value> {
     st.exigir_perm("relatorios.ver")?;
-    let armazem = f.armazem_id.unwrap_or(st.posto().armazem_id);
+    let armazem = st.loja().or(f.armazem_id).unwrap_or(st.posto().armazem_id);
     let dias = f.dias.unwrap_or(30);
 
     // Validade olha para os lotes, não para o saldo do artigo.

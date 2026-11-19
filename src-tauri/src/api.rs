@@ -831,6 +831,8 @@ async fn autenticar(st: &AppState, token: &str, ip: IpAddr) -> Result<Chave, Rec
         mudar_senha: false,
         bloqueada: false,
         perfil_descricao: None,
+        // as chaves da API agem pelo posto delas (a loja da chave), não pela loja do utilizador
+        armazem_id: None,
     };
     Ok(Chave { id, nome: row.get("nome"), prefixo: row.get("prefixo"), permissoes, limite_minuto: row.get("limite_minuto"), sessao, posto })
 }
