@@ -81,6 +81,8 @@ export interface Artigo {
   descricao_curta: string | null;
   /** dados do ramo (ISBN/autor, tamanho/cor, marca/modelo…): texto JSON vindo da base, ou objecto ao gravar */
   atributos?: string | Record<string, string | number | boolean> | null;
+  /** quando a fotografia foi alterada (vazio = sem foto); serve de versão para a cache das miniaturas */
+  foto?: string | null;
   tipo: "P" | "S";
   familia_id: number | null;
   subfamilia_id: number | null;
@@ -342,7 +344,8 @@ export interface DocCompleto {
   custos?: { id: number; tipo: string; descricao: string | null; valor: number }[];
   retencoes: { codigo: string; descricao: string; percentagem: number; base: number; valor: number }[];
   linhas: DocLinha[];
-  pagamentos: { modo_codigo: string; descricao: string; valor: number }[];
+  /** moeda/valor_moeda/cambio: numerário recebido noutra moeda (o valor está em Kz, líquido do troco) */
+  pagamentos: { modo_codigo: string; descricao: string; valor: number; moeda?: string | null; valor_moeda?: number | null; cambio?: number | null }[];
   liquidacoes: { id: number; numero_doc: string; data_emissao: string; total: number; valor: number }[];
   /** recibos que liquidaram este documento (servidores anteriores à 1.2 não os enviam) */
   recibos?: { id: number; numero_doc: string; tipo_codigo: string; tipo_desc: string; data_emissao: string; valor: number; estado: string }[];
@@ -397,6 +400,8 @@ export interface CaixaResumo {
   movimentos: { id: number; data_hora: string; tipo: string; valor: number; descricao: string; rubrica: string | null; modo_codigo: string | null }[];
   artigos: { referencia: string; descricao: string; quantidade: number; total: number }[];
   numerario_esperado: number | null;
+  /** numerário recebido noutras moedas (fica na gaveta nessas moedas): valor em cêntimos da moeda, kz = equivalente */
+  moedas_estrangeiras?: { moeda: string; valor: number; kz: number }[];
   /** Fecho cego: quem conta não vê o esperado até fechar. */
   cego?: boolean;
   /** Depois do fecho: esperado × contado de cada forma de pagamento. */

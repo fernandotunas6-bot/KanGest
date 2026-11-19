@@ -241,6 +241,10 @@
           "ativo": {
             "type": "boolean"
           },
+          "tem_foto": {
+            "type": "boolean",
+            "description": "Tem fotografia (GET /artigos/{id}/foto)."
+          },
           "atributos": {
             "type": "object",
             "additionalProperties": {
@@ -1820,6 +1824,71 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Artigo"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NaoEncontrado"
+          },
+          "401": {
+            "$ref": "#/components/responses/NaoAutenticado"
+          },
+          "403": {
+            "$ref": "#/components/responses/SemPermissao"
+          },
+          "429": {
+            "$ref": "#/components/responses/LimitePedidos"
+          }
+        }
+      }
+    },
+    "/artigos/{id}/foto": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Fotografia do artigo",
+        "tags": [
+          "Artigos"
+        ],
+        "x-permissao": "api.artigos",
+        "description": "A imagem em si (WebP, JPEG ou PNG), para a loja online. `tem_foto` no artigo diz se existe.\n\n**Permissão da chave:** `api.artigos`",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "chave": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Imagem",
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }

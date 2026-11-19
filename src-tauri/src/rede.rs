@@ -315,10 +315,13 @@ pub fn iniciar_servidor(estado: Arc<AppState>, cfg: &Config) -> AppResult<u16> {
                 ATENDER.fetch_add(1, Ordering::Relaxed);
                 let st = estado.clone();
                 let k = chave.clone();
-                std::thread::spawn(move || {
+                let lancado = std::thread::Builder::new().name("kangest-rede-pedido".into()).stack_size(crate::PILHA_PEDIDOS).spawn(move || {
                     atender(&st, &k, fluxo);
                     ATENDER.fetch_sub(1, Ordering::Relaxed);
                 });
+                if lancado.is_err() {
+                    ATENDER.fetch_sub(1, Ordering::Relaxed);
+                }
             }
         })
         .map_err(|e| AppError::msg(format!("Não foi possível iniciar o servidor de rede: {e}")))?;

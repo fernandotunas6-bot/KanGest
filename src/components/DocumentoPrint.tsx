@@ -249,8 +249,8 @@ export function Ticket({ d, via = "Original" }: { d: DocCompleto; via?: string }
       {d.pagamentos.length > 0 && (
         <>
           {cabecalho("Modo de Pagamento")}
-          {d.pagamentos.map((p) => (
-            <Row key={p.modo_codigo} k={p.descricao} v={kzNum(p.valor + (p.modo_codigo === "NU" ? doc.troco : 0))} />
+          {pagamentosEntregues(d).map((p) => (
+            <Row key={p.chave} k={p.descricao} v={kzNum(p.valor)} />
           ))}
         </>
       )}
@@ -299,6 +299,24 @@ export function Ticket({ d, via = "Original" }: { d: DocCompleto; via?: string }
       {e.rodape && <div className="mt-1 text-center text-[10px]">{e.rodape}</div>}
       <div className="mt-1.5 text-center">* OBRIGADO VOLTE SEMPRE *</div>
     </div>
+  );
+}
+
+/**
+ * Linhas «modo de pagamento» do talão com o que o cliente entregou: o numerário em kwanzas soma o troco; o recebido
+ * noutra moeda aparece com o valor na moeda e o câmbio.
+ */
+function pagamentosEntregues(d: DocCompleto): { chave: string; descricao: string; valor: number }[] {
+  const doc = d.documento;
+  const bruto = (p: DocCompleto["pagamentos"][number]) => Math.round((p.valor_moeda ?? 0) * (p.cambio ?? 0));
+  const estrangeiros = d.pagamentos.filter((p) => p.moeda);
+  if (!estrangeiros.length) return d.pagamentos.map((p) => ({ chave: p.modo_codigo, descricao: p.descricao, valor: p.valor + (p.modo_codigo === "NU" ? doc.troco : 0) }));
+  const outros = d.pagamentos.filter((p) => !p.moeda && p.modo_codigo !== "NU").reduce((s, p) => s + p.valor, 0);
+  const kzNotas = Math.max(0, doc.valor_entregue - outros - estrangeiros.reduce((s, p) => s + bruto(p), 0));
+  return d.pagamentos.map((p, i) =>
+    p.moeda
+      ? { chave: `${p.moeda}-${i}`, descricao: `Numerário ${p.moeda} ${kzNum(p.valor_moeda ?? 0)} × ${(p.cambio ?? 0).toLocaleString("pt-PT", { minimumFractionDigits: 2 })}`, valor: bruto(p) }
+      : { chave: `${p.modo_codigo}-${i}`, descricao: p.descricao, valor: p.modo_codigo === "NU" ? kzNotas : p.valor },
   );
 }
 
@@ -570,9 +588,12 @@ export function A4({ d, via = "Original" }: { d: DocCompleto; via?: string }) {
             )}
             {d.pagamentos.length > 0 && (
               <Seccao titulo="Método de pagamento">
-                {d.pagamentos.map((p) => (
-                  <div key={p.modo_codigo} className="flex justify-between text-[9px]">
-                    <span>{p.descricao}</span>
+                {d.pagamentos.map((p, i) => (
+                  <div key={`${p.modo_codigo}-${i}`} className="flex justify-between text-[9px]">
+                    <span>
+                      {p.descricao}
+                      {p.moeda ? ` (${p.moeda} ${kzNum(p.valor_moeda ?? 0)} ao câmbio ${(p.cambio ?? 0).toLocaleString("pt-PT", { minimumFractionDigits: 2 })})` : ""}
+                    </span>
                     <span>{kzNum(p.valor)}</span>
                   </div>
                 ))}
