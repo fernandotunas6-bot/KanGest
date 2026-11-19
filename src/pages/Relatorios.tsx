@@ -8,6 +8,7 @@ import { data, hojeISO, inicioMesISO, kz, numero, qtd } from "@/lib/format";
 import { useSession } from "@/store/session";
 import type { Entidade } from "@/lib/types";
 import { EntidadePicker } from "@/components/Pickers";
+import { useTabelas } from "@/lib/hooks";
 import { Badge, Button, Card, Input, MenuItem, PageHeader, Popover, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 import { InventarioSaft } from "@/components/InventarioSaft";
 import { dataXL, exportarExcel, kzXL, type CelulaXL } from "@/lib/csv";
@@ -26,6 +27,8 @@ const VISTAS = [
   { id: "vendedor", label: "Por vendedor" },
   { id: "pagamento", label: "Por forma de pagamento" },
   { id: "posto", label: "Por posto" },
+  { id: "armazem", label: "Por loja (armazém)" },
+  { id: "mes_armazem", label: "Lojas por mês" },
   { id: "artigo_operador", label: "Artigos por operador" },
   { id: "artigo_entidade", label: "Artigos por entidade" },
   { id: "documento", label: "Detalhe de documentos" },
@@ -37,10 +40,10 @@ const VISTAS = [
 
 type Vista = (typeof VISTAS)[number]["id"];
 
-/** Os 17 mapas arrumados por assunto (como os grupos de mapas do Primavera e o menu de relatórios do Odoo). */
+/** Os 19 mapas arrumados por assunto (como os grupos de mapas do Primavera e o menu de relatórios do Odoo). */
 const CATEGORIAS: { id: string; label: string; vistas: Vista[] }[] = [
   { id: "vendas", label: "Vendas", vistas: ["sintese", "dia", "mes", "artigo", "familia", "cliente"] },
-  { id: "equipa", label: "Operadores e postos", vistas: ["operador", "vendedor", "posto", "artigo_operador"] },
+  { id: "equipa", label: "Operadores, postos e lojas", vistas: ["operador", "vendedor", "posto", "armazem", "mes_armazem", "artigo_operador"] },
   { id: "documentos", label: "Pagamentos e documentos", vistas: ["pagamento", "artigo_entidade", "documento"] },
   { id: "impostos", label: "Impostos", vistas: ["iva", "iva_dia", "iva_familia", "irt_c"] },
 ];
@@ -156,22 +159,27 @@ export default function Relatorios() {
   function escolher(v: Vista) {
     setVista(v);
     // «Por mês» com um período de um só mês mostraria uma linha: passa a ser o ano até hoje
-    if (v === "mes" && de.slice(0, 7) === ate.slice(0, 7)) setDe(`${ate.slice(0, 4)}-01-01`);
+    if ((v === "mes" || v === "mes_armazem") && de.slice(0, 7) === ate.slice(0, 7)) setDe(`${ate.slice(0, 4)}-01-01`);
   }
   const sessao = useSession((s) => s.sessao);
   const saftParam = sp.get("saft");
   const [entidade, setEntidade] = useState<Entidade | null>(null);
+  // Uma loja (armazém) e um canal: «balcao» = programa e POS; «api» = loja online e outras integrações
+  const armazens = useTabelas().data?.armazens ?? [];
+  const [armazemId, setArmazemId] = useState(0);
+  const [canal, setCanal] = useState<"" | "api" | "balcao">("");
+  const filtros = { armazem_id: armazemId || null, canal: canal || null };
   const sintese = vista === "sintese";
   const [ano, setAno] = useState(new Date().getFullYear());
   const { data: linhas = [], isFetching } = useQuery({
-    queryKey: ["relatorio", vista, de, ate, entidade?.id ?? 0],
-    queryFn: () => call<Linha[]>("relatorios.vendas", { de, ate, agrupar: vista, entidade_id: entidade?.id ?? null }),
+    queryKey: ["relatorio", vista, de, ate, entidade?.id ?? 0, armazemId, canal],
+    queryFn: () => call<Linha[]>("relatorios.vendas", { de, ate, agrupar: vista, entidade_id: entidade?.id ?? null, ...filtros }),
     placeholderData: (p) => p,
     enabled: !sintese,
   });
   const qSintese = useQuery({
-    queryKey: ["relatorio-sintese", ano],
-    queryFn: () => call<Sintese>("relatorios.sintese", { ano }),
+    queryKey: ["relatorio-sintese", ano, armazemId, canal],
+    queryFn: () => call<Sintese>("relatorios.sintese", { ano, ...filtros }),
     placeholderData: (p) => p,
     enabled: sintese,
   });
@@ -231,6 +239,9 @@ export default function Relatorios() {
     }
   }
 
+  const descricaoFiltros =
+    (armazemId ? ` — ${armazens.find((a) => a.id === armazemId)?.nome ?? "loja"}` : "") +
+    (canal === "api" ? " — loja online e API" : canal === "balcao" ? " — balcão" : "");
   const primeiraColuna = vista === "dia" ? "Dia" : vista === "mes" ? "Mês" : titulo.replace("Por ", "").replace(/^\w/, (c) => c.toUpperCase());
 
   /** O mapa à vista, com as mesmas colunas, num livro Excel (números e datas como tal). */
@@ -248,7 +259,7 @@ export default function Relatorios() {
     exportarExcel(
       `Relatorio-${vista}-${de}-a-${ate}.xlsx`,
       [colunas.map((c) => c.t), ...(ordenados ?? []).map((l) => colunas.map((c) => c.v(l))), colunas.map((c) => c.total ?? "")],
-      { titulo: `${titulo} — ${data(de)} a ${data(ate)}${entidade ? ` — ${entidade.nome}` : ""}`, folha: titulo },
+      { titulo: `${titulo} — ${data(de)} a ${data(ate)}${entidade ? ` — ${entidade.nome}` : ""}${descricaoFiltros}`, folha: titulo },
     );
   }
 
@@ -430,6 +441,21 @@ export default function Relatorios() {
             )}
           </>
         )}
+        {armazens.length > 1 && (
+          <Select className="w-52" value={String(armazemId)} onChange={(e) => setArmazemId(Number(e.target.value))} aria-label="Loja (armazém)">
+            <option value="0">Todas as lojas</option>
+            {armazens.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.nome}
+              </option>
+            ))}
+          </Select>
+        )}
+        <Select className="w-52" value={canal} onChange={(e) => setCanal(e.target.value as "" | "api" | "balcao")} aria-label="Canal de venda">
+          <option value="">Todos os canais</option>
+          <option value="balcao">Balcão (programa e POS)</option>
+          <option value="api">Loja online e API</option>
+        </Select>
       </div>
       {vista === "irt_c" && <TaxaGrupoC />}
       {sintese ? (

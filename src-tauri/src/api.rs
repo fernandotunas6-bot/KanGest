@@ -138,12 +138,14 @@ struct Servidor {
 
 static SERVIDOR: Mutex<Option<Servidor>> = Mutex::new(None);
 static ERRO: Mutex<Option<String>> = Mutex::new(None);
-static APP: OnceLock<Arc<AppState>> = OnceLock::new();
+/// Estado da aplicação para as threads da API. Substituível (e não um `OnceLock`) para os testes poderem ligar a API,
+/// um de cada vez, cada um com a sua base de dados.
+static APP: Mutex<Option<Arc<AppState>>> = Mutex::new(None);
 static ATENDER: AtomicUsize = AtomicUsize::new(0);
 
 /// Guarda o estado da aplicação para o ecrã de configuração poder abrir o servidor.
 pub fn registar_estado(a: Arc<AppState>) {
-    let _ = APP.set(a);
+    *APP.lock().unwrap_or_else(|e| e.into_inner()) = Some(a);
 }
 
 /// Arranque da aplicação: abre a API se estiver ligada. Não se chama nos postos clientes (a base é a do servidor).
@@ -974,6 +976,8 @@ pub(crate) const ROTAS: &[(&str, &str)] = &[
     ("GET", "/documentos/{id}"),
     ("POST", "/documentos/{id}/anular"),
     ("GET", "/relatorios/vendas"),
+    ("GET", "/relatorios/sintese"),
+    ("GET", "/relatorios/stock"),
     ("GET", "/saft"),
 ];
 
@@ -1166,6 +1170,14 @@ async fn rotear(st: &AppState, c: &Chave, p: &Pedido, segs: &[&str]) -> Res {
             c.exigir("relatorios.ver")?;
             vendas(st, c, p).await
         }
+        ("GET", ["relatorios", "sintese"]) => {
+            c.exigir("relatorios.ver")?;
+            sintese(st, c, p).await
+        }
+        ("GET", ["relatorios", "stock"]) => {
+            c.exigir("relatorios.ver")?;
+            relatorio_stock(st, c, p).await
+        }
         ("GET", ["saft"]) => {
             c.exigir("sistema.saft")?;
             saft(st, c, p).await
@@ -1332,6 +1344,7 @@ async fn tabelas(st: &AppState) -> Res {
             "taxas_iva": db::query_json(p, "SELECT id, codigo, descricao, percentagem FROM taxas_iva WHERE ativo = 1 ORDER BY percentagem DESC").await?,
             "motivos_isencao": db::query_json(p, "SELECT codigo, descricao FROM motivos_isencao ORDER BY codigo").await?,
             "armazens": db::query_json(p, "SELECT id, nome FROM armazens WHERE ativo = 1 ORDER BY id").await?,
+            "postos": db::query_json(p, "SELECT id, descricao, armazem_id, serie_prefixo FROM postos ORDER BY id").await?,
             "modos_pagamento": db::query_json(p, "SELECT codigo, descricao FROM modos_pagamento WHERE ativo = 1 ORDER BY ordem").await?,
             "tipos_documento": db::query_json(p, "SELECT codigo, descricao, classe, grupo FROM tipos_documento WHERE ativo = 1 ORDER BY ordem").await?,
             "prazos_pagamento": db::query_json(p, "SELECT codigo, descricao, dias FROM prazos_pagamento ORDER BY dias").await?,
@@ -1736,6 +1749,7 @@ async fn documentos(st: &AppState, c: &Chave, p: &Pedido) -> Res {
            AND (?4 IS NULL OR d.data_emissao >= ?4) AND (?5 IS NULL OR d.data_emissao <= ?5)
            AND (?6 IS NULL OR d.entidade_id = ?6) AND (?7 IS NULL OR d.estado = ?7)
            AND (?8 IS NULL OR d.api_chave_id = ?8)
+           AND (?10 IS NULL OR d.referencia = ?10) AND (?11 IS NULL OR d.posto_id = ?11) AND (?12 IS NULL OR d.armazem_id = ?12)
          ORDER BY d.id LIMIT ?9",
     )
     .bind(q_i64(p, "desde_id")?.unwrap_or(0))
@@ -1747,6 +1761,9 @@ async fn documentos(st: &AppState, c: &Chave, p: &Pedido) -> Res {
     .bind(q(p, "estado").map(str::to_uppercase))
     .bind(q_bool(p, "desta_chave").unwrap_or(false).then_some(c.id))
     .bind(limite + 1)
+    .bind(q(p, "referencia"))
+    .bind(q_i64(p, "posto_id")?)
+    .bind(q_i64(p, "armazem_id")?)
     .fetch_all(&st.pool)
     .await?;
     let mut linhas: Vec<Value> = rows.iter().map(db::row_json).collect();
@@ -1944,6 +1961,20 @@ async fn resolver_cliente(st: &AppState, c: &Chave, corpo: &mut Map<String, Valu
 /// Com documento de origem (nota de crédito, conversão de proforma ou encomenda) o programa não volta a pedir
 /// autorização de preço e desconto, porque o ecrã copia as linhas da origem. Pela API as linhas vêm de fora: sem as
 /// permissões de preço e desconto, cada artigo tem de estar na origem e o preço e o desconto são os da origem.
+/// Sem `armazem_id`, um documento com origem (FR de uma NE, NC de uma venda) fica no armazém da origem: a encomenda
+/// reservada na loja do levantamento sai do stock dessa loja, e a devolução volta para a loja onde se vendeu.
+async fn armazem_da_origem(st: &AppState, corpo: &mut Map<String, Value>) -> Result<(), Resposta> {
+    if corpo.get("armazem_id").is_some_and(|v| !v.is_null()) {
+        return Ok(());
+    }
+    let Some(oid) = corpo.get("doc_origem_id").and_then(Value::as_i64) else { return Ok(()) };
+    let arm: Option<i64> = sqlx::query_scalar("SELECT armazem_id FROM documentos WHERE id = ?").bind(oid).fetch_optional(&st.pool).await?.flatten();
+    if let Some(a) = arm {
+        corpo.insert("armazem_id".into(), json!(a));
+    }
+    Ok(())
+}
+
 async fn precos_da_origem(st: &AppState, c: &Chave, corpo: &mut Map<String, Value>) -> Result<(), Resposta> {
     let Some(oid) = corpo.get("doc_origem_id").and_then(Value::as_i64) else { return Ok(()) };
     let (pode_preco, pode_desconto) = (c.tem("pos.alterar_preco"), c.tem("pos.desconto"));
@@ -2041,6 +2072,7 @@ async fn emitir(st: &AppState, c: &Chave, p: &Pedido) -> Res {
     // as embalagens e a balança mudam as quantidades: volta a confirmar os limites
     validar_valores(&corpo)?;
     precos_da_origem(st, c, &mut corpo).await?;
+    armazem_da_origem(st, &mut corpo).await?;
     let v = match executar(st, c, "documentos.emitir", Value::Object(corpo)).await {
         Ok(v) => v,
         // no programa pede-se o PIN de um supervisor; pela API só conta a permissão da chave
@@ -2076,6 +2108,9 @@ const AGRUPAMENTOS: &[&str] = &[
     "pagamento",
     "vendedor",
     "posto",
+    "armazem",
+    "mes_posto",
+    "mes_armazem",
     "documento",
     "iva",
     "iva_dia",
@@ -2091,15 +2126,60 @@ async fn vendas(st: &AppState, c: &Chave, p: &Pedido) -> Res {
     if !AGRUPAMENTOS.contains(&agrupar) {
         return Err(Resposta::erro(400, "pedido_invalido", format!("agrupar tem de ser um de: {}.", AGRUPAMENTOS.join(", "))));
     }
-    let mut v = executar(
-        st,
-        c,
-        "relatorios.vendas",
-        json!({ "de": &de[..10], "ate": &ate[..10], "agrupar": agrupar, "entidade_id": q_i64(p, "entidade_id")? }),
-    )
-    .await?;
+    let filtros = filtros_vendas(p)?;
+    let mut params = json!({ "de": &de[..10], "ate": &ate[..10], "agrupar": agrupar, "entidade_id": q_i64(p, "entidade_id")? });
+    params.as_object_mut().expect("objecto").extend(filtros.clone());
+    let mut v = executar(st, c, "relatorios.vendas", params).await?;
+    // `limite`: só as primeiras linhas (ex.: os 10 mais vendidos com agrupar=artigo, que vem por total decrescente)
+    if let (Some(n), Value::Array(a)) = (q_i64(p, "limite")?, &mut v) {
+        a.truncate(n.clamp(1, 1000) as usize);
+    }
     custos(&mut v, c);
-    Ok(Resposta::json(200, &json!({ "de": &de[..10], "ate": &ate[..10], "agrupar": agrupar, "dados": v })))
+    let mut r = json!({ "de": &de[..10], "ate": &ate[..10], "agrupar": agrupar, "dados": v });
+    r.as_object_mut().expect("objecto").extend(filtros);
+    Ok(Resposta::json(200, &r))
+}
+
+/// Filtros comuns dos relatórios de vendas: `posto_id`, `armazem_id` (a loja, num servidor central) e `canal`
+/// (`api` = loja online e outras integrações; `balcao` = programa e POS). Só os que vêm no pedido.
+fn filtros_vendas(p: &Pedido) -> Result<Map<String, Value>, Resposta> {
+    let mut m = Map::new();
+    for k in ["posto_id", "armazem_id"] {
+        if let Some(v) = q_i64(p, k)? {
+            m.insert(k.into(), json!(v));
+        }
+    }
+    if let Some(cn) = q(p, "canal") {
+        if !matches!(cn, "api" | "balcao") {
+            return Err(Resposta::erro(400, "pedido_invalido", "canal tem de ser «api» ou «balcao»."));
+        }
+        m.insert("canal".into(), json!(cn));
+    }
+    Ok(m)
+}
+
+/// Vendas de cada mês de um ano ao lado do ano anterior (o «Relatório Síntese»), com os mesmos filtros.
+async fn sintese(st: &AppState, c: &Chave, p: &Pedido) -> Res {
+    let ano = q_i64(p, "ano")?.unwrap_or_else(|| db::hoje()[..4].parse().unwrap_or(2026));
+    let mut params = json!({ "ano": ano });
+    params.as_object_mut().expect("objecto").extend(filtros_vendas(p)?);
+    let v = executar(st, c, "relatorios.sintese", params).await?;
+    Ok(Resposta::json(200, &v))
+}
+
+const SITUACOES_STOCK: &[&str] = &["existencias", "ruptura", "minimo", "excesso", "parado", "validade", "precos", "previsao"];
+
+/// Relatórios de stock de um armazém: existências, ruptura, abaixo do mínimo, excesso, parado, validade, preços e
+/// previsão de venda. Os valores ao custo só saem com `api.custos`.
+async fn relatorio_stock(st: &AppState, c: &Chave, p: &Pedido) -> Res {
+    let situacao = q(p, "situacao").unwrap_or("existencias");
+    if !SITUACOES_STOCK.contains(&situacao) {
+        return Err(Resposta::erro(400, "pedido_invalido", format!("situacao tem de ser uma de: {}.", SITUACOES_STOCK.join(", "))));
+    }
+    let armazem = armazem_de(p, c)?;
+    let mut v = executar(st, c, "relatorios.stock", json!({ "situacao": situacao, "armazem_id": armazem, "dias": q_i64(p, "dias")? })).await?;
+    custos(&mut v, c);
+    Ok(Resposta::json(200, &json!({ "situacao": situacao, "armazem_id": armazem, "dados": v })))
 }
 
 async fn saft(st: &AppState, c: &Chave, p: &Pedido) -> Res {
@@ -2233,7 +2313,7 @@ pub async fn guardar(st: &AppState, g: GuardarIn) -> AppResult<Value> {
     }
     if g.ativo {
         services::licenca::api_incluida(&services::licenca::calcular(st).await?).map_err(AppError::msg)?;
-        let app = APP.get().cloned().ok_or_else(|| AppError::msg("Feche e reabra o KanGest para ligar a API."))?;
+        let app = APP.lock().unwrap_or_else(|e| e.into_inner()).clone().ok_or_else(|| AppError::msg("Feche e reabra o KanGest para ligar a API."))?;
         if let Err(e) = iniciar(app, porta, rede) {
             *ERRO.lock().unwrap() = Some(e.to_string());
             return Err(e);

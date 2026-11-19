@@ -8,8 +8,18 @@ use crate::state::AppState;
 // Vendas líquidas: facturas (FR/FT/ND) somam, notas de crédito subtraem.
 const SINAL: &str = "CASE WHEN d.tipo_codigo = 'NC' THEN -1 ELSE 1 END";
 const VENDAS: &str = "d.tipo_codigo IN ('FR','FT','ND','NC') AND d.estado <> 'A'";
-// ?3 opcional: limita o relatório a uma entidade (cliente)
-const ENT: &str = "AND (?3 IS NULL OR d.entidade_id = ?3)";
+// Filtros opcionais do relatório de vendas: ?3 entidade (cliente), ?4 posto, ?5 armazém (a loja, num servidor
+// central) e ?6 canal ('api' = documentos emitidos por uma chave da API, como a loja online; 'balcao' = os outros).
+const ENT: &str = "AND (?3 IS NULL OR d.entidade_id = ?3) AND (?4 IS NULL OR d.posto_id = ?4) AND (?5 IS NULL OR d.armazem_id = ?5)
+     AND (?6 IS NULL OR (?6 = 'api') = (d.api_chave_id IS NOT NULL))";
+
+/// Canal de venda: `api` (loja online e outras integrações) ou `balcao` (programa e POS).
+fn canal_valido(c: &Option<String>) -> AppResult<()> {
+    match c.as_deref() {
+        None | Some("api") | Some("balcao") => Ok(()),
+        Some(_) => Err(AppError::msg("Canal inválido: use «api» ou «balcao».")),
+    }
+}
 
 pub async fn dashboard(st: &AppState) -> AppResult<Value> {
     st.sessao()?;
@@ -167,14 +177,23 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
 pub struct VendasIn {
     de: String,
     ate: String,
-    /// dia | artigo | familia | operador | vendedor | posto | pagamento | cliente | artigo_operador | artigo_entidade | documento | iva
+    /// dia | mes | artigo | familia | operador | vendedor | posto | armazem | mes_posto | mes_armazem | pagamento | cliente |
+    /// artigo_operador | artigo_entidade | documento | iva | iva_dia | iva_familia | irt_c
     agrupar: String,
     #[serde(default)]
     entidade_id: Option<i64>,
+    #[serde(default)]
+    posto_id: Option<i64>,
+    #[serde(default)]
+    armazem_id: Option<i64>,
+    /// api | balcao
+    #[serde(default)]
+    canal: Option<String>,
 }
 
 pub async fn vendas(st: &AppState, f: VendasIn) -> AppResult<Value> {
     st.exigir_perm("relatorios.ver")?;
+    canal_valido(&f.canal)?;
     let taxa_c = taxa_grupo_c(&st.pool).await?;
     let sql = match f.agrupar.as_str() {
         // IRT Grupo C: imposto sobre o volume de vendas (sem IVA) de cada mês, à taxa configurada
@@ -196,7 +215,8 @@ pub async fn vendas(st: &AppState, f: VendasIn) -> AppResult<Value> {
              FROM documentos d WHERE {VENDAS} AND d.data_emissao BETWEEN ?1 AND ?2 {ENT} GROUP BY 1 ORDER BY 1"
         ),
         "artigo" => format!(
-            "SELECT l.referencia || ' — ' || l.descricao AS chave, SUM({SINAL}*l.quantidade) AS quantidade,
+            "SELECT l.referencia || ' — ' || l.descricao AS chave, MAX(l.artigo_id) AS artigo_id, l.referencia,
+                    SUM({SINAL}*l.quantidade) AS quantidade,
                     SUM({SINAL}*l.valor_liquido) AS liquido, SUM({SINAL}*l.valor_iva) AS iva, SUM({SINAL}*l.total) AS total,
                     SUM({SINAL}*(l.valor_liquido - CAST(ROUND(l.custo * l.quantidade) AS INTEGER))) AS lucro
              FROM documento_linhas l JOIN documentos d ON d.id = l.documento_id
@@ -239,6 +259,30 @@ pub async fn vendas(st: &AppState, f: VendasIn) -> AppResult<Value> {
                     SUM({SINAL}*d.total_iva) AS iva, SUM({SINAL}*d.total) AS total
              FROM documentos d LEFT JOIN postos ps ON ps.id = d.posto_id
              WHERE {VENDAS} AND d.data_emissao BETWEEN ?1 AND ?2 {ENT} GROUP BY 1 ORDER BY total DESC"
+        ),
+        // vendas por armazém (num servidor central, cada loja tem o seu armazém)
+        "armazem" => format!(
+            "SELECT COALESCE(ar.nome, 'Sem armazém') AS chave, d.armazem_id, COUNT(*) AS docs, SUM({SINAL}*d.total_liquido) AS liquido,
+                    SUM({SINAL}*d.total_iva) AS iva, SUM({SINAL}*d.total) AS total
+             FROM documentos d LEFT JOIN armazens ar ON ar.id = d.armazem_id
+             WHERE {VENDAS} AND d.data_emissao BETWEEN ?1 AND ?2 {ENT} GROUP BY d.armazem_id ORDER BY total DESC"
+        ),
+        // cada mês de cada posto / de cada armazém (para os relatórios por loja e por mês)
+        "mes_posto" => format!(
+            "SELECT substr(d.data_emissao, 1, 7) || ' · ' || COALESCE(ps.descricao, 'Sem posto') AS chave,
+                    substr(d.data_emissao, 1, 7) AS mes, d.posto_id, ps.descricao AS posto,
+                    COUNT(*) AS docs, SUM({SINAL}*d.total_liquido) AS liquido, SUM({SINAL}*d.total_iva) AS iva, SUM({SINAL}*d.total) AS total
+             FROM documentos d LEFT JOIN postos ps ON ps.id = d.posto_id
+             WHERE {VENDAS} AND d.data_emissao BETWEEN ?1 AND ?2 {ENT}
+             GROUP BY substr(d.data_emissao, 1, 7), d.posto_id ORDER BY 2, ps.descricao"
+        ),
+        "mes_armazem" => format!(
+            "SELECT substr(d.data_emissao, 1, 7) || ' · ' || COALESCE(ar.nome, 'Sem armazém') AS chave,
+                    substr(d.data_emissao, 1, 7) AS mes, d.armazem_id, ar.nome AS armazem,
+                    COUNT(*) AS docs, SUM({SINAL}*d.total_liquido) AS liquido, SUM({SINAL}*d.total_iva) AS iva, SUM({SINAL}*d.total) AS total
+             FROM documentos d LEFT JOIN armazens ar ON ar.id = d.armazem_id
+             WHERE {VENDAS} AND d.data_emissao BETWEEN ?1 AND ?2 {ENT}
+             GROUP BY substr(d.data_emissao, 1, 7), d.armazem_id ORDER BY 2, ar.nome"
         ),
         // artigos por operador: o que cada vendedor vendeu
         "artigo_operador" => format!(
@@ -290,7 +334,15 @@ pub async fn vendas(st: &AppState, f: VendasIn) -> AppResult<Value> {
         ),
         _ => return Err(AppError::msg("Agrupamento inválido.")),
     };
-    let rows = sqlx::query(&sql).bind(&f.de).bind(&f.ate).bind(f.entidade_id).fetch_all(&st.pool).await?;
+    let rows = sqlx::query(&sql)
+        .bind(&f.de)
+        .bind(&f.ate)
+        .bind(f.entidade_id)
+        .bind(f.posto_id)
+        .bind(f.armazem_id)
+        .bind(&f.canal)
+        .fetch_all(&st.pool)
+        .await?;
     Ok(db::rows_json(&rows))
 }
 
@@ -299,6 +351,13 @@ pub async fn vendas(st: &AppState, f: VendasIn) -> AppResult<Value> {
 #[derive(Deserialize)]
 pub struct SinteseIn {
     ano: i32,
+    /// Só um posto / um armazém (uma loja) / um canal (api | balcao), como no relatório de vendas.
+    #[serde(default)]
+    posto_id: Option<i64>,
+    #[serde(default)]
+    armazem_id: Option<i64>,
+    #[serde(default)]
+    canal: Option<String>,
 }
 
 /// Relatório síntese: vendas de cada mês de um ano ao lado do ano anterior (como o «Relatório Síntese»
@@ -308,14 +367,21 @@ pub async fn sintese(st: &AppState, s: SinteseIn) -> AppResult<Value> {
     if !(1990..=2100).contains(&s.ano) {
         return Err(AppError::msg("Ano inválido."));
     }
+    canal_valido(&s.canal)?;
     let rows: Vec<(i64, i64, i64, i64, i64, i64)> = sqlx::query_as(&format!(
         "SELECT CAST(substr(d.data_emissao, 1, 4) AS INTEGER), CAST(substr(d.data_emissao, 6, 2) AS INTEGER), COUNT(*),
                 COALESCE(SUM({SINAL}*d.total), 0), COALESCE(SUM({SINAL}*d.total_liquido), 0),
                 COALESCE(SUM(CASE WHEN d.importado = 1 THEN {SINAL}*d.total ELSE 0 END), 0)
-         FROM documentos d WHERE {VENDAS} AND d.data_emissao >= ?1 AND d.data_emissao < ?2 GROUP BY 1, 2"
+         FROM documentos d WHERE {VENDAS} AND d.data_emissao >= ?1 AND d.data_emissao < ?2
+           AND (?3 IS NULL OR d.posto_id = ?3) AND (?4 IS NULL OR d.armazem_id = ?4)
+           AND (?5 IS NULL OR (?5 = 'api') = (d.api_chave_id IS NOT NULL))
+         GROUP BY 1, 2"
     ))
     .bind(format!("{}-01-01", s.ano - 1))
     .bind(format!("{}-01-01", s.ano + 1))
+    .bind(s.posto_id)
+    .bind(s.armazem_id)
+    .bind(&s.canal)
     .fetch_all(&st.pool)
     .await?;
     let valor = |ano: i32, mes: i64| rows.iter().find(|r| r.0 == ano as i64 && r.1 == mes);
