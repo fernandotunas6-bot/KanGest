@@ -1,6 +1,6 @@
 # Gerado por scripts/gerar-site.py: cabeçalhos de segurança do Cloudflare Pages.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://kangest.pages.dev 'sha256-51ejvQTDi+0ufZivvwhlNcYhd3iQzfNNO4xWpA/v2gc=' https://static.cloudflareinsights.com; style-src 'self' https://kangest.pages.dev 'unsafe-inline'; img-src 'self' https://kangest.pages.dev data:; font-src 'self' https://kangest.pages.dev; connect-src 'self' https://formsubmit.co https://cloudflareinsights.com https://kangest-licencas.valentinocanguele.workers.dev; form-action 'self' https://formsubmit.co; frame-ancestors 'none'; base-uri 'self' https://kangest.pages.dev/; object-src 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://kangest.pages.dev 'sha256-TeP52HP7H44xdB0H3djhtVcL6PL10O5bfAHDVJNBwP8=' https://static.cloudflareinsights.com; style-src 'self' https://kangest.pages.dev 'unsafe-inline'; img-src 'self' https://kangest.pages.dev data:; font-src 'self' https://kangest.pages.dev; connect-src 'self' https://formsubmit.co https://cloudflareinsights.com https://kangest-licencas.valentinocanguele.workers.dev; form-action 'self' https://formsubmit.co; frame-ancestors 'none'; base-uri 'self' https://kangest.pages.dev/; object-src 'none'; upgrade-insecure-requests
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
