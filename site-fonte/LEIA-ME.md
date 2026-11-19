@@ -30,6 +30,18 @@ pedidos de download e de contacto chegam a esse endereço pelo FormSubmit e quem
 automaticamente (o FormSubmit pede uma confirmação no primeiro envio). Sem contactos, a página de contacto mostra
 alternativas em vez do formulário, e o pedido de download mostra os links na própria página.
 
+## Página «Aderir» (planos e pedido de adesão)
+
+`paginas/aderir.html`: os passos da adesão, os três planos (Essencial, Comércio, Empresa) e o formulário com a empresa,
+o NIF, os postos, o contacto, a actividade, o programa actual e o que mais precisa. Não há pagamentos no site.
+
+- **Preços**: vêm do servidor de licenças (`GET {web.licencas}/v1/planos`), definidos no painel do produtor em
+  **Planos e preços**. Com o preço a zero, o cartão diz «Sob consulta». Mudar o preço no painel muda o site sem gerar
+  nada de novo.
+- **Para onde vai o pedido**: com `contacto.email`, chega por email (FormSubmit, com o assunto «Adesão ao KanGest:
+  empresa (plano)»); sem email, abre o WhatsApp de `contacto.whatsapp` com o pedido já escrito.
+- `aderir.html?plano=essencial` (ou `comercio`, `empresa`) chega com o plano escolhido.
+
 ## Página de entrada (KanGest web)
 
 `paginas/entrar.html` e o botão **Entrar** do topo: o nome da empresa leva ao KanGest web dela. Em `config.json`,

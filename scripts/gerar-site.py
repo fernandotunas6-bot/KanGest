@@ -27,6 +27,7 @@ MENU = [
     ("equipamento", "equipamento.html", "Equipamento POS"),
     ("siga", "siga-plus.html", "SIGA Plus"),
     ("projectos", "projectos.html", "Projectos"),
+    ("aderir", "aderir.html", "Aderir"),
     ("contacto", "contacto.html", "Contacto"),
 ]
 

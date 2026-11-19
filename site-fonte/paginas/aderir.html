@@ -1,0 +1,168 @@
+<!--{"titulo": "Aderir ao KanGest · planos e pedido de adesão", "descricao": "Escolha o plano do KanGest (Essencial, Comércio ou Empresa) e envie o pedido de adesão. Contactamos consigo para a instalação, a migração dos dados e a licença. Sem pagamentos online.", "menu": "aderir"}-->
+<section class="heroi heroi-pagina">
+  <div class="cont">
+    <nav class="migalhas" aria-label="Caminho"><a href="index.html">Início</a><span>/</span><span>Aderir</span></nav>
+    <span class="olho">Aderir ao KanGest</span>
+    <h1>Escolha o plano, nós tratamos do resto</h1>
+    <p class="sub">Envie o pedido de adesão com os dados da empresa. Contactamos consigo para combinar a instalação, a passagem dos dados e a licença. Não há pagamentos no site: só paga depois de falar connosco.</p>
+    <div class="confianca">
+      <span>{{icone:ok}} 30 dias de experiência com tudo</span>
+      <span>{{icone:ok}} Os dados ficam no seu computador</span>
+      <span>{{icone:ok}} Documentos assinados e SAF-T (AO)</span>
+    </div>
+  </div>
+</section>
+
+<section class="seccao-branca">
+  <div class="cont">
+    <div class="cabeca">
+      <span class="olho">Como funciona</span>
+      <h2>Da adesão à primeira factura</h2>
+    </div>
+    <ol class="passos horizontal">
+      <li><div><h3>Experimente</h3><p>Baixe o KanGest e use-o 30 dias com tudo, sem compromisso. O que lançar nesse tempo continua lá depois.</p></div></li>
+      <li><div><h3>Envie o pedido</h3><p>Escolha o plano e diga-nos quem é a empresa, quantos postos tem e o que precisa.</p></div></li>
+      <li><div><h3>Falamos consigo</h3><p>Confirmamos o plano e o preço, combinamos o pagamento, a instalação e, se precisar, a migração dos dados e o equipamento.</p></div></li>
+      <li><div><h3>Licença activa</h3><p>Com o pagamento confirmado, a licença chega ao KanGest sozinha (ou por código, sem internet).</p></div></li>
+    </ol>
+  </div>
+</section>
+
+<section class="seccao-creme">
+  <div class="cont">
+    <div class="cabeca">
+      <span class="olho">Planos</span>
+      <h2>Todos os planos têm o KanGest inteiro</h2>
+      <p class="sub">Vendas e POS, facturação certificada, stock, clientes e contas correntes, tesouraria, recursos humanos, oficina, relatórios e actualizações. Muda o número de postos de venda.</p>
+    </div>
+    <div class="planos" data-planos>
+      <article class="plano" data-plano="ESSENCIAL">
+        <h3>Essencial</h3>
+        <p class="plano-para">Para a loja com um caixa.</p>
+        <div class="preco" data-preco="ESSENCIAL"><b>Sob consulta</b></div>
+        <ul class="lista-ok">
+          <li>1 posto de venda</li>
+          <li>Facturação, POS e stock</li>
+          <li>Facturação Electrónica e SAF-T</li>
+          <li>Cópias de segurança automáticas</li>
+        </ul>
+        <a class="btn btn-linha" href="#pedido" data-escolher="ESSENCIAL">Escolher o Essencial</a>
+      </article>
+      <article class="plano destaque" data-plano="COMERCIO">
+        <span class="selo-plano">O mais pedido</span>
+        <h3>Comércio</h3>
+        <p class="plano-para">Para a loja com vários caixas ou armazém.</p>
+        <div class="preco" data-preco="COMERCIO"><b>Sob consulta</b></div>
+        <ul class="lista-ok">
+          <li>Até 3 postos de venda em rede</li>
+          <li>Tudo o que tem o Essencial</li>
+          <li>Utilizadores e permissões por posto</li>
+          <li>Acesso pelo browser na rede da loja</li>
+        </ul>
+        <a class="btn btn-laranja" href="#pedido" data-escolher="COMERCIO">Escolher o Comércio</a>
+      </article>
+      <article class="plano" data-plano="EMPRESA">
+        <h3>Empresa</h3>
+        <p class="plano-para">Para várias lojas e integrações.</p>
+        <div class="preco" data-preco="EMPRESA"><b>Sob consulta</b></div>
+        <ul class="lista-ok">
+          <li>Postos de venda sem limite</li>
+          <li>Tudo o que tem o Comércio</li>
+          <li>API de integração (loja online, contabilidade)</li>
+          <li>Lojas com utilizadores e painel próprios</li>
+        </ul>
+        <a class="btn btn-linha" href="#pedido" data-escolher="EMPRESA">Escolher o Empresa</a>
+      </article>
+    </div>
+    <p class="nota" style="margin-top:16px">Os preços são em kwanzas e confirmam-se no contacto. A migração dos dados, a formação e o equipamento POS orçamentam-se à parte.</p>
+  </div>
+</section>
+
+<section id="pedido">
+  <div class="cont dividido" style="align-items:start">
+    <div>
+      <span class="olho">Pedido de adesão</span>
+      <h2 style="font-size:30px;margin:8px 0 14px">Diga-nos quem é a sua empresa</h2>
+      <div class="texto">
+        <p>Com estes dados preparamos a licença em nome da empresa (o NIF fica nela) e a proposta da instalação.</p>
+        <p data-com-email hidden>O pedido chega-nos por email e respondemos pelo contacto que indicar.</p>
+        <p data-so-whatsapp hidden>Ao enviar, o pedido abre no WhatsApp já escrito: só tem de carregar em enviar.</p>
+      </div>
+      <a class="telefone-grande" href="tel:{{config.contacto.telefoneLink}}">{{icone:telefone}}<span><small>Prefere falar? Telefone e WhatsApp</small>{{config.contacto.telefone}}</span></a>
+      <div class="recurso" style="margin-top:28px">
+        <h3>Ainda não experimentou?</h3>
+        <p>Pode instalar já e aderir depois: o que lançar na experiência continua lá. <a class="seta" href="baixar.html">Baixar o KanGest {{icone:seta}}</a></p>
+      </div>
+    </div>
+
+    <div>
+      <form class="formulario" id="formAdesao" novalidate>
+        <h3>Os dados da empresa</h3>
+        <p class="nota">Os campos com * são obrigatórios.</p>
+        <fieldset class="escolha-plano">
+          <legend>Plano *</legend>
+          <label><input type="radio" name="plano" value="Essencial" data-codigo="ESSENCIAL"><span>Essencial<small>1 posto</small></span></label>
+          <label><input type="radio" name="plano" value="Comércio" data-codigo="COMERCIO" checked><span>Comércio<small>até 3 postos</small></span></label>
+          <label><input type="radio" name="plano" value="Empresa" data-codigo="EMPRESA"><span>Empresa<small>sem limite</small></span></label>
+        </fieldset>
+        <div class="campos">
+          <div class="campo largo"><label for="ad-empresa">Nome da empresa *</label><input id="ad-empresa" name="empresa" autocomplete="organization" required></div>
+          <div class="campo"><label for="ad-nif">NIF da empresa *</label><input id="ad-nif" name="nif" inputmode="text" autocomplete="off" placeholder="5000000000" required></div>
+          <div class="campo"><label for="ad-postos">Postos de venda (caixas)</label><input id="ad-postos" name="postos" type="number" min="1" max="200" value="1" inputmode="numeric"></div>
+          <div class="campo"><label for="ad-nome">O seu nome *</label><input id="ad-nome" name="nome" autocomplete="name" required></div>
+          <div class="campo"><label for="ad-cargo">Função</label><input id="ad-cargo" name="cargo" autocomplete="organization-title" placeholder="Gerente, proprietário…"></div>
+          <div class="campo"><label for="ad-telefone">Telefone ou WhatsApp *</label><input id="ad-telefone" name="telefone" type="tel" autocomplete="tel" placeholder="9xx xxx xxx" required></div>
+          <div class="campo"><label for="ad-email">Email</label><input id="ad-email" name="email" type="email" autocomplete="email" placeholder="nome@empresa.ao"></div>
+          <div class="campo"><label for="ad-provincia">Província</label>
+            <select id="ad-provincia" name="provincia">
+              <option>Luanda</option><option>Bengo</option><option>Benguela</option><option>Bié</option><option>Cabinda</option><option>Cuando</option><option>Cubango</option><option>Cuanza Norte</option><option>Cuanza Sul</option><option>Cunene</option><option>Huambo</option><option>Huíla</option><option>Icolo e Bengo</option><option>Lunda Norte</option><option>Lunda Sul</option><option>Malanje</option><option>Moxico</option><option>Moxico Leste</option><option>Namibe</option><option>Uíge</option><option>Zaire</option><option>Fora de Angola</option>
+            </select>
+          </div>
+          <div class="campo"><label for="ad-ramo">Actividade</label>
+            <select id="ad-ramo" name="ramo">
+              <option>Comércio geral</option><option>Supermercado ou mercearia</option><option>Restauração</option><option>Farmácia</option><option>Livraria ou papelaria</option><option>Oficina auto</option><option>Materiais de construção</option><option>Prestação de serviços</option><option>Outra</option>
+            </select>
+          </div>
+          <div class="campo largo"><label for="ad-anterior">Que programa usa hoje?</label>
+            <select id="ad-anterior" name="anterior">
+              <option>Nenhum (começo agora)</option><option>KIGEST</option><option>Excel ou papel</option><option>Já experimentei o KanGest</option><option>Outro programa</option>
+            </select>
+          </div>
+        </div>
+        <fieldset class="escolhas">
+          <legend>Também precisa de</legend>
+          <label><input type="checkbox" name="extras" value="Instalação no local"> Instalação no local</label>
+          <label><input type="checkbox" name="extras" value="Migração dos dados"> Passar os dados que já tem</label>
+          <label><input type="checkbox" name="extras" value="Formação da equipa"> Formação da equipa</label>
+          <label><input type="checkbox" name="extras" value="Equipamento POS"> Equipamento POS</label>
+          <label><input type="checkbox" name="extras" value="Facturação Electrónica (AGT)"> Ligar à Facturação Electrónica</label>
+          <label><input type="checkbox" name="extras" value="Loja online ou API"> Loja online ou API</label>
+        </fieldset>
+        <div class="campos" style="margin-top:12px">
+          <div class="campo largo"><label for="ad-mensagem">Mais alguma coisa?</label><textarea id="ad-mensagem" name="mensagem" placeholder="Por exemplo: duas lojas em Luanda, 4 caixas, queremos começar no início do mês."></textarea></div>
+        </div>
+        <label class="consentimento"><input type="checkbox" name="consentimento" value="sim"> Autorizo que me contactem sobre este pedido. *</label>
+        <button class="btn btn-laranja" type="submit">Enviar pedido de adesão</button>
+        <p class="erro-form" data-erro role="alert"></p>
+      </form>
+      <div class="formulario" id="adesaoEnviada" hidden>
+        <div class="resposta"><div class="ok">{{icone:ok}}<span data-mensagem-enviada>Recebemos o seu pedido de adesão. Vamos contactá-lo em breve.</span></div></div>
+        <p class="nota" data-reenviar hidden>Se o WhatsApp não abriu, <a href="#" data-abrir-whatsapp>abra-o aqui</a> ou ligue para {{config.contacto.telefone}}.</p>
+        <a class="btn btn-linha" href="baixar.html">{{icone:baixar}}Baixar o KanGest enquanto espera</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="seccao-branca">
+  <div class="estreito">
+    <div class="cabeca"><span class="olho">Perguntas frequentes</span><h2>Antes de aderir</h2></div>
+    <div class="faq">
+      <details><summary>Tenho de pagar alguma coisa no site?</summary><p>Não. O pedido só nos diz o que precisa. O preço, a forma de pagamento e a data de início combinam-se consigo; a licença é activada quando o pagamento é confirmado.</p></details>
+      <details><summary>Perco o que lancei durante a experiência?</summary><p>Não. A licença activa-se no mesmo KanGest: artigos, clientes, documentos e stock continuam lá.</p></details>
+      <details><summary>Preciso de internet?</summary><p>Não para facturar: os dados ficam no seu computador. A internet serve para comunicar as facturas à AGT, receber actualizações e renovar a licença sozinha. Sem internet, a licença chega por código.</p></details>
+      <details><summary>Posso mudar de plano depois?</summary><p>Sim. Se abrir mais caixas ou mais lojas, passa para o plano seguinte e a licença nova chega ao mesmo KanGest.</p></details>
+      <details><summary>Já uso o KIGEST ou outro programa.</summary><p>Passamos os artigos, os clientes, o stock e os saldos; do KIGEST passa também o histórico de documentos. <a class="seta" href="migracao-kigest.html">Ver como funciona a migração</a></p></details>
+    </div>
+  </div>
+</section>

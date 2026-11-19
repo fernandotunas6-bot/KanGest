@@ -207,4 +207,132 @@
       }
     });
   }
+
+  // adesão: os preços vêm do servidor de licenças (painel do produtor → Planos e preços; sem preço, «sob consulta»);
+  // o pedido chega por email (FormSubmit) com o email de vendas configurado, senão abre o WhatsApp já escrito
+  const fa = $("#formAdesao");
+  if (fa) {
+    const W = C.web || {};
+    const kz = (v) => `${new Intl.NumberFormat("pt-PT", { maximumFractionDigits: 0 }).format(v)} Kz`;
+    if (W.licencas) {
+      fetch(`${W.licencas}/v1/planos`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((r) => {
+          for (const p of r?.planos || []) {
+            const el = $(`[data-preco="${p.codigo}"]`);
+            if (!el || !(p.preco_mes > 0 || p.preco_ano > 0)) continue;
+            const [valor, periodo] = p.preco_mes > 0 ? [p.preco_mes, "/mês"] : [p.preco_ano, "/ano"];
+            el.replaceChildren(Object.assign(document.createElement("b"), { textContent: kz(valor) }), Object.assign(document.createElement("span"), { textContent: periodo }));
+            if (p.preco_mes > 0 && p.preco_ano > 0) el.append(Object.assign(document.createElement("small"), { textContent: `ou ${kz(p.preco_ano)} por ano` }));
+          }
+        })
+        .catch(() => {});
+    }
+    $$("[data-com-email]").forEach((el) => (el.hidden = !contacto.email));
+    $$("[data-so-whatsapp]").forEach((el) => (el.hidden = !!contacto.email || !contacto.whatsapp));
+    // escolher um plano nos cartões marca-o no formulário (e ao contrário)
+    const marcarCartao = (codigo) => $$("[data-plano]").forEach((c) => c.classList.toggle("escolhido", c.dataset.plano === codigo));
+    const radio = (codigo) => $(`input[name=plano][data-codigo="${codigo}"]`, fa);
+    $$("[data-escolher]").forEach((a) =>
+      a.addEventListener("click", () => {
+        const r = radio(a.dataset.escolher);
+        if (r) r.checked = true;
+        marcarCartao(a.dataset.escolher);
+        const postos = $("#ad-postos", fa);
+        if (a.dataset.escolher === "COMERCIO" && Number(postos.value) < 2) postos.value = 2;
+        setTimeout(() => $("#ad-empresa", fa).focus({ preventScroll: true }), 400);
+      }),
+    );
+    $$("input[name=plano]", fa).forEach((r) => r.addEventListener("change", () => marcarCartao(r.dataset.codigo)));
+    const planoURL = (new URLSearchParams(location.search).get("plano") || "").toUpperCase();
+    if (radio(planoURL)) radio(planoURL).checked = true;
+    marcarCartao($("input[name=plano]:checked", fa)?.dataset.codigo);
+
+    // NIF de Angola: 10 algarismos (empresas) ou o n.º do BI (9 algarismos, 2 letras, 3 algarismos)
+    const nifValido = (n) => /^\d{10}$/.test(n) || /^\d{9}[A-Z]{2}\d{3}$/.test(n);
+    const erro = $("[data-erro]", fa), botao = $("button[type=submit]", fa);
+    let textoWhatsapp = "";
+    fa.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      erro.textContent = "";
+      const f = new FormData(fa);
+      const d = Object.fromEntries(f);
+      const extras = f.getAll("extras");
+      const nif = String(d.nif || "").replace(/[\s.-]/g, "").toUpperCase();
+      const falta = (id, msg) => {
+        erro.textContent = msg;
+        $(id, fa)?.focus();
+      };
+      if (!String(d.empresa || "").trim()) return falta("#ad-empresa", "Indique o nome da empresa.");
+      if (!nifValido(nif)) return falta("#ad-nif", "O NIF não parece certo: 10 algarismos (empresas) ou o n.º do BI (ex.: 001234567LA041).");
+      if (!String(d.nome || "").trim()) return falta("#ad-nome", "Indique o seu nome.");
+      if (String(d.telefone || "").replace(/\D/g, "").length < 9) return falta("#ad-telefone", "Indique um telefone ou WhatsApp para o contactarmos.");
+      if (d.email && !emailValido(d.email)) return falta("#ad-email", "O email não parece certo.");
+      if (!d.consentimento) return (erro.textContent = "Para tratarmos o pedido, autorize o contacto.");
+      const linhas = [
+        `Pedido de adesão ao KanGest — plano ${d.plano}`,
+        "",
+        `Empresa: ${d.empresa.trim()}`,
+        `NIF: ${nif}`,
+        `Postos de venda: ${d.postos || 1}`,
+        `Actividade: ${d.ramo}`,
+        `Província: ${d.provincia}`,
+        `Programa actual: ${d.anterior}`,
+        `Contacto: ${d.nome.trim()}${d.cargo ? ` (${d.cargo.trim()})` : ""}`,
+        `Telefone: ${d.telefone.trim()}`,
+        `Email: ${d.email || "—"}`,
+        `Também precisa de: ${extras.length ? extras.join(", ") : "—"}`,
+      ];
+      if (String(d.mensagem || "").trim()) linhas.push("", d.mensagem.trim());
+      const texto = linhas.join("\n");
+      const enviado = (msg, comWhatsapp) => {
+        fa.hidden = true;
+        const caixa = $("#adesaoEnviada");
+        caixa.hidden = false;
+        if (msg) $("[data-mensagem-enviada]", caixa).textContent = msg;
+        $("[data-reenviar]", caixa).hidden = !comWhatsapp;
+        caixa.scrollIntoView({ behavior: "smooth", block: "center" });
+      };
+      if (contacto.email) {
+        botao.disabled = true;
+        botao.textContent = "A enviar…";
+        try {
+          await enviarFormSubmit({
+            _subject: `Adesão ao KanGest: ${d.empresa.trim()} (${d.plano})`,
+            _template: "table",
+            _captcha: "false",
+            _replyto: d.email || undefined,
+            plano: d.plano,
+            empresa: d.empresa.trim(),
+            nif,
+            postos: d.postos,
+            actividade: d.ramo,
+            provincia: d.provincia,
+            programa_actual: d.anterior,
+            nome: d.nome.trim(),
+            funcao: d.cargo || "",
+            telefone: d.telefone.trim(),
+            email: d.email || "",
+            tambem_precisa: extras.join(", "),
+            mensagem: d.mensagem || "",
+          });
+          enviado(null, false);
+        } catch {
+          botao.disabled = false;
+          botao.textContent = "Enviar pedido de adesão";
+          erro.textContent = contacto.whatsapp ? "Não foi possível enviar agora. Tente de novo, ou envie pelo WhatsApp." : "Não foi possível enviar agora. Tente de novo dentro de momentos.";
+        }
+      } else if (contacto.whatsapp) {
+        textoWhatsapp = urlWhatsapp(texto);
+        enviado("O pedido abriu no WhatsApp, já escrito: carregue em enviar para nos chegar. Respondemos pelo mesmo número.", true);
+        window.open(textoWhatsapp, "_blank", "noopener");
+      } else {
+        erro.textContent = `Ligue-nos para ${contacto.telefone || "o número indicado"}: os pedidos pelo site ainda não estão ligados.`;
+      }
+    });
+    $("[data-abrir-whatsapp]")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (textoWhatsapp) window.open(textoWhatsapp, "_blank", "noopener");
+    });
+  }
 })();
