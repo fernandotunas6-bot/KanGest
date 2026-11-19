@@ -1130,7 +1130,8 @@
             "type": "string"
           },
           "armazem_id": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Armazém do stock (omitido = o do posto da chave; num documento com origem, o da origem). Num servidor central, a loja: a NE de uma encomenda a levantar numa loja reserva o stock dessa loja."
           },
           "armazem_destino_id": {
             "type": "integer"
@@ -1457,7 +1458,7 @@
         "tags": [
           "Geral"
         ],
-        "description": "Famílias, subfamílias, unidades, taxas de IVA, motivos de isenção, armazéns, modos de pagamento, tipos de documento, prazos, retenções e moedas.",
+        "description": "Famílias, subfamílias, unidades, taxas de IVA, motivos de isenção, armazéns, postos (com o armazém e o prefixo de série), modos de pagamento, tipos de documento, prazos, retenções e moedas.",
         "security": [
           {
             "bearer": []
@@ -2878,6 +2879,34 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "name": "referencia",
+            "in": "query",
+            "required": false,
+            "description": "V/ Referência exacta: o n.º da encomenda no outro sistema.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "ENC-1001"
+          },
+          {
+            "name": "posto_id",
+            "in": "query",
+            "required": false,
+            "description": "Só deste posto.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "armazem_id",
+            "in": "query",
+            "required": false,
+            "description": "Só deste armazém (a loja, num servidor central).",
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "security": [
@@ -3134,7 +3163,7 @@
           "Relatórios e fiscal"
         ],
         "x-permissao": "relatorios.ver",
-        "description": "Vendas do período agrupadas (notas de crédito a abater). O lucro só aparece com api.custos.\n\n**Permissão da chave:** `relatorios.ver`",
+        "description": "Vendas do período agrupadas (notas de crédito a abater). O lucro só aparece com api.custos.\n\n`agrupar=artigo` traz também `artigo_id` e `referencia` e vem por total decrescente (com `limite`, os mais vendidos); `mes_posto` e `mes_armazem` dão uma linha por mês e por loja (`mes`, `posto_id`/`armazem_id`).\n\n**Permissão da chave:** `relatorios.ver`",
         "parameters": [
           {
             "name": "de",
@@ -3170,6 +3199,9 @@
                 "pagamento",
                 "vendedor",
                 "posto",
+                "armazem",
+                "mes_posto",
+                "mes_armazem",
                 "documento",
                 "iva",
                 "iva_dia",
@@ -3184,6 +3216,45 @@
             "in": "query",
             "required": false,
             "description": "Só este cliente.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "posto_id",
+            "in": "query",
+            "required": false,
+            "description": "Só deste posto.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "armazem_id",
+            "in": "query",
+            "required": false,
+            "description": "Só deste armazém (a loja, num servidor central).",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "canal",
+            "in": "query",
+            "description": "api = documentos emitidos por chaves da API (loja online…); balcao = programa e POS.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "api",
+                "balcao"
+              ]
+            }
+          },
+          {
+            "name": "limite",
+            "in": "query",
+            "required": false,
+            "description": "Só as primeiras linhas (1 a 1000).",
             "schema": {
               "type": "integer"
             }
@@ -3213,6 +3284,211 @@
                     },
                     "agrupar": {
                       "type": "string"
+                    },
+                    "dados": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/NaoAutenticado"
+          },
+          "403": {
+            "$ref": "#/components/responses/SemPermissao"
+          },
+          "429": {
+            "$ref": "#/components/responses/LimitePedidos"
+          }
+        }
+      }
+    },
+    "/relatorios/sintese": {
+      "get": {
+        "summary": "Síntese do ano",
+        "tags": [
+          "Relatórios e fiscal"
+        ],
+        "x-permissao": "relatorios.ver",
+        "description": "Vendas de cada mês do ano ao lado do ano anterior (com o histórico importado do KIGEST). `mes_em_curso` assinala o mês ainda aberto.\n\n**Permissão da chave:** `relatorios.ver`",
+        "parameters": [
+          {
+            "name": "ano",
+            "in": "query",
+            "required": false,
+            "description": "Ano (omitido = o actual).",
+            "schema": {
+              "type": "integer"
+            },
+            "example": 2026
+          },
+          {
+            "name": "posto_id",
+            "in": "query",
+            "required": false,
+            "description": "Só deste posto.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "armazem_id",
+            "in": "query",
+            "required": false,
+            "description": "Só deste armazém (a loja, num servidor central).",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "canal",
+            "in": "query",
+            "description": "api = documentos emitidos por chaves da API (loja online…); balcao = programa e POS.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "api",
+                "balcao"
+              ]
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "chave": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ano": {
+                      "type": "integer"
+                    },
+                    "anterior": {
+                      "type": "integer"
+                    },
+                    "mes_em_curso": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "meses": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "mes": {
+                            "type": "integer"
+                          },
+                          "atual": {
+                            "type": "integer",
+                            "description": "Valor em cêntimos de Kz (1 Kz = 100).",
+                            "nullable": true
+                          },
+                          "anterior": {
+                            "type": "integer",
+                            "description": "Valor em cêntimos de Kz (1 Kz = 100).",
+                            "nullable": true
+                          },
+                          "docs_atual": {
+                            "type": "integer"
+                          },
+                          "docs_anterior": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/NaoAutenticado"
+          },
+          "403": {
+            "$ref": "#/components/responses/SemPermissao"
+          },
+          "429": {
+            "$ref": "#/components/responses/LimitePedidos"
+          }
+        }
+      }
+    },
+    "/relatorios/stock": {
+      "get": {
+        "summary": "Relatórios de stock",
+        "tags": [
+          "Relatórios e fiscal"
+        ],
+        "x-permissao": "relatorios.ver",
+        "description": "Stock de um armazém: existências, ruptura, abaixo do mínimo, excesso, parado (dias sem saída), validade (lotes a expirar em `dias`), preços e previsão de venda. Os valores ao custo só saem com api.custos.\n\n**Permissão da chave:** `relatorios.ver`",
+        "parameters": [
+          {
+            "name": "situacao",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "existencias",
+              "enum": [
+                "existencias",
+                "ruptura",
+                "minimo",
+                "excesso",
+                "parado",
+                "validade",
+                "precos",
+                "previsao"
+              ]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/armazem_id"
+          },
+          {
+            "name": "dias",
+            "in": "query",
+            "required": false,
+            "description": "parado: dias sem saída; validade: dias até expirar (30 por omissão).",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "chave": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "situacao": {
+                      "type": "string"
+                    },
+                    "armazem_id": {
+                      "type": "integer"
                     },
                     "dados": {
                       "type": "array",
