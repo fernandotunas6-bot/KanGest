@@ -13,6 +13,7 @@ import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Ta
 import { atributosDe, ramoPorId, resumoAtributos, type Ramo } from "@/lib/ramos";
 import { prepararFoto, useMiniaturas } from "@/lib/fotos";
 import { InputData } from "@/components/InputData";
+import { AbasFicha } from "@/components/Auditoria";
 
 export default function Artigos() {
   const [q, setQ] = useState("");
@@ -343,320 +344,322 @@ function ArtigoForm({
         </>
       }
     >
-      <div className="mb-4 flex items-center gap-4">
-        <div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-xl border border-dashed border-line-strong bg-sunken">
-          {fotoVista ? <img src={fotoVista} alt="Fotografia do artigo" className="size-full object-cover" /> : <ImageIcon className="size-6 text-ink-3" />}
-        </div>
-        <div className="space-y-1.5">
-          <div className="text-[13px] font-medium">Fotografia</div>
-          <div className="flex flex-wrap gap-2">
-            <label className="kg-btn kg-btn-sm inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 text-[13px] font-medium hover:bg-sunken">
-              <Camera className="size-4" /> {fotoVista ? "Trocar" : "Escolher ou tirar foto"}
-              <input type="file" accept="image/*" className="hidden" onChange={(e) => escolherFoto(e.target.files?.[0])} />
-            </label>
-            {fotoVista && (
-              <Button variant="ghost" size="sm" onClick={() => setFotoNova("apagar")}>
-                Remover
-              </Button>
-            )}
+      <AbasFicha entidade="artigos" id={a.id}>
+        <div className="mb-4 flex items-center gap-4">
+          <div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-xl border border-dashed border-line-strong bg-sunken">
+            {fotoVista ? <img src={fotoVista} alt="Fotografia do artigo" className="size-full object-cover" /> : <ImageIcon className="size-6 text-ink-3" />}
           </div>
-          <div className="text-[12px] text-ink-3">Aparece na grelha do POS e na loja online (API). Reduzida a 800 px.</div>
+          <div className="space-y-1.5">
+            <div className="text-[13px] font-medium">Fotografia</div>
+            <div className="flex flex-wrap gap-2">
+              <label className="kg-btn kg-btn-sm inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 text-[13px] font-medium hover:bg-sunken">
+                <Camera className="size-4" /> {fotoVista ? "Trocar" : "Escolher ou tirar foto"}
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => escolherFoto(e.target.files?.[0])} />
+              </label>
+              {fotoVista && (
+                <Button variant="ghost" size="sm" onClick={() => setFotoNova("apagar")}>
+                  Remover
+                </Button>
+              )}
+            </div>
+            <div className="text-[12px] text-ink-3">Aparece na grelha do POS e na loja online (API). Reduzida a 800 px.</div>
+          </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-4 gap-4">
-        <Field label="Descrição" className="col-span-3">
-          <Input autoFocus value={a.descricao ?? ""} onChange={(e) => set("descricao", e.target.value)} />
-        </Field>
-        <Field label="Tipo">
-          <Select value={a.tipo} onChange={(e) => set("tipo", e.target.value)}>
-            <option value="P">Produto</option>
-            <option value="S">Serviço</option>
-          </Select>
-        </Field>
-        <Field label="Referência" hint={a.id ? undefined : "Vazio = automática"}>
-          <Input value={a.referencia ?? ""} onChange={(e) => set("referencia", e.target.value)} />
-        </Field>
-        <Field label={ramo.rotuloCodigo ?? "Código de barras"} hint={ramo.id === "livraria" ? "ISBN-10 ou 13, com ou sem hífenes" : undefined}>
-          <Input value={a.codigo_barras ?? ""} onChange={(e) => set("codigo_barras", e.target.value)} />
-        </Field>
-        <Field label="Família">
-          <Select value={a.familia_id ?? ""} onChange={(e) => set("familia_id", Number(e.target.value))}>
-            {t?.familias.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.descricao}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Unidade">
-          <Select value={a.unidade_id ?? ""} onChange={(e) => set("unidade_id", Number(e.target.value))}>
-            {t?.unidades.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.descricao} ({u.abreviatura})
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field label="Taxa de IVA">
-          <Select value={a.taxa_iva_id} onChange={(e) => set("taxa_iva_id", Number(e.target.value))}>
-            {t?.taxas.map((x) => (
-              <option key={x.id} value={x.id}>
-                {x.descricao}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        {taxa === 0 && (
-          <Field label="Motivo de isenção" className="col-span-3">
-            <Select value={a.motivo_isencao ?? ""} onChange={(e) => set("motivo_isencao", e.target.value)}>
-              <option value="">Seleccione…</option>
-              {t?.motivos.map((m) => (
-                <option key={m.codigo} value={m.codigo}>
-                  {m.codigo} — {m.descricao}
+        <div className="grid grid-cols-4 gap-4">
+          <Field label="Descrição" className="col-span-3">
+            <Input autoFocus value={a.descricao ?? ""} onChange={(e) => set("descricao", e.target.value)} />
+          </Field>
+          <Field label="Tipo">
+            <Select value={a.tipo} onChange={(e) => set("tipo", e.target.value)}>
+              <option value="P">Produto</option>
+              <option value="S">Serviço</option>
+            </Select>
+          </Field>
+          <Field label="Referência" hint={a.id ? undefined : "Vazio = automática"}>
+            <Input value={a.referencia ?? ""} onChange={(e) => set("referencia", e.target.value)} />
+          </Field>
+          <Field label={ramo.rotuloCodigo ?? "Código de barras"} hint={ramo.id === "livraria" ? "ISBN-10 ou 13, com ou sem hífenes" : undefined}>
+            <Input value={a.codigo_barras ?? ""} onChange={(e) => set("codigo_barras", e.target.value)} />
+          </Field>
+          <Field label="Família">
+            <Select value={a.familia_id ?? ""} onChange={(e) => set("familia_id", Number(e.target.value))}>
+              {t?.familias.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.descricao}
                 </option>
               ))}
             </Select>
           </Field>
-        )}
-      </div>
+          <Field label="Unidade">
+            <Select value={a.unidade_id ?? ""} onChange={(e) => set("unidade_id", Number(e.target.value))}>
+              {t?.unidades.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.descricao} ({u.abreviatura})
+                </option>
+              ))}
+            </Select>
+          </Field>
 
-      {ramo.campos.length > 0 && (
-        <div className="mt-6 rounded-xl border border-line p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <span className="flex items-center gap-2 font-medium">
-              <ramo.icone className="size-4 text-brand" /> Dados de {ramo.nome.split(/[,/]/)[0].toLowerCase()}
-            </span>
-            {ramo.variantes && a.id && (
-              <Button variant="secondary" size="sm" onClick={() => setVariantes(true)} title="Criar um artigo por combinação (ex.: tamanho × cor), cada um com o seu stock">
-                <Layers className="size-4" /> Gerar variantes
-              </Button>
-            )}
-          </div>
-          <div className="grid grid-cols-4 gap-4">
-            {ramo.campos.map((c) =>
-              c.tipo === "sim" ? (
-                <label key={c.id} className="col-span-2 flex items-center gap-2 self-end pb-2 text-[13px]">
-                  <input type="checkbox" checked={!!atrib[c.id]} onChange={(e) => setAtrib({ ...atrib, [c.id]: e.target.checked })} />
-                  {c.label}
-                </label>
-              ) : (
-                <Field key={c.id} label={c.label} hint={c.dica} className={c.largo ? "col-span-4" : "col-span-2"}>
-                  <Input
-                    inputMode={c.tipo === "numero" ? "numeric" : undefined}
-                    value={atrib[c.id] === undefined || typeof atrib[c.id] === "boolean" ? "" : String(atrib[c.id])}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setAtrib({ ...atrib, [c.id]: c.tipo === "numero" ? (v.trim() === "" ? "" : Number(v.replace(",", ".")) || 0) : v });
-                    }}
-                  />
-                </Field>
-              ),
-            )}
-          </div>
-        </div>
-      )}
-      {variantes && a.id && <GerarVariantes artigo={a as Artigo} ramo={ramo} onClose={() => setVariantes(false)} />}
-
-      <div className="mt-6 rounded-xl border border-line p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="font-medium">Preços</span>
-          {margemDe(0) !== null && (
-            <Badge tone={(margemDe(0) ?? 0) < 0 ? "danger" : "ok"}>Lucro PVP 1: {kz(semIvaDe(0) - custoC)}</Badge>
+          <Field label="Taxa de IVA">
+            <Select value={a.taxa_iva_id} onChange={(e) => set("taxa_iva_id", Number(e.target.value))}>
+              {t?.taxas.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.descricao}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {taxa === 0 && (
+            <Field label="Motivo de isenção" className="col-span-3">
+              <Select value={a.motivo_isencao ?? ""} onChange={(e) => set("motivo_isencao", e.target.value)}>
+                <option value="">Seleccione…</option>
+                {t?.motivos.map((m) => (
+                  <option key={m.codigo} value={m.codigo}>
+                    {m.codigo} — {m.descricao}
+                  </option>
+                ))}
+              </Select>
+            </Field>
           )}
         </div>
-        <div className="grid grid-cols-5 gap-4">
-          <Field label="Custo (s/ IVA)">
-            <Input className="num text-right" value={custo} onChange={(e) => setCusto(e.target.value)} />
-          </Field>
-          {pvp.map((p, i) => (
-            <Field key={i} label={`PVP ${i + 1} (c/ IVA)`} hint={i === 0 ? `s/ IVA ${kz(preco1)}` : undefined}>
-              <Input
-                className="num text-right"
-                value={p}
-                onChange={(e) => {
-                  setPvp((xs) => xs.map((x, j) => (j === i ? e.target.value : x)));
-                  setMargemTxt((xs) => xs.map((x, j) => (j === i ? null : x)));
-                }}
-              />
-            </Field>
-          ))}
-          <div className="self-center text-[12px] text-ink-3">Margem s/ custo</div>
-          {pvp.map((_, i) => {
-            const m = margemDe(i);
-            return (
-              <div key={i} className="flex items-center gap-1.5">
-                <Input
-                  className={cn("num h-8 text-right", m !== null && m < 0 && "text-danger")}
-                  value={margemTxt[i] ?? (m === null ? "" : m.toFixed(2).replace(".", ","))}
-                  placeholder={custoC > 0 ? "—" : "sem custo"}
-                  disabled={custoC <= 0}
-                  title="Escreva a margem para calcular o PVP a partir do custo"
-                  onChange={(e) => aplicarMargem(i, e.target.value)}
-                  onBlur={() => setMargemTxt((xs) => xs.map((x, j) => (j === i ? null : x)))}
-                />
-                <span className="text-[12px] text-ink-3">%</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
 
-      <div className="mt-4 rounded-xl border border-line p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <span>
-            <span className="font-medium">Outros códigos e balança</span>
-            <span className="block text-[12px] text-ink-3">Códigos de embalagens (ex.: o pack de 12 vende 12 unidades) e o código do artigo nas etiquetas da balança.</span>
-          </span>
-          <Field label="Código na balança (PLU)" className="w-48">
-            <Input className="num" inputMode="numeric" value={a.codigo_balanca ?? ""} onChange={(e) => set("codigo_balanca", e.target.value.replace(/\D/g, "").slice(0, 6))} />
-          </Field>
-        </div>
-        {codigos === null ? (
-          <p className="text-[13px] text-ink-3">A carregar…</p>
-        ) : (
-          <div className="space-y-2">
-            {codigos.map((c, i) => (
-              <div key={i} className="grid grid-cols-[1fr_1fr_110px_36px] items-center gap-2">
-                <Input className="font-mono" placeholder="Código de barras" value={c.codigo} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, codigo: e.target.value } : x)))} />
-                <Input placeholder="Descrição (ex.: Pack de 12)" value={c.descricao} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, descricao: e.target.value } : x)))} />
-                <Input className="num text-right" type="number" min={0} step="any" title="Unidades que este código vende" value={c.quantidade} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, quantidade: Number(e.target.value) } : x)))} />
-                <button type="button" className="rounded-md p-1.5 text-ink-3 hover:bg-danger-50 hover:text-danger" title="Retirar" onClick={() => setCodigos(codigos.filter((_, j) => j !== i))}>
-                  ×
-                </button>
-              </div>
-            ))}
-            <Button type="button" size="sm" variant="secondary" onClick={() => setCodigos([...codigos, { codigo: "", descricao: "", quantidade: 1 }])}>
-              Acrescentar código
-            </Button>
+        {ramo.campos.length > 0 && (
+          <div className="mt-6 rounded-xl border border-line p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <span className="flex items-center gap-2 font-medium">
+                <ramo.icone className="size-4 text-brand" /> Dados de {ramo.nome.split(/[,/]/)[0].toLowerCase()}
+              </span>
+              {ramo.variantes && a.id && (
+                <Button variant="secondary" size="sm" onClick={() => setVariantes(true)} title="Criar um artigo por combinação (ex.: tamanho × cor), cada um com o seu stock">
+                  <Layers className="size-4" /> Gerar variantes
+                </Button>
+              )}
+            </div>
+            <div className="grid grid-cols-4 gap-4">
+              {ramo.campos.map((c) =>
+                c.tipo === "sim" ? (
+                  <label key={c.id} className="col-span-2 flex items-center gap-2 self-end pb-2 text-[13px]">
+                    <input type="checkbox" checked={!!atrib[c.id]} onChange={(e) => setAtrib({ ...atrib, [c.id]: e.target.checked })} />
+                    {c.label}
+                  </label>
+                ) : (
+                  <Field key={c.id} label={c.label} hint={c.dica} className={c.largo ? "col-span-4" : "col-span-2"}>
+                    <Input
+                      inputMode={c.tipo === "numero" ? "numeric" : undefined}
+                      value={atrib[c.id] === undefined || typeof atrib[c.id] === "boolean" ? "" : String(atrib[c.id])}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setAtrib({ ...atrib, [c.id]: c.tipo === "numero" ? (v.trim() === "" ? "" : Number(v.replace(",", ".")) || 0) : v });
+                      }}
+                    />
+                  </Field>
+                ),
+              )}
+            </div>
           </div>
         )}
-      </div>
+        {variantes && a.id && <GerarVariantes artigo={a as Artigo} ramo={ramo} onClose={() => setVariantes(false)} />}
 
-      <div className="mt-4 rounded-xl border border-line p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <span>
-            <span className="font-medium">Promoção</span>
-            <span className="block text-[12px] text-ink-3">Desconto aplicado automaticamente nas vendas entre as datas, sem pedir autorização.</span>
-          </span>
-          {promoEstado && <Badge tone={promoEstado.tom}>{promoEstado.txt}</Badge>}
-        </div>
-        <div className="grid grid-cols-3 gap-4">
-          <Field label="Desconto (%)">
-            <Input
-              className="num text-right"
-              type="number"
-              min={0}
-              max={100}
-              step="0.5"
-              value={promoPct || ""}
-              placeholder="0"
-              onChange={(e) => set("promo_desconto", Number(e.target.value))}
-            />
-          </Field>
-          <Field label="De" hint="Vazio = desde já">
-            <InputData value={a.promo_inicio ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_inicio", e.target.value || null)} />
-          </Field>
-          <Field label="Até" hint="Vazio = sem fim">
-            <InputData value={a.promo_fim ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_fim", e.target.value || null)} />
-          </Field>
-        </div>
-      </div>
-
-      {a.tipo === "P" && (
-        <div className="mt-4 rounded-xl border border-line p-4">
-          <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={!!a.composto} onChange={(e) => set("composto", e.target.checked ? 1 : 0)} />
-              <span>
-                <span className="font-medium">Artigo composto (kit)</span>
-                <span className="block text-[12px] text-ink-3">A venda baixa o stock de cada componente.</span>
-              </span>
-            </label>
-            {!a.composto && (
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={!!a.controla_lote} onChange={(e) => set("controla_lote", e.target.checked ? 1 : 0)} />
-                <span>
-                  <span className="font-medium">Controla lotes e validades</span>
-                  <span className="block text-[12px] text-ink-3">Lote obrigatório nas entradas; saídas pelo que expira primeiro.</span>
-                </span>
-              </label>
-            )}
-            {!a.composto && !!a.controla_lote && (
-              <Field label="Avisar validade com (dias)" className="w-44">
-                <Input className="num text-right" type="number" min={0} value={a.aviso_validade_dias ?? 30} onChange={(e) => set("aviso_validade_dias", Number(e.target.value))} />
-              </Field>
+        <div className="mt-6 rounded-xl border border-line p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="font-medium">Preços</span>
+            {margemDe(0) !== null && (
+              <Badge tone={(margemDe(0) ?? 0) < 0 ? "danger" : "ok"}>Lucro PVP 1: {kz(semIvaDe(0) - custoC)}</Badge>
             )}
           </div>
-          {!!a.composto && (
-            <div className="mt-4">
-              <div className="mb-2 flex items-center gap-2 text-[12px] font-medium uppercase tracking-wide text-ink-2">
-                <Layers className="size-4" /> Composição
-              </div>
-              <ArtigoPicker
-                placeholder="Adicionar componente…"
-                filtro={(x) => x.id !== a.id && !x.composto && !comps.some((c) => c.componente_id === x.id)}
-                onPick={(x) => setComps((cs) => [...cs, { componente_id: x.id, quantidade: 1, referencia: x.referencia, descricao: x.descricao, custo_medio: x.custo_medio, unidade: x.unidade }])}
-              />
-              {comps.length > 0 && (
-                <table className="mt-3 w-full text-left">
-                  <tbody>
-                    {comps.map((c) => (
-                      <tr key={c.componente_id} className="border-b border-line/70">
-                        <td className="py-1.5">
-                          <span className="font-medium">{c.descricao}</span>
-                          <span className="ml-2 font-mono text-[11.5px] text-ink-3">{c.referencia}</span>
-                        </td>
-                        <td className="w-32 py-1.5">
-                          <Input
-                            className="num h-8 text-right"
-                            type="number"
-                            min={0}
-                            step="any"
-                            value={c.quantidade}
-                            onChange={(e) => setComps((cs) => cs.map((x) => (x.componente_id === c.componente_id ? { ...x, quantidade: Number(e.target.value) } : x)))}
-                          />
-                        </td>
-                        <td className="w-16 py-1.5 pl-2 text-[12px] text-ink-3">{c.unidade ?? "UN"}</td>
-                        <td className="num w-32 py-1.5 text-right text-ink-2">{kz(Math.round((c.custo_medio ?? 0) * c.quantidade))}</td>
-                        <td className="w-10 py-1.5 text-right">
-                          <button className="rounded-md p-1.5 text-ink-3 hover:bg-danger-50 hover:text-danger" onClick={() => setComps((cs) => cs.filter((x) => x.componente_id !== c.componente_id))}>
-                            <Trash2 className="size-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-              {comps.length > 0 && <div className="mt-2 text-right text-[13px] text-ink-2">Custo dos componentes (custo médio): <b className="num">{kz(custoKit)}</b></div>}
+          <div className="grid grid-cols-5 gap-4">
+            <Field label="Custo (s/ IVA)">
+              <Input className="num text-right" value={custo} onChange={(e) => setCusto(e.target.value)} />
+            </Field>
+            {pvp.map((p, i) => (
+              <Field key={i} label={`PVP ${i + 1} (c/ IVA)`} hint={i === 0 ? `s/ IVA ${kz(preco1)}` : undefined}>
+                <Input
+                  className="num text-right"
+                  value={p}
+                  onChange={(e) => {
+                    setPvp((xs) => xs.map((x, j) => (j === i ? e.target.value : x)));
+                    setMargemTxt((xs) => xs.map((x, j) => (j === i ? null : x)));
+                  }}
+                />
+              </Field>
+            ))}
+            <div className="self-center text-[12px] text-ink-3">Margem s/ custo</div>
+            {pvp.map((_, i) => {
+              const m = margemDe(i);
+              return (
+                <div key={i} className="flex items-center gap-1.5">
+                  <Input
+                    className={cn("num h-8 text-right", m !== null && m < 0 && "text-danger")}
+                    value={margemTxt[i] ?? (m === null ? "" : m.toFixed(2).replace(".", ","))}
+                    placeholder={custoC > 0 ? "—" : "sem custo"}
+                    disabled={custoC <= 0}
+                    title="Escreva a margem para calcular o PVP a partir do custo"
+                    onChange={(e) => aplicarMargem(i, e.target.value)}
+                    onBlur={() => setMargemTxt((xs) => xs.map((x, j) => (j === i ? null : x)))}
+                  />
+                  <span className="text-[12px] text-ink-3">%</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-line p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <span>
+              <span className="font-medium">Outros códigos e balança</span>
+              <span className="block text-[12px] text-ink-3">Códigos de embalagens (ex.: o pack de 12 vende 12 unidades) e o código do artigo nas etiquetas da balança.</span>
+            </span>
+            <Field label="Código na balança (PLU)" className="w-48">
+              <Input className="num" inputMode="numeric" value={a.codigo_balanca ?? ""} onChange={(e) => set("codigo_balanca", e.target.value.replace(/\D/g, "").slice(0, 6))} />
+            </Field>
+          </div>
+          {codigos === null ? (
+            <p className="text-[13px] text-ink-3">A carregar…</p>
+          ) : (
+            <div className="space-y-2">
+              {codigos.map((c, i) => (
+                <div key={i} className="grid grid-cols-[1fr_1fr_110px_36px] items-center gap-2">
+                  <Input className="font-mono" placeholder="Código de barras" value={c.codigo} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, codigo: e.target.value } : x)))} />
+                  <Input placeholder="Descrição (ex.: Pack de 12)" value={c.descricao} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, descricao: e.target.value } : x)))} />
+                  <Input className="num text-right" type="number" min={0} step="any" title="Unidades que este código vende" value={c.quantidade} onChange={(e) => setCodigos(codigos.map((x, j) => (j === i ? { ...x, quantidade: Number(e.target.value) } : x)))} />
+                  <button type="button" className="rounded-md p-1.5 text-ink-3 hover:bg-danger-50 hover:text-danger" title="Retirar" onClick={() => setCodigos(codigos.filter((_, j) => j !== i))}>
+                    ×
+                  </button>
+                </div>
+              ))}
+              <Button type="button" size="sm" variant="secondary" onClick={() => setCodigos([...codigos, { codigo: "", descricao: "", quantidade: 1 }])}>
+                Acrescentar código
+              </Button>
             </div>
           )}
         </div>
-      )}
 
-      {a.tipo === "P" && !a.composto && (
-        <div className="mt-4 grid grid-cols-4 items-end gap-4">
-          <Field label="Stock mínimo">
-            <Input className="num text-right" type="number" value={a.qtd_minima ?? 0} onChange={(e) => set("qtd_minima", Number(e.target.value))} />
-          </Field>
-          <Field label="Stock máximo">
-            <Input className="num text-right" type="number" value={a.qtd_maxima ?? 0} onChange={(e) => set("qtd_maxima", Number(e.target.value))} />
-          </Field>
-          <label className="flex h-10 items-center gap-2">
-            <input type="checkbox" checked={!!a.controla_stock} onChange={(e) => set("controla_stock", e.target.checked ? 1 : 0)} /> Controla stock
-          </label>
-          <label className="flex h-10 items-center gap-2">
-            <input type="checkbox" checked={!!a.permite_negativo} onChange={(e) => set("permite_negativo", e.target.checked ? 1 : 0)} /> Permite stock negativo
-          </label>
+        <div className="mt-4 rounded-xl border border-line p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <span>
+              <span className="font-medium">Promoção</span>
+              <span className="block text-[12px] text-ink-3">Desconto aplicado automaticamente nas vendas entre as datas, sem pedir autorização.</span>
+            </span>
+            {promoEstado && <Badge tone={promoEstado.tom}>{promoEstado.txt}</Badge>}
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <Field label="Desconto (%)">
+              <Input
+                className="num text-right"
+                type="number"
+                min={0}
+                max={100}
+                step="0.5"
+                value={promoPct || ""}
+                placeholder="0"
+                onChange={(e) => set("promo_desconto", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="De" hint="Vazio = desde já">
+              <InputData value={a.promo_inicio ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_inicio", e.target.value || null)} />
+            </Field>
+            <Field label="Até" hint="Vazio = sem fim">
+              <InputData value={a.promo_fim ?? ""} disabled={promoPct <= 0} onChange={(e) => set("promo_fim", e.target.value || null)} />
+            </Field>
+          </div>
         </div>
-      )}
-      {a.id && (
-        <label className="mt-4 flex items-center gap-2 text-ink-2">
-          <input type="checkbox" checked={a.ativo !== 0} onChange={(e) => set("ativo", e.target.checked ? 1 : 0)} /> Artigo activo
-        </label>
-      )}
+
+        {a.tipo === "P" && (
+          <div className="mt-4 rounded-xl border border-line p-4">
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={!!a.composto} onChange={(e) => set("composto", e.target.checked ? 1 : 0)} />
+                <span>
+                  <span className="font-medium">Artigo composto (kit)</span>
+                  <span className="block text-[12px] text-ink-3">A venda baixa o stock de cada componente.</span>
+                </span>
+              </label>
+              {!a.composto && (
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={!!a.controla_lote} onChange={(e) => set("controla_lote", e.target.checked ? 1 : 0)} />
+                  <span>
+                    <span className="font-medium">Controla lotes e validades</span>
+                    <span className="block text-[12px] text-ink-3">Lote obrigatório nas entradas; saídas pelo que expira primeiro.</span>
+                  </span>
+                </label>
+              )}
+              {!a.composto && !!a.controla_lote && (
+                <Field label="Avisar validade com (dias)" className="w-44">
+                  <Input className="num text-right" type="number" min={0} value={a.aviso_validade_dias ?? 30} onChange={(e) => set("aviso_validade_dias", Number(e.target.value))} />
+                </Field>
+              )}
+            </div>
+            {!!a.composto && (
+              <div className="mt-4">
+                <div className="mb-2 flex items-center gap-2 text-[12px] font-medium uppercase tracking-wide text-ink-2">
+                  <Layers className="size-4" /> Composição
+                </div>
+                <ArtigoPicker
+                  placeholder="Adicionar componente…"
+                  filtro={(x) => x.id !== a.id && !x.composto && !comps.some((c) => c.componente_id === x.id)}
+                  onPick={(x) => setComps((cs) => [...cs, { componente_id: x.id, quantidade: 1, referencia: x.referencia, descricao: x.descricao, custo_medio: x.custo_medio, unidade: x.unidade }])}
+                />
+                {comps.length > 0 && (
+                  <table className="mt-3 w-full text-left">
+                    <tbody>
+                      {comps.map((c) => (
+                        <tr key={c.componente_id} className="border-b border-line/70">
+                          <td className="py-1.5">
+                            <span className="font-medium">{c.descricao}</span>
+                            <span className="ml-2 font-mono text-[11.5px] text-ink-3">{c.referencia}</span>
+                          </td>
+                          <td className="w-32 py-1.5">
+                            <Input
+                              className="num h-8 text-right"
+                              type="number"
+                              min={0}
+                              step="any"
+                              value={c.quantidade}
+                              onChange={(e) => setComps((cs) => cs.map((x) => (x.componente_id === c.componente_id ? { ...x, quantidade: Number(e.target.value) } : x)))}
+                            />
+                          </td>
+                          <td className="w-16 py-1.5 pl-2 text-[12px] text-ink-3">{c.unidade ?? "UN"}</td>
+                          <td className="num w-32 py-1.5 text-right text-ink-2">{kz(Math.round((c.custo_medio ?? 0) * c.quantidade))}</td>
+                          <td className="w-10 py-1.5 text-right">
+                            <button className="rounded-md p-1.5 text-ink-3 hover:bg-danger-50 hover:text-danger" onClick={() => setComps((cs) => cs.filter((x) => x.componente_id !== c.componente_id))}>
+                              <Trash2 className="size-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {comps.length > 0 && <div className="mt-2 text-right text-[13px] text-ink-2">Custo dos componentes (custo médio): <b className="num">{kz(custoKit)}</b></div>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {a.tipo === "P" && !a.composto && (
+          <div className="mt-4 grid grid-cols-4 items-end gap-4">
+            <Field label="Stock mínimo">
+              <Input className="num text-right" type="number" value={a.qtd_minima ?? 0} onChange={(e) => set("qtd_minima", Number(e.target.value))} />
+            </Field>
+            <Field label="Stock máximo">
+              <Input className="num text-right" type="number" value={a.qtd_maxima ?? 0} onChange={(e) => set("qtd_maxima", Number(e.target.value))} />
+            </Field>
+            <label className="flex h-10 items-center gap-2">
+              <input type="checkbox" checked={!!a.controla_stock} onChange={(e) => set("controla_stock", e.target.checked ? 1 : 0)} /> Controla stock
+            </label>
+            <label className="flex h-10 items-center gap-2">
+              <input type="checkbox" checked={!!a.permite_negativo} onChange={(e) => set("permite_negativo", e.target.checked ? 1 : 0)} /> Permite stock negativo
+            </label>
+          </div>
+        )}
+        {a.id && (
+          <label className="mt-4 flex items-center gap-2 text-ink-2">
+            <input type="checkbox" checked={a.ativo !== 0} onChange={(e) => set("ativo", e.target.checked ? 1 : 0)} /> Artigo activo
+          </label>
+        )}
+      </AbasFicha>
     </Modal>
   );
 }

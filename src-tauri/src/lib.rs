@@ -1,5 +1,6 @@
 mod agt;
 pub mod api;
+mod auditoria;
 mod db;
 mod enderecos;
 mod error;

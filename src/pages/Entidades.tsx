@@ -11,6 +11,7 @@ import { imprimir } from "@/lib/print";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import type { Entidade } from "@/lib/types";
+import { AbasFicha } from "@/components/Auditoria";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 
 export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
@@ -177,74 +178,76 @@ function EntidadeForm({ inicial, onClose }: { inicial: Partial<Entidade>; onClos
         </>
       }
     >
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Nome / Razão social" className="col-span-2">
-          <Input autoFocus value={e.nome ?? ""} onChange={(x) => set("nome", x.target.value)} />
-        </Field>
-        <Field
-          label="NIF"
-          hint={nifValido(e.nif, e.pais ?? "AO") ? "Vazio = 999999999 (consumidor final)" : "Em Angola: 10 algarismos (empresas) ou n.º do BI (ex.: 001234567LA041)"}
-        >
-          <Input value={e.nif ?? ""} onChange={(x) => set("nif", x.target.value)} className={cn(!nifValido(e.nif, e.pais ?? "AO") && "border-danger")} />
-        </Field>
-        <Field label="Tipo">
-          <Select value={e.tipo} onChange={(x) => set("tipo", x.target.value)}>
-            <option value="C">Cliente</option>
-            <option value="F">Fornecedor</option>
-            <option value="A">Cliente e fornecedor</option>
-          </Select>
-        </Field>
-        <Field label="Endereço" className="col-span-2">
-          <Input value={e.endereco ?? ""} onChange={(x) => set("endereco", x.target.value)} />
-        </Field>
-        <Field label="Localidade">
-          <Input value={e.localidade ?? ""} onChange={(x) => set("localidade", x.target.value)} />
-        </Field>
-        <Field label="Província">
-          <Input value={e.provincia ?? ""} onChange={(x) => set("provincia", x.target.value)} />
-        </Field>
-        <Field label="País" hint="Código de 2 letras (SAF-T)">
-          <Input
-            list="paises"
-            className="uppercase"
-            maxLength={2}
-            value={e.pais ?? "AO"}
-            onChange={(x) => set("pais", x.target.value.toUpperCase())}
-          />
-          <datalist id="paises">
-            {[["AO", "Angola"], ["PT", "Portugal"], ["ZA", "África do Sul"], ["NA", "Namíbia"], ["CD", "RD Congo"], ["CN", "China"], ["BR", "Brasil"], ["AE", "Emirados Árabes"], ["US", "Estados Unidos"], ["IN", "Índia"], ["TR", "Turquia"]].map(([c, n]) => (
-              <option key={c} value={c}>
-                {n}
-              </option>
-            ))}
-          </datalist>
-        </Field>
-        <Field label="Telefone">
-          <Input value={e.telefone ?? ""} onChange={(x) => set("telefone", x.target.value)} />
-        </Field>
-        <Field label="Email">
-          <Input value={e.email ?? ""} onChange={(x) => set("email", x.target.value)} />
-        </Field>
-        {e.tipo !== "F" && (
-          <>
-            <Field label="Nível de preço">
-              <Select value={e.nivel_preco ?? 1} onChange={(x) => set("nivel_preco", Number(x.target.value))}>
-                {[1, 2, 3, 4].map((n) => (
-                  <option key={n} value={n}>
-                    PVP {n}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Desconto habitual (%)">
-              <Input type="number" className="num text-right" value={e.desconto ?? 0} onChange={(x) => set("desconto", Number(x.target.value))} />
-            </Field>
-            <Field label="Limite de crédito (Kz)">
-              <Input className="num text-right" value={limite} onChange={(x) => setLimite(x.target.value)} />
-            </Field>
-          </>
-        )}
-      </div>
+      <AbasFicha entidade="entidades" id={e.id}>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Nome / Razão social" className="col-span-2">
+            <Input autoFocus value={e.nome ?? ""} onChange={(x) => set("nome", x.target.value)} />
+          </Field>
+          <Field
+            label="NIF"
+            hint={nifValido(e.nif, e.pais ?? "AO") ? "Vazio = 999999999 (consumidor final)" : "Em Angola: 10 algarismos (empresas) ou n.º do BI (ex.: 001234567LA041)"}
+          >
+            <Input value={e.nif ?? ""} onChange={(x) => set("nif", x.target.value)} className={cn(!nifValido(e.nif, e.pais ?? "AO") && "border-danger")} />
+          </Field>
+          <Field label="Tipo">
+            <Select value={e.tipo} onChange={(x) => set("tipo", x.target.value)}>
+              <option value="C">Cliente</option>
+              <option value="F">Fornecedor</option>
+              <option value="A">Cliente e fornecedor</option>
+            </Select>
+          </Field>
+          <Field label="Endereço" className="col-span-2">
+            <Input value={e.endereco ?? ""} onChange={(x) => set("endereco", x.target.value)} />
+          </Field>
+          <Field label="Localidade">
+            <Input value={e.localidade ?? ""} onChange={(x) => set("localidade", x.target.value)} />
+          </Field>
+          <Field label="Província">
+            <Input value={e.provincia ?? ""} onChange={(x) => set("provincia", x.target.value)} />
+          </Field>
+          <Field label="País" hint="Código de 2 letras (SAF-T)">
+            <Input
+              list="paises"
+              className="uppercase"
+              maxLength={2}
+              value={e.pais ?? "AO"}
+              onChange={(x) => set("pais", x.target.value.toUpperCase())}
+            />
+            <datalist id="paises">
+              {[["AO", "Angola"], ["PT", "Portugal"], ["ZA", "África do Sul"], ["NA", "Namíbia"], ["CD", "RD Congo"], ["CN", "China"], ["BR", "Brasil"], ["AE", "Emirados Árabes"], ["US", "Estados Unidos"], ["IN", "Índia"], ["TR", "Turquia"]].map(([c, n]) => (
+                <option key={c} value={c}>
+                  {n}
+                </option>
+              ))}
+            </datalist>
+          </Field>
+          <Field label="Telefone">
+            <Input value={e.telefone ?? ""} onChange={(x) => set("telefone", x.target.value)} />
+          </Field>
+          <Field label="Email">
+            <Input value={e.email ?? ""} onChange={(x) => set("email", x.target.value)} />
+          </Field>
+          {e.tipo !== "F" && (
+            <>
+              <Field label="Nível de preço">
+                <Select value={e.nivel_preco ?? 1} onChange={(x) => set("nivel_preco", Number(x.target.value))}>
+                  {[1, 2, 3, 4].map((n) => (
+                    <option key={n} value={n}>
+                      PVP {n}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Desconto habitual (%)">
+                <Input type="number" className="num text-right" value={e.desconto ?? 0} onChange={(x) => set("desconto", Number(x.target.value))} />
+              </Field>
+              <Field label="Limite de crédito (Kz)">
+                <Input className="num text-right" value={limite} onChange={(x) => setLimite(x.target.value)} />
+              </Field>
+            </>
+          )}
+        </div>
+      </AbasFicha>
     </Modal>
   );
 }

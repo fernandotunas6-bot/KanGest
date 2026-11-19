@@ -151,25 +151,6 @@ pub async fn acessos_listar(st: &AppState, f: RegistoIn) -> AppResult<Value> {
     Ok(db::rows_json(&rows))
 }
 
-/// Operações registadas (emissões, anulações, importações, alterações de configuração…).
-pub async fn auditoria_listar(st: &AppState, f: RegistoIn) -> AppResult<Value> {
-    st.exigir_perm("sistema.auditoria")?;
-    let rows = sqlx::query(
-        "SELECT a.id, a.data_hora, a.acao, a.detalhe, u.nome AS utilizador
-         FROM auditoria a LEFT JOIN utilizadores u ON u.id = a.utilizador_id
-         WHERE substr(replace(a.data_hora, 'T', ' '), 1, 10) BETWEEN ?1 AND ?2
-           AND (?3 IS NULL OR a.utilizador_id = ?3) AND (?4 IS NULL OR a.acao = ?4)
-         ORDER BY a.id DESC LIMIT 2000",
-    )
-    .bind(&f.de)
-    .bind(&f.ate)
-    .bind(f.utilizador_id)
-    .bind(f.evento.filter(|e| !e.is_empty()))
-    .fetch_all(&st.pool)
-    .await?;
-    Ok(db::rows_json(&rows))
-}
-
 // ============================== autenticação ==============================
 
 async fn sessao_de(st: &AppState, row: &sqlx::sqlite::SqliteRow) -> Sessao {

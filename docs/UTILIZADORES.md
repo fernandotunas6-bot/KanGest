@@ -128,6 +128,35 @@ Ficam no **Registo de acessos**: `Entrada`, `Saída`, `Tentativa falhada` (com o
 com data, hora e posto. A **Auditoria** guarda as operações (quem criou ou alterou utilizadores e perfis, mudou a
 política de segurança, emitiu ou anulou documentos, importou dados…).
 
+### Auditoria: o antes e o depois
+
+Cada vez que alguém cria, altera, elimina ou anula uma ficha — artigos, clientes e fornecedores, utilizadores, perfis,
+famílias, armazéns, taxas, moedas, séries, contas, centros de custo, tipos de documento, modos de pagamento, postos,
+promoções e cupões, funcionários, viaturas e ordens da oficina, chaves da API, documentos anulados, a ficha da empresa
+— fica uma linha com **o que estava e o que ficou**: numa criação a ficha nova, numa alteração só os campos que
+mudaram, numa eliminação a ficha como estava. As configurações (segurança, opções de venda, email, facturação
+electrónica, cores…) ficam chave a chave. Uma gravação sem mudanças não fica. Cada linha diz também quem, quando, em
+que posto e por que via (este computador, rede da loja, pela Internet ou API de integração).
+
+Senhas, PIN, segredos dos dois passos, chaves privadas e senhas de email **nunca** vão para o registo: aparecem como
+«•••» (e «••• (novo)» quando mudaram). As fotografias aparecem só como «imagem».
+
+Em **Utilizadores e Permissões → Auditoria** filtra-se por período, utilizador, acção, ficha, via e texto (procura no
+detalhe e nos valores); clicar numa linha mostra o antes e o depois, clicar na ficha mostra todo o histórico dela.
+Exporta para Excel e imprime. Nas fichas de artigos, clientes e fornecedores e utilizadores há o separador
+**Histórico** com a mesma informação (para quem tem a permissão *Registo de acessos e auditoria*).
+
+### Registo à prova de adulteração
+
+O registo **só cresce**: o KanGest não deixa apagar nem alterar linhas da auditoria (nem por engano, nem por um erro do
+programa). Cada linha leva um **selo**: o SHA-256 do selo da linha anterior com o conteúdo desta — uma cadeia, como a
+dos documentos certificados. Se alguém mudar ou apagar uma linha directamente na base de dados, fora do KanGest, a
+cadeia parte-se nesse ponto; se apagar as últimas linhas, o KanGest dá pela falta ao abrir ou na operação seguinte e
+deixa-o escrito no próprio registo (`Registo mexido por fora`).
+
+O topo do separador **Auditoria** diz se o registo está íntegro (quantas linhas, de quando a quando) e, se não, qual
+a linha e o que se passou; o botão **Verificar integridade** volta a conferir tudo.
+
 ## Para quem programa
 
 - Catálogo de permissões: `PERMISSOES` em `src-tauri/src/state.rs` e `GRUPOS_PERMISSOES` em `src/lib/permissoes.ts`
@@ -138,6 +167,11 @@ política de segurança, emitiu ou anulou documentos, importou dados…).
   `auth.alterarSenha`, `auth.desbloquear`, `seguranca.politica`. Todos os outros são recusados com a sessão bloqueada
   ou com senha provisória.
 - Tabelas: `perfis`, `acessos`; colunas de segurança em `utilizadores` (migração `0016_utilizadores_permissoes.sql`).
+- Auditoria: `services/auditoria.rs` (o mapa método → ficha em `alvo`, o antes e o depois, a listagem, o histórico) e
+  `src/auditoria.rs` (o selo em cadeia, `selar`, `verificar`). O `dispatch` lê a ficha antes, corre o método e regista
+  o que mudou; no fim de cada pedido sela as linhas novas. Um método novo que grava uma ficha entra em `alvo`; um
+  campo secreto novo tem de ser apanhado por `secreto`. Migração `0037_auditoria_seria.sql` (colunas `entidade`,
+  `registo_id`, `antes`, `depois`, `posto_id`, `origem`, `selo` e os gatilhos que não deixam apagar nem alterar).
 
 ## Utilizadores de uma só loja (servidor central)
 

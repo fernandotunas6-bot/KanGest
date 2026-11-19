@@ -1,5 +1,6 @@
 pub mod acesso_web;
 mod aparencia;
+mod auditoria;
 mod dois_passos;
 mod atualizacao;
 mod avencas;
@@ -51,7 +52,29 @@ fn p<T: DeserializeOwned>(v: Value) -> AppResult<T> {
     Ok(serde_json::from_value(v)?)
 }
 
+/// Entrada de todos os pedidos. Nos métodos que gravam fichas, regista na auditoria o antes e o depois
+/// (services/auditoria.rs); no fim, sela as linhas novas da auditoria (src/auditoria.rs).
 pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<Value> {
+    let r = match auditoria::alvo(metodo, &params) {
+        None => Box::pin(executar(st, metodo, params)).await,
+        Some(alvo) => {
+            let antes = auditoria::antes(st, &alvo, &params).await;
+            let r = Box::pin(executar(st, metodo, params.clone())).await;
+            if let Ok(v) = &r {
+                if let Err(e) = auditoria::depois(st, &alvo, &params, antes, v).await {
+                    eprintln!("Auditoria: {metodo} não ficou registado ({e}).");
+                }
+            }
+            r
+        }
+    };
+    if let Err(e) = crate::auditoria::selar_novas(&st.pool).await {
+        eprintln!("Auditoria: falhou o selo das linhas novas ({e}).");
+    }
+    r
+}
+
+async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value> {
     // Senha provisória por mudar ou sessão bloqueada: só se pode mudar a senha, retomar ou sair.
     let livre = matches!(
         metodo,
@@ -114,7 +137,10 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         "seguranca.obter" => auth::seguranca_obter(st).await,
         "seguranca.guardar" => auth::seguranca_guardar(st, p(params)?).await,
         "acessos.listar" => auth::acessos_listar(st, p(params)?).await,
-        "auditoria.listar" => auth::auditoria_listar(st, p(params)?).await,
+        "auditoria.listar" => auditoria::listar(st, p(params)?).await,
+        "auditoria.opcoes" => auditoria::opcoes(st).await,
+        "auditoria.historico" => auditoria::historico(st, p(params)?).await,
+        "auditoria.verificar" => auditoria::verificar(st).await,
         "auth.alterarSenha" => auth::alterar_senha(st, p(params)?).await,
         "auth.autorizar" => auth::autorizar(st, p(params)?).await,
         "empresa.obter" => setup::empresa_obter(st).await,
