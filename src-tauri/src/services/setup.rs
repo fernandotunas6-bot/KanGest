@@ -11,12 +11,11 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
     let empresa: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM empresa").fetch_one(&st.pool).await?;
     let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM utilizadores").fetch_one(&st.pool).await?;
     let nome: Option<String> = sqlx::query_scalar("SELECT nome FROM empresa WHERE id = 1").fetch_optional(&st.pool).await?;
-    // a aparência da empresa (cores e imagem do ecrã de entrada) já se vê antes de entrar
+    // as cores da empresa já se vêem antes de entrar
     Ok(json!({
         "inicializado": empresa > 0 && users > 0,
         "empresa": nome,
         "cores": super::aparencia::cores(&st.pool).await?,
-        "imagem_entrada": super::aparencia::tem_imagem(&st.pool).await?,
     }))
 }
 

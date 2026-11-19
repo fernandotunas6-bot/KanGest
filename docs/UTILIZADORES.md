@@ -109,9 +109,17 @@ mostrá-los.
   ligações — e a de destaque — Abrir POS, Pagar, avisos). Os tons claros, escuros e os do tema escuro calculam-se
   sozinhos, e uma cor demasiado clara escurece o necessário para o texto se ler. Escolhe-se também na instalação. O
   tema claro ou escuro continua a ser de cada pessoa.
-- **Imagem do ecrã de entrada:** a da empresa (JPEG, PNG ou WebP; reduz-se a 1600 px), com autorização das pessoas
-  que aparecem. Sem ela, a do KanGest: fotografia n.º 9363112 do Pexels (licença Pexels, uso comercial gratuito),
-  editada — fato cinzento, gravata laranja e colunas claras (`scripts/compor-imagem-entrada.py`).
+- **Imagem do ecrã de entrada:** é a do KanGest e **não se troca** — fotografia n.º 9363112 do Pexels (licença
+  Pexels, uso comercial gratuito), editada: fato cinzento, gravata laranja e colunas claras
+  (`scripts/compor-imagem-entrada.py`).
+
+## O meu perfil
+
+No menu do utilizador (canto superior direito), **O meu perfil**: cada pessoa muda a sua **fotografia** (do
+computador ou, no telemóvel, com a câmara; corta-se ao quadrado e reduz-se a 256 px), o **nome**, o **email** e o
+**telefone**. A fotografia aparece no topo, no POS, no ecrã de sessão bloqueada e na lista de utilizadores do
+administrador. O utilizador (login), o perfil, a loja e as permissões continuam a ser do administrador. A mudança fica
+no registo de acessos (`Perfil alterado`, com o nome antigo e o novo).
 
 ## Registo
 

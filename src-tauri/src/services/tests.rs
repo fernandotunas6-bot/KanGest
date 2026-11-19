@@ -5030,10 +5030,10 @@ async fn recuperar_a_senha_com_dois_passos() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
-/// Aparência da empresa: o jogo de cores (na instalação e em Configurações) e a imagem do ecrã de entrada, que se lêem
-/// antes de entrar; só quem configura o sistema os muda.
+/// Aparência da empresa: o jogo de cores (na instalação e em Configurações → Aparência), que se lê antes de entrar; só
+/// quem configura o sistema o muda.
 #[tokio::test]
-async fn aparencia_cores_e_imagem_de_entrada() {
+async fn aparencia_jogo_de_cores() {
     // na instalação: um jogo desconhecido recusa-se antes de criar seja o que for
     let pasta = std::env::temp_dir().join(format!("kigest-aparencia-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&pasta);
@@ -5046,8 +5046,7 @@ async fn aparencia_cores_e_imagem_de_entrada() {
     assert!(rpc_err(&st, "setup.inicializar", setup(json!({ "paleta": "arco-iris" }))).await.contains("desconhecido"));
     assert_eq!(rpc(&st, "setup.estado", Value::Null).await["inicializado"], false);
     rpc(&st, "setup.inicializar", setup(json!({ "paleta": "oceano" }))).await;
-    let e = rpc(&st, "setup.estado", Value::Null).await;
-    assert_eq!((e["cores"].clone(), e["imagem_entrada"].clone()), (json!({ "paleta": "oceano" }), json!(false)));
+    assert_eq!(rpc(&st, "setup.estado", Value::Null).await["cores"], json!({ "paleta": "oceano" }));
 
     // em Configurações → Aparência
     rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
@@ -5055,19 +5054,11 @@ async fn aparencia_cores_e_imagem_de_entrada() {
     let r = rpc(&st, "aparencia.guardar", json!({ "cores": { "paleta": "personalizada", "marca": "#1F4E8C", "destaque": " #E09A2B " } })).await;
     assert_eq!(r["cores"], json!({ "paleta": "personalizada", "marca": "#1f4e8c", "destaque": "#e09a2b" }));
     rpc(&st, "aparencia.guardar", json!({ "cores": { "paleta": "vinho", "marca": "#000000" } })).await;
-    assert!(rpc_err(&st, "aparencia.guardar", json!({ "imagem_entrada": "data:text/html;base64,PGgxPg==" })).await.contains("JPEG, PNG ou WebP"));
-    let grande = format!("data:image/jpeg;base64,{}", "A".repeat(2_100_000));
-    assert!(rpc_err(&st, "aparencia.guardar", json!({ "imagem_entrada": grande })).await.contains("1,5 MB"));
-    let img = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
-    let r = rpc(&st, "aparencia.guardar", json!({ "imagem_entrada": img })).await;
-    assert_eq!((r["cores"].clone(), r["imagem_entrada"].clone()), (json!({ "paleta": "vinho" }), json!(true)), "mudar a imagem não mexe nas cores");
 
-    // antes de entrar, o ecrã lê as cores e a imagem; sem sessão nada se muda
+    // antes de entrar, o ecrã lê as cores; sem sessão nada se muda
     rpc(&st, "auth.logout", Value::Null).await;
-    let e = rpc(&st, "setup.estado", Value::Null).await;
-    assert_eq!((e["cores"].clone(), e["imagem_entrada"].clone()), (json!({ "paleta": "vinho" }), json!(true)));
-    assert_eq!(rpc(&st, "aparencia.imagemEntrada", Value::Null).await["imagem"], img);
-    assert!(!rpc_err(&st, "aparencia.guardar", json!({ "imagem_entrada": "" })).await.is_empty());
+    assert_eq!(rpc(&st, "setup.estado", Value::Null).await["cores"], json!({ "paleta": "vinho" }));
+    assert!(!rpc_err(&st, "aparencia.guardar", json!({ "cores": { "paleta": "azul" } })).await.is_empty());
 
     // quem não configura o sistema (perfil de caixa) não muda a aparência
     rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
@@ -5075,13 +5066,54 @@ async fn aparencia_cores_e_imagem_de_entrada() {
     rpc(&st, "auth.logout", Value::Null).await;
     rpc(&st, "auth.login", json!({ "login": "caixa", "senha": "caixa123" })).await;
     assert!(rpc_err(&st, "aparencia.guardar", json!({ "cores": { "paleta": "azul" } })).await.contains("permiss"));
-    rpc(&st, "auth.logout", Value::Null).await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
 
-    // tirar a imagem volta à do KanGest
+/// O meu perfil: cada um muda o seu nome, contactos e fotografia (e só os seus); o nome novo fica na sessão e o
+/// antigo no registo de acessos; o utilizador (login) e o perfil não mudam por aqui.
+#[tokio::test]
+async fn o_meu_perfil() {
+    let (st, pasta) = base_com_admin("perfil").await;
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Ana", "login": "ana", "senha": "ana12345", "perfil": "CAIXA", "mudar_senha": false })).await;
+    rpc(&st, "auth.logout", Value::Null).await;
+    rpc(&st, "auth.login", json!({ "login": "ana", "senha": "ana12345" })).await;
+    let p = rpc(&st, "auth.perfil", Value::Null).await;
+    assert_eq!((p["nome"].clone(), p["login"].clone(), p["foto"].clone()), (json!("Ana"), json!("ana"), Value::Null));
+
+    let guardar = |extra: Value| {
+        let mut v = json!({ "nome": "Ana Paula", "email": "ana@loja.ao", "telefone": "923 000 111" });
+        for (k, x) in extra.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        v
+    };
+    assert!(rpc_err(&st, "auth.guardarPerfil", guardar(json!({ "nome": "  " }))).await.contains("nome"));
+    assert!(rpc_err(&st, "auth.guardarPerfil", guardar(json!({ "email": "ana loja" }))).await.contains("email"));
+    assert!(rpc_err(&st, "auth.guardarPerfil", guardar(json!({ "foto": "data:image/svg+xml;base64,PHN2Zz4=" }))).await.contains("JPEG, PNG ou WebP"));
+    let foto = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+    let s = rpc(&st, "auth.guardarPerfil", guardar(json!({ "foto": foto, "login": "outra", "perfil": "ADMIN" }))).await;
+    assert_eq!((s["nome"].clone(), s["login"].clone(), s["perfil"].clone()), (json!("Ana Paula"), json!("ana"), json!("CAIXA")), "o login e o perfil não mudam");
+    assert_eq!(rpc(&st, "auth.sessao", Value::Null).await["nome"], "Ana Paula");
+    let p = rpc(&st, "auth.perfil", Value::Null).await;
+    assert_eq!((p["email"].clone(), p["telefone"].clone(), p["foto"].clone()), (json!("ana@loja.ao"), json!("923 000 111"), json!(foto)));
+    // sem `foto`, a fotografia fica; com "" sai
+    rpc(&st, "auth.guardarPerfil", json!({ "nome": "Ana Paula", "email": "", "telefone": "" })).await;
+    let p = rpc(&st, "auth.perfil", Value::Null).await;
+    assert_eq!((p["foto"].clone(), p["email"].clone()), (json!(foto), json!("")));
+    rpc(&st, "auth.guardarPerfil", json!({ "nome": "Ana Paula", "foto": "" })).await;
+    assert!(rpc(&st, "auth.perfil", Value::Null).await["foto"].is_null());
+    let registo: String = sqlx::query_scalar("SELECT detalhe FROM acessos WHERE evento = 'PERFIL' ORDER BY id LIMIT 1").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(registo, "nome: «Ana» → «Ana Paula»");
+
+    // o administrador vê a fotografia na lista; sem sessão não há perfil
+    rpc(&st, "auth.guardarPerfil", json!({ "nome": "Ana Paula", "foto": foto })).await;
+    rpc(&st, "auth.logout", Value::Null).await;
+    assert!(!rpc_err(&st, "auth.perfil", Value::Null).await.is_empty());
     rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
-    rpc(&st, "aparencia.guardar", json!({ "imagem_entrada": "" })).await;
-    assert!(rpc(&st, "aparencia.imagemEntrada", Value::Null).await["imagem"].is_null());
-    assert_eq!(rpc(&st, "setup.estado", Value::Null).await["imagem_entrada"], false);
+    let lista = rpc(&st, "utilizadores.listar", Value::Null).await;
+    let ana = lista.as_array().unwrap().iter().find(|u| u["login"] == "ana").unwrap();
+    assert_eq!((ana["nome"].clone(), ana["foto"].clone()), (json!("Ana Paula"), json!(foto)));
+    assert!(rpc(&st, "auth.perfil", Value::Null).await["foto"].is_null(), "o perfil é o de quem está a usar");
     let _ = std::fs::remove_dir_all(&pasta);
 }
 

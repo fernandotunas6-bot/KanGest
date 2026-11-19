@@ -98,7 +98,7 @@ function Principal() {
   const estado = useQuery({
     queryKey: ["setup"],
     queryFn: async () => {
-      const e = await call<{ inicializado: boolean; empresa: string | null; cores?: Cores | null; imagem_entrada?: boolean }>("setup.estado");
+      const e = await call<{ inicializado: boolean; empresa: string | null; cores?: Cores | null }>("setup.estado");
       // as cores da empresa valem desde o ecrã de entrada (e ficam no aparelho para o próximo arranque)
       useAparencia.getState().setCores(e.cores ?? null);
       const s = await call<Sessao | null>("auth.sessao");
@@ -121,7 +121,7 @@ function Principal() {
     );
   }
   if (!estado.data?.inicializado) return <Setup onDone={() => estado.refetch()} />;
-  if (!sessao) return <Login empresa={estado.data.empresa} imagemPropria={!!estado.data.imagem_entrada} />;
+  if (!sessao) return <Login empresa={estado.data.empresa} />;
   if (sessao.mudar_senha) return <MudarSenhaObrigatoria />;
 
   return (

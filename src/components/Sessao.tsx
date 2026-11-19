@@ -8,6 +8,8 @@ import type { Sessao } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Button, Field, Input, cn } from "@/components/ui";
 import { BoasVindas, CampoAcesso, InputSenha, Moldura } from "@/components/Acesso";
+import { Avatar } from "@/components/MeuPerfil";
+import { useMeuPerfil } from "@/lib/perfil";
 
 const OBRIGATORIO = "Este campo é obrigatório";
 
@@ -133,6 +135,8 @@ export function useTecladoFisicoPin(ativo: boolean, valor: string, onChange: (v:
  */
 export function EcraBloqueado() {
   const sessao = useSession((s) => s.sessao)!;
+  // a fotografia que já se tinha lido (com a sessão bloqueada o servidor não responde)
+  const fotoPerfil = useMeuPerfil().data?.foto;
   const setSessao = useSession((s) => s.setSessao);
   const terminar = useTerminarSessao();
   const qc = useQueryClient();
@@ -187,7 +191,7 @@ export function EcraBloqueado() {
     <div ref={raiz} onKeyDown={(e) => e.stopPropagation()} className="fixed inset-0 z-[200] grid place-items-center bg-brand-700/95 p-6 backdrop-blur-md">
       <div className="w-full max-w-sm rounded-2xl bg-surface p-7 shadow-pop">
         <div className="mb-6 flex items-center gap-3">
-          <div className="grid size-12 place-items-center rounded-full bg-brand text-[18px] font-semibold text-white">{sessao.nome.slice(0, 1).toUpperCase()}</div>
+          <Avatar nome={sessao.nome} foto={fotoPerfil} className="size-12 text-[18px]" />
           <div className="min-w-0">
             <div className="truncate text-[17px] font-semibold">{sessao.nome}</div>
             <div className="flex items-center gap-1.5 text-[13px] text-ink-3">

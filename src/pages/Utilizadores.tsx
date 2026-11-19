@@ -10,10 +10,13 @@ import { useSession } from "@/store/session";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 import { InputData } from "@/components/InputData";
 import { useTabelas } from "@/lib/hooks";
+import { Avatar } from "@/components/MeuPerfil";
 
 interface Utilizador {
   id: number;
   nome: string;
+  /** fotografia que o próprio escolheu (O meu perfil) */
+  foto?: string | null;
   login: string;
   perfil: string;
   perfil_descricao: string | null;
@@ -236,10 +239,15 @@ function ListaUtilizadores() {
             {lista.data?.map((x) => (
               <tr key={x.id} className={cn("hover:bg-sunken/60", !x.ativo && "opacity-60")}>
                 <Td>
-                  <button className="text-left font-medium hover:underline" onClick={() => setU({ ...x, personalizar: x.permissoes_proprias, obrigarMudar: true })}>
-                    {x.nome}
-                  </button>
-                  {x.importado && <div className="text-[11.5px] text-ink-3">importado do KIGEST</div>}
+                  <div className="flex items-center gap-2.5">
+                    <Avatar nome={x.nome} foto={x.foto} className="size-8 text-[12px]" />
+                    <div className="min-w-0">
+                      <button className="text-left font-medium hover:underline" onClick={() => setU({ ...x, personalizar: x.permissoes_proprias, obrigarMudar: true })}>
+                        {x.nome}
+                      </button>
+                      {x.importado && <div className="text-[11.5px] text-ink-3">importado do KIGEST</div>}
+                    </div>
+                  </div>
                 </Td>
                 <Td className="font-mono text-[12.5px]">{x.login}</Td>
                 <Td>
@@ -490,6 +498,7 @@ const EVENTOS: Record<string, { label: string; tom: "ok" | "danger" | "accent" |
   SENHA: { label: "Senha alterada", tom: "brand" },
   SENHA_REDEFINIDA: { label: "Senha redefinida", tom: "accent" },
   RECUPERACAO: { label: "Recuperação da senha", tom: "accent" },
+  PERFIL: { label: "Perfil alterado", tom: "neutral" },
   SESSAO_BLOQUEADA: { label: "Sessão bloqueada", tom: "neutral" },
   SESSAO_RETOMADA: { label: "Sessão retomada", tom: "neutral" },
 };

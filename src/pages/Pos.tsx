@@ -52,6 +52,8 @@ import { useEmpresa } from "@/components/PrintCabecalho";
 import { useAparencia } from "@/lib/aparencia";
 import { atributosDe, notaDaLinha, ramoPorId, resumoAtributos } from "@/lib/ramos";
 import { useMiniaturas } from "@/lib/fotos";
+import { useMeuPerfil } from "@/lib/perfil";
+import { Avatar } from "@/components/MeuPerfil";
 import { abrirVisorEcra, ecraInteiro, linhasVisorColuna, ouvirVisorPronto, publicarVisor, type EstadoVisor } from "@/lib/equipamento";
 
 interface Linha {
@@ -191,6 +193,7 @@ export default function Pos() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const { sessao, pode, tem, setSessao } = useSession();
+  const fotoPerfil = useMeuPerfil().data?.foto;
   const tabelas = useTabelas();
   const opcoes: PostoOpcoes = { ...OPCOES_PADRAO, ...(tabelas.data?.posto?.opcoes ?? {}) };
   const termica = !!opcoes.escpos?.ativo;
@@ -933,7 +936,9 @@ export default function Pos() {
             {agora.toLocaleDateString("pt-PT", { weekday: "short", day: "2-digit", month: "2-digit" })} · <b className="font-semibold text-ink">{agora.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</b>
           </span>
           <span className="flex items-center gap-2 text-[13px] text-ink-2">
-            <span className="grid size-7 place-items-center rounded-full bg-brand text-[12px] font-semibold text-white max-sm:hidden" title={sessao?.nome}>{sessao?.nome.slice(0, 1).toUpperCase()}</span>
+            <span className="max-sm:hidden" title={sessao?.nome}>
+              <Avatar nome={sessao?.nome} foto={fotoPerfil} className="size-7 text-[12px]" />
+            </span>
             <span className="hidden max-w-40 truncate xl:inline">{sessao?.nome}</span>
           </span>
           <Button variant="ghost" size="sm" onClick={bloquearSessao} title="Bloquear o posto (retoma-se com a senha ou o PIN; a venda fica como está)">

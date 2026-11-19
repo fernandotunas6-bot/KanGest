@@ -1,7 +1,6 @@
 import { Fragment, forwardRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { ArrowLeft, Building2, Check, Eye, EyeOff } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { abrirExterno, call } from "@/lib/api";
+import { abrirExterno } from "@/lib/api";
 import { cn } from "@/components/ui";
 import { Logo } from "@/components/Logo";
 import entradaImg from "@/assets/acesso/entrada.jpg";
@@ -25,25 +24,13 @@ const NOVIDADES = [
 ];
 
 /**
- * Montra: a imagem do ecrã de entrada (a da empresa, em Configurações → Aparência, ou a do KanGest: um senhor de fato e
- * gravata diante de colunas claras) com o logótipo em cima e as novidades em cartões em baixo (só em ecrãs largos).
+ * Montra: a imagem do ecrã de entrada do KanGest (um senhor de fato e gravata diante de colunas claras; não se troca)
+ * com o logótipo em cima e as novidades em cartões em baixo (só em ecrãs largos).
  */
-function Vitrine({ imagemPropria }: { imagemPropria?: boolean }) {
-  const propria = useQuery({
-    queryKey: ["aparencia.imagemEntrada"],
-    queryFn: () => call<{ imagem: string | null }>("aparencia.imagemEntrada"),
-    enabled: !!imagemPropria,
-    staleTime: 5 * 60_000,
-  }).data?.imagem;
+function Vitrine() {
   return (
     <aside className="relative hidden min-h-0 flex-col overflow-hidden bg-[#e9ecef] md:flex">
-      <img
-        src={propria || entradaImg}
-        alt=""
-        draggable={false}
-        className="absolute inset-0 size-full object-cover"
-        style={{ objectPosition: propria ? "50% 35%" : "68% 100%" }}
-      />
+      <img src={entradaImg} alt="" draggable={false} className="absolute inset-0 size-full object-cover" style={{ objectPosition: "68% 100%" }} />
       {/* sombra suave em baixo, para os cartões se destacarem da imagem */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-64 bg-gradient-to-t from-black/30 to-transparent" />
       <div className="relative flex items-center gap-3 px-10 pt-9">
@@ -99,20 +86,17 @@ export function Moldura({
   empresa,
   topo,
   onAjuda,
-  imagemPropria,
 }: {
   children: ReactNode;
   empresa?: string | null;
   topo?: ReactNode;
   onAjuda?: (s?: SeccaoAjuda) => void;
-  /** A empresa tem imagem própria para o ecrã de entrada (setup.estado). */
-  imagemPropria?: boolean;
 }) {
   const canto = topo ?? (empresa ? <EmpresaNoCanto nome={empresa} /> : null);
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
       <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
-        <Vitrine imagemPropria={imagemPropria} />
+        <Vitrine />
         <section className="relative flex min-h-0 flex-col overflow-y-auto">
           {/* luz quente no canto, como num fim de tarde, e o verde da marca em baixo */}
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(75%_60%_at_100%_0%,color-mix(in_srgb,var(--color-accent)_14%,transparent),transparent_70%),radial-gradient(60%_50%_at_0%_100%,color-mix(in_srgb,var(--color-brand)_10%,transparent),transparent_70%)]" />

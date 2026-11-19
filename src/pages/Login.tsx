@@ -13,7 +13,7 @@ import PerguntasAcesso from "@/pages/PerguntasAcesso";
 
 const OBRIGATORIO = "Este campo é obrigatório";
 
-export default function Login({ empresa, imagemPropria = false }: { empresa: string | null; imagemPropria?: boolean }) {
+export default function Login({ empresa }: { empresa: string | null }) {
   const [login, setLogin] = useState("");
   const [senha, setSenha] = useState("");
   const [pin, setPin] = useState("");
@@ -85,7 +85,7 @@ export default function Login({ empresa, imagemPropria = false }: { empresa: str
   if (vista === "perguntas") return <PerguntasAcesso seccao={seccao} onVoltar={() => setVista("entrar")} onAjuda={ajuda} />;
 
   return (
-    <Moldura empresa={empresa} onAjuda={ajuda} imagemPropria={imagemPropria}>
+    <Moldura empresa={empresa} onAjuda={ajuda}>
       <div className="w-full max-w-[440px]">
         <BoasVindas texto={pedirCodigo ? undefined : modo === "pin" && comPin ? "Introduza o seu PIN de operador." : undefined} />
 

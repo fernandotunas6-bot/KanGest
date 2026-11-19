@@ -429,6 +429,74 @@ pub async fn alterar_senha(st: &AppState, i: SenhaIn) -> AppResult<Value> {
     Ok(serde_json::to_value(s)?)
 }
 
+// ============================== o meu perfil ==============================
+
+/// O perfil de quem está a usar o programa: nome, contactos e fotografia (menu do utilizador → O meu perfil).
+pub async fn perfil(st: &AppState) -> AppResult<Value> {
+    let s = st.sessao()?;
+    let r = sqlx::query("SELECT nome, login, email, telefone, foto FROM utilizadores WHERE id = ?").bind(s.id).fetch_one(&st.pool).await?;
+    Ok(json!({
+        "nome": r.get::<String, _>("nome"),
+        "login": r.get::<String, _>("login"),
+        "email": r.get::<Option<String>, _>("email").unwrap_or_default(),
+        "telefone": r.get::<Option<String>, _>("telefone").unwrap_or_default(),
+        "foto": r.get::<Option<String>, _>("foto"),
+        "perfil": s.perfil_descricao.clone().unwrap_or(s.perfil.clone()),
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct MeuPerfilIn {
+    nome: String,
+    #[serde(default)]
+    email: String,
+    #[serde(default)]
+    telefone: String,
+    /// Fotografia em data URL (JPEG, PNG ou WebP, já reduzida); `""` tira-a; sem ela, fica como está.
+    #[serde(default)]
+    foto: Option<String>,
+}
+
+/// Cada um muda o seu nome, contactos e fotografia. O utilizador (login), o perfil e as permissões são do
+/// administrador. A mudança do nome fica no registo de acessos (o antigo e o novo).
+pub async fn guardar_perfil(st: &AppState, i: MeuPerfilIn) -> AppResult<Value> {
+    let mut s = st.sessao()?;
+    let nome = i.nome.trim();
+    if nome.is_empty() || nome.chars().count() > 80 {
+        return Err(AppError::msg("Escreva o seu nome (até 80 caracteres)."));
+    }
+    let email = i.email.trim();
+    if !email.is_empty() && (email.len() > 120 || !email.contains('@') || email.contains(' ')) {
+        return Err(AppError::msg("O email não parece certo."));
+    }
+    let telefone = i.telefone.trim();
+    if telefone.chars().count() > 30 {
+        return Err(AppError::msg("O telefone é demasiado comprido."));
+    }
+    if let Some(f) = i.foto.as_deref().filter(|f| !f.is_empty()) {
+        let tipo_ok = ["data:image/jpeg;base64,", "data:image/png;base64,", "data:image/webp;base64,"].iter().any(|p| f.starts_with(p));
+        if !tipo_ok || f.len() > 400_000 {
+            return Err(AppError::msg("A fotografia deve ser JPEG, PNG ou WebP e pequena (até 300 KB)."));
+        }
+    }
+    let antigo: String = sqlx::query_scalar("SELECT nome FROM utilizadores WHERE id = ?").bind(s.id).fetch_one(&st.pool).await?;
+    sqlx::query("UPDATE utilizadores SET nome = ?, email = ?, telefone = ? WHERE id = ?")
+        .bind(nome)
+        .bind(Some(email).filter(|e| !e.is_empty()))
+        .bind(Some(telefone).filter(|t| !t.is_empty()))
+        .bind(s.id)
+        .execute(&st.pool)
+        .await?;
+    if let Some(f) = i.foto.as_deref() {
+        sqlx::query("UPDATE utilizadores SET foto = ? WHERE id = ?").bind(Some(f).filter(|f| !f.is_empty())).bind(s.id).execute(&st.pool).await?;
+    }
+    let detalhe = if antigo != nome { format!("nome: «{antigo}» → «{nome}»") } else { "contactos ou fotografia".into() };
+    registar(st, Some(s.id), &s.login, "PERFIL", Some(detalhe)).await;
+    s.nome = nome.to_string();
+    st.definir_sessao(Some(s.clone()));
+    Ok(serde_json::to_value(s)?)
+}
+
 // ============================== recuperar a senha ==============================
 
 /// Autorizações para escolher a senha nova depois de conferido o código de dois passos: token → (utilizador, validade).
@@ -579,6 +647,7 @@ pub async fn listar(st: &AppState) -> AppResult<Value> {
             "bloqueado_ate": bloqueado,
             "tentativas": r.get::<i64, _>("tentativas"),
             "importado": r.get::<Option<String>, _>("id_origem").is_some(),
+            "foto": r.try_get::<Option<String>, _>("foto").ok().flatten(),
         }));
     }
     Ok(Value::Array(lista))
