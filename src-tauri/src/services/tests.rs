@@ -4224,6 +4224,20 @@ async fn webhooks_api() {
     let t = rpc(&st, "api.webhookTestar", json!({ "id": falha })).await;
     assert_eq!((t["aceite"].as_bool(), t["codigo_http"].as_i64()), (Some(false), Some(500)));
 
+    // ---- reservas: uma NE muda o disponível sem mexer na existência, e o aviso de stock diz quanto ----
+    let ultimo_stock = || -> Value {
+        recebidos.lock().unwrap().iter().rev().filter_map(|x| serde_json::from_str::<Value>(&x.2).ok()).find(|c| c["evento"] == "stock.alterado").expect("aviso de stock")
+    };
+    let ne = rpc(&st, "documentos.emitir", json!({ "tipo": "NE", "linhas": [{ "artigo_id": art, "quantidade": 2 }] })).await;
+    crate::webhooks::ciclo(&st).await.unwrap();
+    let s1 = ultimo_stock();
+    assert_eq!((s1["dados"]["quantidade"].as_f64(), s1["dados"]["reservado"].as_f64(), s1["dados"]["disponivel"].as_f64()), (Some(8.0), Some(2.0), Some(6.0)), "{s1}");
+    assert_eq!((s1["dados"]["armazens"][0]["reservado"].as_f64(), s1["dados"]["armazens"][0]["disponivel"].as_f64()), (Some(2.0), Some(6.0)));
+    rpc(&st, "documentos.anular", json!({ "id": ne["documento"]["id"], "motivo": "encomenda cancelada" })).await;
+    crate::webhooks::ciclo(&st).await.unwrap();
+    let s2 = ultimo_stock();
+    assert_eq!((s2["dados"]["reservado"].as_f64(), s2["dados"]["disponivel"].as_f64()), (Some(0.0), Some(8.0)), "a encomenda anulada liberta a reserva: {s2}");
+
     // ---- segredo novo; desactivar; apagar ----
     let novo = rpc(&st, "api.webhookSegredo", json!({ "id": w["id"] })).await["segredo"].as_str().unwrap().to_string();
     assert_ne!(novo, segredo);

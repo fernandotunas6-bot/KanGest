@@ -240,14 +240,15 @@ automáticos → Novo aviso**, indique o endereço que recebe os avisos e os eve
 |---|---|---|
 | `documento.emitido` | Qualquer documento novo (vendas, compras, recibos, stock), no programa, no POS ou pela API | O documento com as linhas (sem custos) e `url` para o pedir à API |
 | `documento.anulado` | Um documento é anulado | O mesmo, com `estado: "A"` e o motivo |
-| `stock.alterado` | Entradas, saídas, vendas, transferências, inventário | O artigo, a `quantidade` total e o detalhe por armazém, no momento do envio |
+| `stock.alterado` | Entradas, saídas, vendas, transferências, inventário; e notas de encomenda (NE) emitidas, anuladas ou facturadas, que mudam o reservado | O artigo, a `quantidade`, o `reservado` e o `disponivel` (existência − reservado), no total e por armazém, no momento do envio |
 | `artigo.alterado` | Artigo criado ou alterado (descrição, preços, promoção, activo) | O artigo com os preços sem e com IVA (sem custos) |
 
 Cada aviso é um `POST` com JSON:
 
 ```json
 { "id": 381, "evento": "stock.alterado", "criado_em": "2026-11-15T10:42:07",
-  "dados": { "id": 12, "referencia": "ARZ5", "quantidade": 47, "armazens": [{ "armazem_id": 1, "armazem": "Principal", "quantidade": 47 }] } }
+  "dados": { "id": 12, "referencia": "ARZ5", "quantidade": 47, "reservado": 2, "disponivel": 45,
+             "armazens": [{ "armazem_id": 1, "armazem": "Principal", "quantidade": 47, "reservado": 2, "disponivel": 45 }] } }
 ```
 
 - Cabeçalhos: `X-KanGest-Evento`, `X-KanGest-Entrega` (o `id`, igual nas novas tentativas: use-o para não tratar o
@@ -255,6 +256,8 @@ Cada aviso é um `POST` com JSON:
 - Responda com `2xx` em menos de 15 segundos. Sem resposta ou com erro, o KanGest volta a tentar ao fim de 1, 5, 15 e
   30 minutos e de 1, 3, 6 e 12 horas; depois a entrega fica «Falhada» e reenvia-se no ecrã.
 - Vários movimentos do mesmo artigo seguidos dão **um** aviso de stock, com a quantidade do momento do envio.
+- Uma loja online deve vender o **`disponivel`** do armazém (ou dos armazéns) que a servem: as encomendas já feitas
+  e por facturar (NE) estão no `reservado`.
 - **Confirme sempre a assinatura**: `v1` é o HMAC-SHA256 de `"<t>.<corpo>"` com o segredo do aviso (botão da chave).
   Recuse avisos com `t` de há mais de 5 minutos.
 

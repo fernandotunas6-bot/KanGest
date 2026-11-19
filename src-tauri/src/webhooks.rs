@@ -166,15 +166,26 @@ async fn dados_evento(p: &SqlitePool, tipo: &str, objecto: Option<i64>) -> AppRe
             let Some(a) = sqlx::query("SELECT id, referencia, codigo_barras, descricao FROM artigos WHERE id = ?").bind(id).fetch_optional(p).await? else {
                 return Ok(Value::Null);
             };
+            // existência, reservado (notas de encomenda por facturar) e disponível de cada armazém — como em GET /stock
             let armazens = db::query_json_bind(
                 p,
-                "SELECT s.armazem_id, ar.nome AS armazem, s.quantidade FROM stock s JOIN armazens ar ON ar.id = s.armazem_id WHERE s.artigo_id = ? ORDER BY s.armazem_id",
+                "SELECT ar.id AS armazem_id, ar.nome AS armazem, COALESCE(s.quantidade, 0) AS quantidade,
+                        COALESCE(r.reservado, 0) AS reservado, COALESCE(s.quantidade, 0) - COALESCE(r.reservado, 0) AS disponivel
+                 FROM armazens ar
+                 LEFT JOIN stock s ON s.armazem_id = ar.id AND s.artigo_id = ?1
+                 LEFT JOIN (SELECT COALESCE(d.armazem_id, 1) AS armazem_id, SUM(l.quantidade) AS reservado
+                            FROM documentos d JOIN documento_linhas l ON l.documento_id = d.id
+                            WHERE d.tipo_codigo = 'NE' AND d.estado = 'N' AND l.artigo_id = ?1 GROUP BY 1) r ON r.armazem_id = ar.id
+                 WHERE s.artigo_id IS NOT NULL OR r.reservado IS NOT NULL
+                 ORDER BY ar.id",
                 id,
             )
             .await?;
-            let total: f64 = armazens.as_array().map(|v| v.iter().filter_map(|x| x["quantidade"].as_f64()).sum()).unwrap_or(0.0);
+            let soma = |k: &str| armazens.as_array().map(|v| v.iter().filter_map(|x| x[k].as_f64()).sum::<f64>()).unwrap_or(0.0);
             let mut v = db::row_json(&a);
-            v["quantidade"] = json!(total);
+            v["quantidade"] = json!(soma("quantidade"));
+            v["reservado"] = json!(soma("reservado"));
+            v["disponivel"] = json!(soma("disponivel"));
             v["armazens"] = armazens;
             v
         }
