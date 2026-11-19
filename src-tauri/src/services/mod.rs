@@ -179,6 +179,7 @@ pub async fn dispatch(st: &AppState, metodo: &str, params: Value) -> AppResult<V
         // ---- acesso pela Internet (subdomínio do KanGest por túnel da Cloudflare) ----
         "web.estado" => acesso_web::estado(st, p(params)?).await,
         "web.activar" => acesso_web::activar(st, p(params)?).await,
+        "web.activarProprio" => acesso_web::activar_proprio(st, p(params)?).await,
         "web.desactivar" => acesso_web::desactivar(st).await,
 
         // ---- postos em rede (servidor / cliente) ----

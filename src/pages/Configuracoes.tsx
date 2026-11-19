@@ -1305,6 +1305,9 @@ interface EstadoWeb {
   nome: string | null;
   endereco: string | null;
   activo: boolean;
+  /** Túnel da própria empresa (domínio dela), e não um endereço do serviço do KanGest. */
+  proprio: boolean;
+  porta: number;
   tunel: { a_correr: boolean; ligado: boolean; erro: string | null; linhas: string[] };
   remoto?: { disponivel?: boolean; dominio?: string | null; erro?: string };
   aviso?: string;
@@ -1322,6 +1325,9 @@ function AcessoInternet() {
   const [nome, setNome] = useState("");
   const [mudar, setMudar] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [doEmpresa, setDoEmpresa] = useState(false);
+  const [endProprio, setEndProprio] = useState("");
+  const [tokenProprio, setTokenProprio] = useState("");
   if (!e) return null;
   const dominio = e.remoto?.dominio ?? null;
   const limpo = nome.trim().toLowerCase();
@@ -1333,6 +1339,20 @@ function AcessoInternet() {
       const v = await call<EstadoWeb>("web.activar", { nome: limpo });
       toast.success(`Acesso pela Internet activado: ${v.endereco}`);
       setMudar(false);
+      await refetch();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function activarProprio() {
+    setBusy(true);
+    try {
+      const v = await call<EstadoWeb>("web.activarProprio", { endereco: endProprio, token: tokenProprio });
+      toast.success(`A ligar ${v.endereco}…`);
+      setDoEmpresa(false);
+      setTokenProprio("");
       await refetch();
     } catch (err) {
       toast.error((err as Error).message);
@@ -1355,6 +1375,40 @@ function AcessoInternet() {
       setBusy(false);
     }
   }
+
+  const dominioEmpresa = doEmpresa ? (
+    <div className="space-y-3 rounded-lg border border-line p-3">
+      <p className="font-medium text-ink">Domínio da empresa</p>
+      <ol className="list-decimal space-y-1 pl-5">
+        <li>
+          No painel da Cloudflare, onde está o domínio: <b>Zero Trust → Networks → Tunnels → Create a tunnel</b> (tipo Cloudflared), com um nome à escolha.
+        </li>
+        <li>
+          Em <b>Public hostnames</b>: o endereço (ex.: <span className="font-mono">gestao</span> + o seu domínio), tipo <b>HTTP</b>, URL{" "}
+          <span className="font-mono">localhost:{e.porta}</span>.
+        </li>
+        <li>Copie o comando de instalação que o painel mostra (qualquer sistema) e cole-o abaixo: o KanGest tira dele o token. Não precisa de o correr.</li>
+      </ol>
+      <Field label="Endereço">
+        <Input className="font-mono" value={endProprio} onChange={(x) => setEndProprio(x.target.value)} placeholder="gestao.empresa.ao" />
+      </Field>
+      <Field label="Comando de instalação ou token do túnel" hint="Fica cifrado neste computador.">
+        <Input className="font-mono" type="password" autoComplete="off" value={tokenProprio} onChange={(x) => setTokenProprio(x.target.value)} placeholder="cloudflared service install eyJ…" />
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={activarProprio} disabled={!endProprio.trim() || !tokenProprio.trim() || busy}>
+          <Globe className="size-4" /> {busy ? "A ligar…" : "Ligar com o domínio da empresa"}
+        </Button>
+        <Button variant="secondary" onClick={() => setDoEmpresa(false)}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
+  ) : (
+    <button className="text-[13px] font-medium text-brand hover:underline" onClick={() => setDoEmpresa(true)}>
+      Usar um domínio da empresa (ex.: gestao.empresa.ao)
+    </button>
+  );
 
   const q = e.endereco ? qrcode(e.endereco + "/", "M") : null;
   const lado = q ? q.tamanho + 8 : 0;
@@ -1413,6 +1467,7 @@ function AcessoInternet() {
                   Pede a chave de rede e o n.º do posto na primeira vez, e depois o utilizador e a senha. Com HTTPS, instala-se como aplicação. Os dados ficam neste computador: ele tem de
                   estar ligado e com Internet para se entrar de fora; na loja continua tudo a funcionar sem Internet.
                 </p>
+                {e.proprio && <p className="text-ink-3">Domínio da empresa, pelo túnel dela na Cloudflare.</p>}
                 {e.tunel.erro && !e.tunel.ligado && <p className="text-danger">Túnel: {e.tunel.erro}</p>}
               </div>
             </div>
@@ -1420,9 +1475,11 @@ function AcessoInternet() {
               formulario
             ) : (
               <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={() => { setNome(e.nome ?? ""); setMudar(true); }}>
-                  Mudar o endereço
-                </Button>
+                {!e.proprio && (
+                  <Button variant="secondary" onClick={() => { setNome(e.nome ?? ""); setMudar(true); }}>
+                    Mudar o endereço
+                  </Button>
+                )}
                 <Button variant="secondary" onClick={desligar} disabled={busy}>
                   Desligar
                 </Button>
@@ -1435,12 +1492,16 @@ function AcessoInternet() {
             <Button variant="secondary" onClick={() => nav("/licenca")}>
               Ir para Licença e Assinatura
             </Button>
+            {dominioEmpresa}
           </>
         ) : !e.remoto?.disponivel ? (
-          <p>
-            O endereço próprio do KanGest (como <span className="font-mono">minhaempresa.kangest.ao</span>) ainda não está disponível. Entretanto, pode publicar este servidor com o seu
-            domínio pelo túnel da Cloudflare — ver o guia «Modo web e PWA».
-          </p>
+          <>
+            <p>
+              Abra o KanGest desta empresa em qualquer browser, com HTTPS e sem abrir portas no router: o KanGest liga-se à Cloudflare de dentro para fora. O endereço com o nome do
+              KanGest ainda não está disponível; pode já usar um domínio da empresa.
+            </p>
+            {dominioEmpresa}
+          </>
         ) : (
           <>
             <p>
@@ -1448,6 +1509,7 @@ function AcessoInternet() {
               este servidor em qualquer browser, com HTTPS.
             </p>
             {formulario}
+            {dominioEmpresa}
           </>
         )}
       </div>
