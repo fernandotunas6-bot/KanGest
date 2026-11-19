@@ -1,6 +1,7 @@
 mod agt;
 pub mod api;
 mod db;
+mod enderecos;
 mod error;
 pub mod http;
 pub mod internet;

@@ -97,3 +97,6 @@ export function nifValido(nif: string | null | undefined, pais = "AO"): boolean 
   if (!n || pais.toUpperCase() !== "AO") return true;
   return n === "999999999" || /^\d{10}$/.test(n) || /^\d{9}[A-Z]{2}\d{3}$/.test(n);
 }
+
+/** Anfitrião para um URL: um IPv6 vai entre parênteses rectos (`http://[2001:db8::1]:7799`); IPv4 e nomes ficam iguais. */
+export const anfitriaoUrl = (h: string) => (h.includes(":") && !h.startsWith("[") ? `[${h}]` : h);

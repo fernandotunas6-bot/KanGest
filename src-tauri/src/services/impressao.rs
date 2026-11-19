@@ -703,15 +703,15 @@ fn enviar(cfg: &Config, bytes: &[u8]) -> AppResult<()> {
 }
 
 fn rede(destino: &str, bytes: &[u8]) -> AppResult<()> {
-    use std::net::{TcpStream, ToSocketAddrs};
+    use std::net::ToSocketAddrs;
     use std::time::Duration;
-    let alvo = if destino.contains(':') { destino.to_string() } else { format!("{destino}:9100") };
-    let addr = alvo
-        .to_socket_addrs()
+    // IPv4, IPv6 (`fd00::50` ou `[fd00::50]:9100`) ou nome
+    let alvo = crate::enderecos::alvo(destino, 9100);
+    alvo.to_socket_addrs()
         .map_err(|e| AppError::msg(format!("Endereço de impressora inválido ({alvo}): {e}")))?
         .next()
         .ok_or_else(|| AppError::msg(format!("Endereço de impressora inválido: {alvo}")))?;
-    let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(4))
+    let mut s = crate::enderecos::ligar(&alvo, Duration::from_secs(4))
         .map_err(|e| AppError::msg(format!("Sem resposta da impressora em {alvo}: {e}")))?;
     s.set_write_timeout(Some(Duration::from_secs(5))).ok();
     s.write_all(bytes).map_err(|e| AppError::msg(format!("Falha a enviar para {alvo}: {e}")))?;

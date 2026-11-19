@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -133,7 +133,7 @@ struct Servidor {
     porta: u16,
     rede: bool,
     parar: Arc<AtomicBool>,
-    fio: Option<std::thread::JoinHandle<()>>,
+    fios: Vec<std::thread::JoinHandle<()>>,
 }
 
 static SERVIDOR: Mutex<Option<Servidor>> = Mutex::new(None);
@@ -180,49 +180,54 @@ pub fn iniciar(st: Arc<AppState>, porta: u16, rede: bool) -> AppResult<u16> {
     if let Some(s) = guarda.take() {
         fechar(s);
     }
-    let ip = if rede { Ipv4Addr::UNSPECIFIED } else { Ipv4Addr::LOCALHOST };
-    let escuta = TcpListener::bind((ip, porta)).map_err(|e| {
+    // rede: IPv4 e IPv6 na mesma porta; só desta máquina: 127.0.0.1 e ::1 (o localhost do túnel pode ser qualquer um)
+    let escutas = crate::enderecos::escutar(porta, rede).map_err(|e| {
         AppError::msg(format!("Não foi possível abrir a porta {porta} da API: {e}. Escolha outra porta ou autorize o KanGest na firewall."))
     })?;
     let parar = Arc::new(AtomicBool::new(false));
-    let sinal = parar.clone();
-    let fio = std::thread::Builder::new()
-        .name("kangest-api".into())
-        .spawn(move || {
-            for fluxo in escuta.incoming() {
-                if sinal.load(Ordering::SeqCst) {
-                    break;
+    let mut fios = Vec::new();
+    for escuta in escutas {
+        let sinal = parar.clone();
+        let st = st.clone();
+        let fio = std::thread::Builder::new()
+            .name("kangest-api".into())
+            .spawn(move || {
+                for fluxo in escuta.incoming() {
+                    if sinal.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let Ok(mut fluxo) = fluxo else { continue };
+                    // limite de pedidos em simultâneo: uma integração avariada não deixa o servidor sem fios
+                    if ATENDER.load(Ordering::SeqCst) >= MAX_LIGACOES {
+                        fluxo.set_write_timeout(Some(Duration::from_secs(2))).ok();
+                        let r = Resposta::erro(503, "ocupado", "Demasiados pedidos em simultâneo. Tente de novo dentro de momentos.").com("Retry-After", "2");
+                        let _ = fluxo.write_all(&r.bytes());
+                        continue;
+                    }
+                    ATENDER.fetch_add(1, Ordering::SeqCst);
+                    let st = st.clone();
+                    let lancado = std::thread::Builder::new().name("kangest-api-pedido".into()).stack_size(crate::PILHA_PEDIDOS).spawn(move || {
+                        atender(&st, fluxo);
+                        ATENDER.fetch_sub(1, Ordering::SeqCst);
+                    });
+                    if lancado.is_err() {
+                        ATENDER.fetch_sub(1, Ordering::SeqCst);
+                    }
                 }
-                let Ok(mut fluxo) = fluxo else { continue };
-                // limite de pedidos em simultâneo: uma integração avariada não deixa o servidor sem fios
-                if ATENDER.load(Ordering::SeqCst) >= MAX_LIGACOES {
-                    fluxo.set_write_timeout(Some(Duration::from_secs(2))).ok();
-                    let r = Resposta::erro(503, "ocupado", "Demasiados pedidos em simultâneo. Tente de novo dentro de momentos.").com("Retry-After", "2");
-                    let _ = fluxo.write_all(&r.bytes());
-                    continue;
-                }
-                ATENDER.fetch_add(1, Ordering::SeqCst);
-                let st = st.clone();
-                let lancado = std::thread::Builder::new().name("kangest-api-pedido".into()).stack_size(crate::PILHA_PEDIDOS).spawn(move || {
-                    atender(&st, fluxo);
-                    ATENDER.fetch_sub(1, Ordering::SeqCst);
-                });
-                if lancado.is_err() {
-                    ATENDER.fetch_sub(1, Ordering::SeqCst);
-                }
-            }
-        })
-        .map_err(|e| AppError::msg(format!("Não foi possível iniciar o servidor da API: {e}")))?;
-    *guarda = Some(Servidor { porta, rede, parar, fio: Some(fio) });
+            })
+            .map_err(|e| AppError::msg(format!("Não foi possível iniciar o servidor da API: {e}")))?;
+        fios.push(fio);
+    }
+    *guarda = Some(Servidor { porta, rede, parar, fios });
     *ERRO.lock().unwrap() = None;
     Ok(porta)
 }
 
 fn fechar(mut s: Servidor) {
     s.parar.store(true, Ordering::SeqCst);
-    // acorda o accept() com uma ligação local: o ciclo vê o sinal, termina e fecha a porta
-    let _ = TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, s.porta)), Duration::from_secs(2));
-    if let Some(f) = s.fio.take() {
+    // acorda os accept() com ligações locais (IPv4 e IPv6): cada ciclo vê o sinal, termina e fecha a porta
+    crate::enderecos::acordar(s.porta);
+    for f in s.fios.drain(..) {
         let _ = f.join();
     }
 }
@@ -478,10 +483,7 @@ enum Rede {
 
 /// IPv4 dentro de IPv6 (`::ffff:a.b.c.d`) passa a IPv4.
 fn normalizar(ip: IpAddr) -> IpAddr {
-    match ip {
-        IpAddr::V6(a) => a.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(ip),
-        _ => ip,
-    }
+    crate::enderecos::canonico(ip)
 }
 
 /// Lista de IPs e redes («192.168.1.10, 10.0.0.0/8, ::1»), separados por vírgulas, pontos e vírgulas ou espaços.

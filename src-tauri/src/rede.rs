@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -294,7 +294,8 @@ pub fn iniciar_servidor(estado: Arc<AppState>, cfg: &Config) -> AppResult<u16> {
         }
         return Err(AppError::msg(format!("O servidor já está a servir na porta {p}. Feche e reabra a aplicação para mudar de porta.")));
     }
-    let escuta = TcpListener::bind(("0.0.0.0", cfg.porta))
+    // IPv4 e IPv6 na mesma porta (dupla pilha)
+    let escutas = crate::enderecos::escutar(cfg.porta, true)
         .map_err(|e| AppError::msg(format!("Não foi possível abrir a porta {}: {e}. Escolha outra porta ou autorize a aplicação na firewall.", cfg.porta)))?;
     // o sal fica guardado no rede.json: os postos já ligados continuam a derivar a mesma chave
     let mut cfg = cfg.clone();
@@ -303,28 +304,32 @@ pub fn iniciar_servidor(estado: Arc<AppState>, cfg: &Config) -> AppResult<u16> {
         gravar(&estado.pasta_dados, &cfg)?;
     }
     let chave = Seguranca { chave: cifra::derivar(cfg.chave.trim(), &cfg.sal), sal: cfg.sal.clone() };
-    std::thread::Builder::new()
-        .name("kigest-rede".into())
-        .spawn(move || {
-            for fluxo in escuta.incoming() {
-                let Ok(fluxo) = fluxo else { continue };
-                // limite de pedidos em paralelo: um posto avariado não derruba o servidor
-                if ATENDER.load(Ordering::Relaxed) >= 48 {
-                    continue;
+    for escuta in escutas {
+        let estado = estado.clone();
+        let chave = chave.clone();
+        std::thread::Builder::new()
+            .name("kigest-rede".into())
+            .spawn(move || {
+                for fluxo in escuta.incoming() {
+                    let Ok(fluxo) = fluxo else { continue };
+                    // limite de pedidos em paralelo: um posto avariado não derruba o servidor
+                    if ATENDER.load(Ordering::Relaxed) >= 48 {
+                        continue;
+                    }
+                    ATENDER.fetch_add(1, Ordering::Relaxed);
+                    let st = estado.clone();
+                    let k = chave.clone();
+                    let lancado = std::thread::Builder::new().name("kangest-rede-pedido".into()).stack_size(crate::PILHA_PEDIDOS).spawn(move || {
+                        atender(&st, &k, fluxo);
+                        ATENDER.fetch_sub(1, Ordering::Relaxed);
+                    });
+                    if lancado.is_err() {
+                        ATENDER.fetch_sub(1, Ordering::Relaxed);
+                    }
                 }
-                ATENDER.fetch_add(1, Ordering::Relaxed);
-                let st = estado.clone();
-                let k = chave.clone();
-                let lancado = std::thread::Builder::new().name("kangest-rede-pedido".into()).stack_size(crate::PILHA_PEDIDOS).spawn(move || {
-                    atender(&st, &k, fluxo);
-                    ATENDER.fetch_sub(1, Ordering::Relaxed);
-                });
-                if lancado.is_err() {
-                    ATENDER.fetch_sub(1, Ordering::Relaxed);
-                }
-            }
-        })
-        .map_err(|e| AppError::msg(format!("Não foi possível iniciar o servidor de rede: {e}")))?;
+            })
+            .map_err(|e| AppError::msg(format!("Não foi possível iniciar o servidor de rede: {e}")))?;
+    }
     PORTA_ACTIVA.store(cfg.porta as usize, Ordering::Relaxed);
     // a configuração em uso passa a ser esta (o arranque e o ecrã de rede contam com isso)
     *celula().lock().unwrap() = cfg.clone();
@@ -446,7 +451,8 @@ fn um() -> i64 {
 fn atender(st: &AppState, seg: &Seguranca, mut fluxo: TcpStream) {
     fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
-    let ligacao = fluxo.peer_addr().ok().map(|a| a.ip());
+    // um IPv4 numa porta de dupla pilha chega como ::ffff:a.b.c.d: volta a IPv4 (o túnel na própria máquina é 127.0.0.1)
+    let ligacao = fluxo.peer_addr().ok().map(|a| crate::enderecos::canonico(a.ip()));
     let pedido = ler_pedido(&mut fluxo);
     let ip_cloudflare = pedido.as_ref().ok().and_then(|p| p.ip_cloudflare);
     let endereco = endereco_real(ligacao, ip_cloudflare);
@@ -611,19 +617,21 @@ fn limpar_antigas(l: &mut HashMap<String, Ligacao>) {
 
 // ============================== cliente ==============================
 
-fn destino(cfg: &Config) -> AppResult<std::net::SocketAddr> {
-    let s = cfg.servidor.trim();
-    let alvo = if s.contains(':') { s.to_string() } else { format!("{s}:{}", if cfg.porta == 0 { PORTA_PADRAO } else { cfg.porta }) };
+/// `servidor` com a porta: IPv4, IPv6 (`2001:db8::1` ou `[2001:db8::1]:7799`) ou nome.
+fn destino(cfg: &Config) -> AppResult<String> {
+    let alvo = crate::enderecos::alvo(&cfg.servidor, if cfg.porta == 0 { PORTA_PADRAO } else { cfg.porta });
     alvo.to_socket_addrs()
         .map_err(|e| AppError::msg(format!("Endereço do servidor inválido ({alvo}): {e}")))?
         .next()
-        .ok_or_else(|| AppError::msg(format!("Endereço do servidor inválido: {alvo}")))
+        .ok_or_else(|| AppError::msg(format!("Endereço do servidor inválido: {alvo}")))?;
+    Ok(alvo)
 }
 
 /// Pedido HTTP simples ao servidor; devolve o JSON do corpo da resposta.
 fn http(cfg: &Config, metodo: &str, corpo: Option<&str>) -> AppResult<Value> {
-    let addr = destino(cfg)?;
-    let mut fluxo = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
+    let alvo = destino(cfg)?;
+    // um nome com IPv6 e IPv4 tenta os dois
+    let mut fluxo = crate::enderecos::ligar(&alvo, Duration::from_secs(5))
         .map_err(|e| AppError::msg(format!("Sem ligação ao servidor {}: {e}", cfg.servidor)))?;
     fluxo.set_read_timeout(Some(Duration::from_secs(60))).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
@@ -652,7 +660,7 @@ fn http(cfg: &Config, metodo: &str, corpo: Option<&str>) -> AppResult<Value> {
 fn sal_do_servidor(cfg: &Config, renovar: bool) -> AppResult<String> {
     static SAIS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
     let sais = SAIS.get_or_init(|| Mutex::new(HashMap::new()));
-    let alvo = destino(cfg)?.to_string();
+    let alvo = destino(cfg)?;
     if !renovar {
         if let Some(s) = sais.lock().unwrap().get(&alvo) {
             return Ok(s.clone());
@@ -803,16 +811,7 @@ pub async fn sincronizar_posto(st: &AppState) -> AppResult<PostoAtual> {
 
 /// Endereços desta máquina na rede local, para ditar aos outros postos.
 pub(crate) fn enderecos_locais() -> Vec<String> {
-    let mut v = Vec::new();
-    // truque sem dependências: "ligar" um socket UDP não envia nada, mas revela o IP da interface usada
-    if let Ok(s) = std::net::UdpSocket::bind("0.0.0.0:0") {
-        if s.connect("8.8.8.8:80").is_ok() {
-            if let Ok(a) = s.local_addr() {
-                v.push(a.ip().to_string());
-            }
-        }
-    }
-    v
+    crate::enderecos::locais()
 }
 
 pub async fn estado(st: &AppState) -> AppResult<Value> {

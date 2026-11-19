@@ -15,6 +15,25 @@ No KIGEST original todos os postos apontavam para o mesmo SQL Server. Aqui o pap
 3. Em Configurações → Postos e impressão, dê a cada posto a sua descrição, armazém e prefixo de
    série, e em cada máquina use *Usar nesta máquina*.
 
+## IPv4 e IPv6
+
+O servidor ouve nos **dois ao mesmo tempo**, na mesma porta (dupla pilha): os postos, os telemóveis no browser e
+as integrações ligam-se pelo endereço que tiverem. O ecrã do servidor mostra o IPv4 e, havendo, o IPv6 da
+máquina (o código QR usa o primeiro).
+
+- No posto, o endereço do servidor pode ser IPv4 (`192.168.1.10`), IPv6 (`2001:db8::10`, ou `[2001:db8::10]:7799`
+  com a porta) ou um nome (`servidor.loja.ao`). Um nome com os dois tipos de endereço tenta os dois.
+- No browser, um IPv6 escreve-se entre parênteses rectos: `http://[2001:db8::10]:7799`.
+- A API (Sistema → API e Integrações) e as impressoras de rede (`fd00::50` ou `[fd00::50]:9100`) aceitam o mesmo.
+  Com a API «só desta máquina», abre em `127.0.0.1` e em `::1`, para o túnel chegar por qualquer um.
+- Os registos, os bloqueios por chave errada e o reconhecimento do túnel na própria máquina tratam um IPv4 que chega
+  pela porta IPv6 (`::ffff:192.168.1.5`) como o IPv4 que é.
+- Sem IPv6 no computador (desligado no sistema), o servidor abre só em IPv4, como antes.
+
+Na firewall, autorize o KanGest nos dois (no Windows, a regra da aplicação cobre IPv4 e IPv6). Com IPv6 público,
+os computadores ficam alcançáveis da Internet sem NAT: não publique a porta 7799 sem o túnel e o Access
+([CLOUDFLARE.md](CLOUDFLARE.md)).
+
 ## O que fica em cada lado
 
 | Fica no servidor | Fica em cada posto |
