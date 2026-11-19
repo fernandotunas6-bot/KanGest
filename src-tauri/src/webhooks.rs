@@ -142,7 +142,7 @@ async fn dados_evento(p: &SqlitePool, tipo: &str, objecto: Option<i64>) -> AppRe
             let Some(d) = sqlx::query(
                 "SELECT d.id, d.numero_doc, d.tipo_codigo, t.descricao AS tipo_descricao, t.grupo, d.data_emissao, d.data_hora,
                         d.entidade_id, d.entidade_nome, d.entidade_nif, d.total_liquido, d.total_iva, d.total, d.valor_pendente,
-                        d.estado, d.motivo_anulacao, d.referencia, d.hash_controlo, d.posto_id, d.api_chave_id
+                        d.estado, d.motivo_anulacao, d.referencia, d.hash_controlo, d.posto_id, d.armazem_id, d.api_chave_id
                  FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo WHERE d.id = ?",
             )
             .bind(id)

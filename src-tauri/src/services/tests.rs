@@ -4194,6 +4194,7 @@ async fn webhooks_api() {
     let fr_aviso = corpos.iter().find(|c| c["evento"] == "documento.emitido" && c["dados"]["tipo_codigo"] == "FR").expect("aviso da FR");
     assert_eq!((fr_aviso["dados"]["numero_doc"].as_str(), fr_aviso["dados"]["total"].as_i64()), (fr["documento"]["numero_doc"].as_str(), Some(171000)));
     assert_eq!(fr_aviso["dados"]["linhas"][0]["referencia"], "CAF250");
+    assert_eq!((fr_aviso["dados"]["armazem_id"].as_i64(), fr_aviso["dados"]["posto_id"].as_i64()), (Some(1), Some(1)), "a loja (armazém) e o posto da venda");
     assert!(fr_aviso["dados"]["linhas"][0].get("custo").is_none(), "os avisos não levam custos");
     let stock = corpos.iter().find(|c| c["evento"] == "stock.alterado").expect("aviso de stock");
     assert_eq!(stock["dados"]["quantidade"].as_f64(), Some(7.0), "o aviso leva o stock no momento do envio (8 − 1)");

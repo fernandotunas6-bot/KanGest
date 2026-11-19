@@ -238,7 +238,7 @@ automáticos → Novo aviso**, indique o endereço que recebe os avisos e os eve
 
 | Evento | Quando | `dados` |
 |---|---|---|
-| `documento.emitido` | Qualquer documento novo (vendas, compras, recibos, stock), no programa, no POS ou pela API | O documento com as linhas (sem custos) e `url` para o pedir à API |
+| `documento.emitido` | Qualquer documento novo (vendas, compras, recibos, stock), no programa, no POS ou pela API | O documento com as linhas (sem custos), o `posto_id`, o `armazem_id` (a loja), o `api_chave_id` (vazio = balcão) e `url` para o pedir à API |
 | `documento.anulado` | Um documento é anulado | O mesmo, com `estado: "A"` e o motivo |
 | `stock.alterado` | Entradas, saídas, vendas, transferências, inventário; e notas de encomenda (NE) emitidas, anuladas ou facturadas, que mudam o reservado | O artigo, a `quantidade`, o `reservado` e o `disponivel` (existência − reservado), no total e por armazém, no momento do envio |
 | `artigo.alterado` | Artigo criado ou alterado (descrição, preços, promoção, activo) | O artigo com os preços sem e com IVA (sem custos) |
