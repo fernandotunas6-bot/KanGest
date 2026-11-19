@@ -76,6 +76,51 @@ entra sem o telemóvel.
   (túnel da Cloudflare), as contas que não a tenham ligada. Na rede da loja nada muda. Pela Internet o PIN nunca
   serve para entrar.
 
+## Esqueci-me da senha
+
+No ecrã de entrada, **Esqueci-me da senha** abre a recuperação em três passos: o utilizador, o código da aplicação de
+autenticação (ou um código de recuperação, que fica gasto) e a senha nova, com a política de senhas.
+
+- Só serve a quem tem a **verificação em dois passos** ligada; os outros pedem ao administrador uma senha provisória
+  (**Redefinir senha**). A mensagem de erro é a mesma em todos os casos — não diz se o utilizador existe nem se tem
+  os dois passos.
+- Um código errado conta como tentativa falhada para o bloqueio da conta; com a conta bloqueada não se recupera.
+- O código conferido dá **10 minutos** para escolher a senha, uma só vez. A senha nova deixa a conta desbloqueada e
+  sem senha provisória; os dois passos continuam ligados.
+- Só nos postos da loja (rede local): **pela Internet a senha não se recupera**.
+- Fica no registo: `Recuperação da senha` (código conferido) e `Senha alterada` («recuperada com a verificação em dois
+  passos»); um código de recuperação usado fica também na auditoria.
+
+## Ecrã de entrada
+
+À esquerda, a imagem do ecrã de entrada com o logótipo e três cartões de novidades; à direita, «Bem-vindo ao
+KanGest» com o utilizador e a senha (o olho mostra o que se
+escreveu; os campos vazios dizem «Este campo é obrigatório»), **Ocultar valores** e **Esqueci-me da senha**. Em baixo,
+as **Perguntas frequentes** (entrar, aparelhos e rede, segurança), **Contacte-nos** e o site.
+
+**Ocultar valores** fica guardado no aparelho: no painel, os valores em kwanzas aparecem como `••••••` (e o eixo do
+gráfico sem montantes), para quem está do outro lado do balcão não os ver. No painel, **Mostrar valores** volta a
+mostrá-los.
+
+**Configurações → Aparência** (permissão de configurar o sistema), para todos os postos e browsers da empresa:
+
+- **Cores do sistema:** sete jogos prontos (o verde-petróleo do KanGest, azul-marinho, azul petróleo e ouro, vinho e
+  dourado, verde-floresta, grafite e laranja, violeta) ou um personalizado com duas cores (a principal — menu, botões,
+  ligações — e a de destaque — Abrir POS, Pagar, avisos). Os tons claros, escuros e os do tema escuro calculam-se
+  sozinhos, e uma cor demasiado clara escurece o necessário para o texto se ler. Escolhe-se também na instalação. O
+  tema claro ou escuro continua a ser de cada pessoa.
+- **Imagem do ecrã de entrada:** é a do KanGest e **não se troca** — fotografia n.º 9363112 do Pexels (licença
+  Pexels, uso comercial gratuito), editada: fato cinzento, gravata laranja e colunas claras
+  (`scripts/compor-imagem-entrada.py`).
+
+## O meu perfil
+
+No menu do utilizador (canto superior direito), **O meu perfil**: cada pessoa muda a sua **fotografia** (do
+computador ou, no telemóvel, com a câmara; corta-se ao quadrado e reduz-se a 256 px), o **nome**, o **email** e o
+**telefone**. A fotografia aparece no topo, no POS, no ecrã de sessão bloqueada e na lista de utilizadores do
+administrador. O utilizador (login), o perfil, a loja e as permissões continuam a ser do administrador. A mudança fica
+no registo de acessos (`Perfil alterado`, com o nome antigo e o novo).
+
 ## Registo
 
 Ficam no **Registo de acessos**: `Entrada`, `Saída`, `Tentativa falhada` (com o utilizador escrito, mesmo que não exista),

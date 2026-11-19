@@ -7,6 +7,7 @@ import { abrirVisorEcra, logoParaRaster } from "@/lib/equipamento";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import EmailConfig from "@/components/EmailConfig";
+import AparenciaConfig from "@/components/AparenciaConfig";
 import { imprimir } from "@/lib/print";
 import { call, descricaoDispositivo, esquecerLigacao, levarFicheiro, ligacaoWeb, MODO_WEB, reiniciar } from "@/lib/api";
 import { instalarPwa, usePwa } from "@/lib/pwa";
@@ -19,13 +20,14 @@ import type { Empresa, EscPos, Posto, PostoOpcoes, VisorOpcoes } from "@/lib/typ
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 
-const ABAS = ["Empresa", "Postos e impressão", "Rede", "Email", "Tabelas", "Sistema", "Certificação AGT"] as const;
+const ABAS = ["Empresa", "Aparência", "Postos e impressão", "Rede", "Email", "Tabelas", "Sistema", "Certificação AGT"] as const;
 
 export default function Configuracoes() {
   const { tem } = useSession();
   const nav = useNavigate();
   const permitido: Record<(typeof ABAS)[number], boolean> = {
     Empresa: tem("sistema.configuracoes"),
+    Aparência: tem("sistema.configuracoes"),
     "Postos e impressão": true,
     Rede: tem("sistema.configuracoes"),
     Email: tem("sistema.configuracoes"),
@@ -37,7 +39,7 @@ export default function Configuracoes() {
   const [aba, setAba] = useState<(typeof ABAS)[number]>(visiveis[0] ?? "Postos e impressão");
   // ?aba=…: «Cadastro de Empresa», «Utilizadores», «Cópia de Segurança», «Armazém» abrem o separador certo
   const [sp] = useSearchParams();
-  const pedida = ({ empresa: "Empresa", postos: "Postos e impressão", rede: "Rede", email: "Email", tabelas: "Tabelas", sistema: "Sistema", agt: "Certificação AGT" } as const)[
+  const pedida = ({ empresa: "Empresa", aparencia: "Aparência", postos: "Postos e impressão", rede: "Rede", email: "Email", tabelas: "Tabelas", sistema: "Sistema", agt: "Certificação AGT" } as const)[
     sp.get("aba") as "empresa"
   ];
   // os utilizadores passaram para o seu próprio módulo
@@ -68,6 +70,7 @@ export default function Configuracoes() {
           <RamoActividade />
         </div>
       )}
+      {aba === "Aparência" && <AparenciaConfig />}
       {aba === "Postos e impressão" && <Postos />}
       {aba === "Rede" && (MODO_WEB ? <RedeNoBrowser /> : <Rede />)}
       {aba === "Email" && <EmailConfig />}

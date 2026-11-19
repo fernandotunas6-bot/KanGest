@@ -1,11 +1,17 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { LockKeyhole, ShieldCheck } from "lucide-react";
+import { ArrowRight, ShieldCheck } from "lucide-react";
 import { call } from "@/lib/api";
 import { useSession } from "@/store/session";
 import type { Sessao } from "@/lib/types";
-import { Button, Field, Input, cn } from "@/components/ui";
-import { Moldura, TecladoPin, inicioDe, usePolitica, useTecladoFisicoPin } from "@/components/Sessao";
+import { useOcultarValores } from "@/lib/privacidade";
+import { Button, cn } from "@/components/ui";
+import { BoasVindas, CampoAcesso, InputAcesso, InputSenha, Interruptor, Moldura, type SeccaoAjuda } from "@/components/Acesso";
+import { TecladoPin, inicioDe, usePolitica, useTecladoFisicoPin } from "@/components/Sessao";
+import RecuperarSenha from "@/pages/RecuperarSenha";
+import PerguntasAcesso from "@/pages/PerguntasAcesso";
+
+const OBRIGATORIO = "Este campo é obrigatório";
 
 export default function Login({ empresa }: { empresa: string | null }) {
   const [login, setLogin] = useState("");
@@ -17,6 +23,11 @@ export default function Login({ empresa }: { empresa: string | null }) {
   const [pedirCodigo, setPedirCodigo] = useState(false);
   const [codigo, setCodigo] = useState("");
   const [busy, setBusy] = useState(false);
+  // os avisos «Este campo é obrigatório» só aparecem depois de carregar em Entrar
+  const [tocado, setTocado] = useState(false);
+  const [vista, setVista] = useState<"entrar" | "recuperar" | "perguntas">("entrar");
+  const [seccao, setSeccao] = useState<SeccaoAjuda | undefined>();
+  const [ocultar, setOcultar] = useOcultarValores();
   const setSessao = useSession((s) => s.setSessao);
   const politica = usePolitica();
   const nav = useNavigate();
@@ -29,6 +40,7 @@ export default function Login({ empresa }: { empresa: string | null }) {
       const s = await call<Sessao | { dois_passos: true }>(metodo, params);
       if ("dois_passos" in s) {
         setPedirCodigo(true);
+        setTocado(false);
         return;
       }
       setSessao(s);
@@ -45,7 +57,13 @@ export default function Login({ empresa }: { empresa: string | null }) {
 
   function submeter(e: FormEvent) {
     e.preventDefault();
-    entrar("auth.login", pedirCodigo ? { login, senha, codigo } : { login, senha });
+    setTocado(true);
+    if (pedirCodigo) {
+      if (codigo.trim()) entrar("auth.login", { login, senha, codigo });
+      return;
+    }
+    if (!login.trim() || !senha) return;
+    entrar("auth.login", { login, senha });
   }
 
   function recomecar() {
@@ -53,23 +71,26 @@ export default function Login({ empresa }: { empresa: string | null }) {
     setCodigo("");
     setSenha("");
     setErro("");
+    setTocado(false);
   }
 
-  useTecladoFisicoPin(comPin && modo === "pin", pin, setPin, () => entrar("auth.loginPin", { pin }));
+  const ajuda = (s?: SeccaoAjuda) => {
+    setSeccao(s);
+    setVista("perguntas");
+  };
+
+  useTecladoFisicoPin(vista === "entrar" && comPin && modo === "pin", pin, setPin, () => entrar("auth.loginPin", { pin }));
+
+  if (vista === "recuperar") return <RecuperarSenha loginInicial={login} onVoltar={() => setVista("entrar")} onAjuda={ajuda} />;
+  if (vista === "perguntas") return <PerguntasAcesso seccao={seccao} onVoltar={() => setVista("entrar")} onAjuda={ajuda} />;
 
   return (
-    <Moldura empresa={empresa}>
-      <div className="w-full max-w-sm">
-        <div className="mb-7">
-          <div className="mb-4 inline-flex rounded-xl bg-brand-50 p-2.5 text-brand">
-            <LockKeyhole className="size-5" />
-          </div>
-          <h2 className="text-[24px] font-semibold tracking-tight">Iniciar sessão</h2>
-          <p className="mt-1 text-ink-3">{modo === "pin" ? "Introduza o seu PIN de operador." : "Introduza as suas credenciais."}</p>
-        </div>
+    <Moldura empresa={empresa} onAjuda={ajuda}>
+      <div className="w-full max-w-[440px]">
+        <BoasVindas texto={pedirCodigo ? undefined : modo === "pin" && comPin ? "Introduza o seu PIN de operador." : undefined} />
 
-        {comPin && (
-          <div className="mb-5 grid grid-cols-2 gap-1 rounded-lg bg-sunken p-1 text-[13px]">
+        {comPin && !pedirCodigo && (
+          <div className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-sunken p-1 text-[13px]">
             {(["senha", "pin"] as const).map((m) => (
               <button
                 key={m}
@@ -77,6 +98,7 @@ export default function Login({ empresa }: { empresa: string | null }) {
                 onClick={() => {
                   setModo(m);
                   setErro("");
+                  setTocado(false);
                 }}
                 className={cn("rounded-md py-1.5", modo === m ? "bg-surface font-medium shadow-sm" : "text-ink-2")}
               >
@@ -87,25 +109,25 @@ export default function Login({ empresa }: { empresa: string | null }) {
         )}
 
         {pedirCodigo ? (
-          <form onSubmit={submeter} className="space-y-4">
+          <form noValidate onSubmit={submeter} className="space-y-5">
             <div className="flex gap-3 rounded-lg bg-brand-50 p-3 text-[13px] text-ink-2">
               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
               <span>Verificação em dois passos: escreva o código de 6 algarismos que a aplicação de autenticação mostra agora (ou um dos códigos de recuperação).</span>
             </div>
-            <Field label="Código">
-              <Input
+            <CampoAcesso label="Código" erro={tocado && !codigo.trim() && OBRIGATORIO}>
+              <InputAcesso
                 autoFocus
-                required
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 value={codigo}
                 onChange={(e) => setCodigo(e.target.value.slice(0, 12))}
-                className="h-11 text-center font-mono text-[20px] tracking-[0.3em]"
+                invalido={tocado && !codigo.trim()}
+                className="text-center font-mono text-[20px] tracking-[0.3em]"
                 placeholder="000000"
               />
-            </Field>
-            <Button size="lg" className="w-full" loading={busy}>
-              Confirmar
+            </CampoAcesso>
+            <Button variant="accent" size="lg" className="h-12 w-full text-[15px]" loading={busy}>
+              Confirmar <ArrowRight className="size-4" />
             </Button>
             <button type="button" onClick={recomecar} className="w-full text-[13px] text-ink-3 hover:text-ink">
               Entrar com outro utilizador
@@ -114,15 +136,29 @@ export default function Login({ empresa }: { empresa: string | null }) {
         ) : modo === "pin" && comPin ? (
           <TecladoPin valor={pin} onChange={setPin} ocupado={busy} onConfirmar={() => entrar("auth.loginPin", { pin })} />
         ) : (
-          <form onSubmit={submeter} className="space-y-4">
-            <Field label="Utilizador">
-              <Input autoFocus required autoComplete="username" value={login} onChange={(e) => setLogin(e.target.value)} className="h-11" />
-            </Field>
-            <Field label="Senha">
-              <Input type="password" required autoComplete="current-password" value={senha} onChange={(e) => setSenha(e.target.value)} className="h-11" />
-            </Field>
-            <Button size="lg" className="w-full" loading={busy}>
-              Entrar
+          <form noValidate onSubmit={submeter} className="space-y-5">
+            <CampoAcesso label="Utilizador" erro={tocado && !login.trim() && OBRIGATORIO}>
+              <InputAcesso
+                autoFocus
+                autoComplete="username"
+                autoCapitalize="off"
+                spellCheck={false}
+                value={login}
+                onChange={(e) => setLogin(e.target.value)}
+                invalido={tocado && !login.trim()}
+              />
+            </CampoAcesso>
+            <CampoAcesso label="Senha" erro={tocado && !senha && OBRIGATORIO}>
+              <InputSenha autoComplete="current-password" value={senha} onChange={(e) => setSenha(e.target.value)} invalido={tocado && !senha} />
+            </CampoAcesso>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <Interruptor ligado={ocultar} onChange={setOcultar} rotulo="Ocultar valores" dica="Esconde os valores em kwanzas do painel neste aparelho" />
+              <button type="button" onClick={() => setVista("recuperar")} className="text-[14px] font-medium text-ink underline underline-offset-2 hover:text-brand">
+                Esqueci-me da senha
+              </button>
+            </div>
+            <Button variant="accent" size="lg" className="h-12 w-full text-[15px]" loading={busy}>
+              Entrar <ArrowRight className="size-4" />
             </Button>
           </form>
         )}

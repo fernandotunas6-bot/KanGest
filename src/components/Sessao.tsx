@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Delete, KeyRound, LockKeyhole, LogOut } from "lucide-react";
+import { ArrowRight, Delete, LockKeyhole, LogOut } from "lucide-react";
 import { call } from "@/lib/api";
 import type { Sessao } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Button, Field, Input, cn } from "@/components/ui";
-import { Logo } from "@/components/Logo";
+import { BoasVindas, CampoAcesso, InputSenha, Moldura } from "@/components/Acesso";
+import { Avatar } from "@/components/MeuPerfil";
+import { useMeuPerfil } from "@/lib/perfil";
+
+const OBRIGATORIO = "Este campo é obrigatório";
 
 export interface PoliticaPublica {
   login_pin: boolean;
@@ -131,6 +135,8 @@ export function useTecladoFisicoPin(ativo: boolean, valor: string, onChange: (v:
  */
 export function EcraBloqueado() {
   const sessao = useSession((s) => s.sessao)!;
+  // a fotografia que já se tinha lido (com a sessão bloqueada o servidor não responde)
+  const fotoPerfil = useMeuPerfil().data?.foto;
   const setSessao = useSession((s) => s.setSessao);
   const terminar = useTerminarSessao();
   const qc = useQueryClient();
@@ -185,7 +191,7 @@ export function EcraBloqueado() {
     <div ref={raiz} onKeyDown={(e) => e.stopPropagation()} className="fixed inset-0 z-[200] grid place-items-center bg-brand-700/95 p-6 backdrop-blur-md">
       <div className="w-full max-w-sm rounded-2xl bg-surface p-7 shadow-pop">
         <div className="mb-6 flex items-center gap-3">
-          <div className="grid size-12 place-items-center rounded-full bg-brand text-[18px] font-semibold text-white">{sessao.nome.slice(0, 1).toUpperCase()}</div>
+          <Avatar nome={sessao.nome} foto={fotoPerfil} className="size-12 text-[18px]" />
           <div className="min-w-0">
             <div className="truncate text-[17px] font-semibold">{sessao.nome}</div>
             <div className="flex items-center gap-1.5 text-[13px] text-ink-3">
@@ -250,11 +256,14 @@ export function MudarSenhaObrigatoria() {
   const [f, setF] = useState({ atual: "", nova: "", confirmar: "" });
   const [erro, setErro] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  const [tocado, setTocado] = useState(false);
   const minimo = politica.data?.senha_min ?? 6;
 
   async function guardar(e: FormEvent) {
     e.preventDefault();
     setErro("");
+    setTocado(true);
+    if (!f.atual || !f.nova || !f.confirmar) return;
     if (f.nova !== f.confirmar) return setErro("A confirmação não coincide com a nova senha.");
     setOcupado(true);
     try {
@@ -269,31 +278,28 @@ export function MudarSenhaObrigatoria() {
     }
   }
 
+  const falta = (v: string) => tocado && !v;
   return (
     <Moldura>
-      <form onSubmit={guardar} className="w-full max-w-sm">
-        <div className="mb-7">
-          <div className="mb-4 inline-flex rounded-xl bg-accent-50 p-2.5 text-accent-ink">
-            <KeyRound className="size-5" />
-          </div>
-          <h2 className="text-[24px] font-semibold tracking-tight">Escolha a sua senha</h2>
-          <p className="mt-1 text-ink-3">
-            Olá, {sessao.nome.split(" ")[0]}. Está a usar uma senha provisória: defina uma senha só sua para continuar.
-          </p>
-        </div>
-        <div className="space-y-4">
-          <Field label="Senha provisória">
-            <Input autoFocus type="password" required value={f.atual} onChange={(e) => setF({ ...f, atual: e.target.value })} className="h-11" />
-          </Field>
-          <Field label="Nova senha" hint={`Pelo menos ${minimo} caracteres`}>
-            <Input type="password" autoComplete="new-password" required value={f.nova} onChange={(e) => setF({ ...f, nova: e.target.value })} className="h-11" />
-          </Field>
-          <Field label="Confirmar nova senha">
-            <Input type="password" autoComplete="new-password" required value={f.confirmar} onChange={(e) => setF({ ...f, confirmar: e.target.value })} className="h-11" />
-          </Field>
+      <form noValidate onSubmit={guardar} className="w-full max-w-[440px]">
+        <BoasVindas
+          antes={`Olá, ${sessao.nome.split(" ")[0]}`}
+          titulo="Escolha a sua senha"
+          texto="Está a usar uma senha provisória: defina uma senha só sua para continuar."
+        />
+        <div className="space-y-5">
+          <CampoAcesso label="Senha provisória" erro={falta(f.atual) && OBRIGATORIO}>
+            <InputSenha autoFocus value={f.atual} onChange={(e) => setF({ ...f, atual: e.target.value })} invalido={falta(f.atual)} />
+          </CampoAcesso>
+          <CampoAcesso label="Nova senha" erro={falta(f.nova) && OBRIGATORIO} dica={`Pelo menos ${minimo} caracteres`}>
+            <InputSenha autoComplete="new-password" value={f.nova} onChange={(e) => setF({ ...f, nova: e.target.value })} invalido={falta(f.nova)} />
+          </CampoAcesso>
+          <CampoAcesso label="Confirmar nova senha" erro={falta(f.confirmar) && OBRIGATORIO}>
+            <InputSenha autoComplete="new-password" value={f.confirmar} onChange={(e) => setF({ ...f, confirmar: e.target.value })} invalido={falta(f.confirmar)} />
+          </CampoAcesso>
           {erro && <p className="rounded-lg bg-danger-50 px-3 py-2 text-[13px] text-danger">{erro}</p>}
-          <Button size="lg" className="w-full" loading={ocupado}>
-            Guardar e entrar
+          <Button variant="accent" size="lg" className="h-12 w-full text-[15px]" loading={ocupado}>
+            Guardar e entrar <ArrowRight className="size-4" />
           </Button>
           <button type="button" onClick={terminar} className="mx-auto flex items-center gap-1.5 text-[13px] text-ink-2 hover:text-ink">
             <LogOut className="size-4" /> Sair
@@ -304,32 +310,5 @@ export function MudarSenhaObrigatoria() {
   );
 }
 
-/** Painel de marca à esquerda e o formulário à direita (entrada, senha provisória). */
-export function Moldura({ children, empresa }: { children: ReactNode; empresa?: string | null }) {
-  return (
-    <div className="grid h-full md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-      <div className="relative hidden flex-col justify-between overflow-hidden bg-brand-700 p-12 text-white md:flex">
-        <div className="absolute -right-32 -top-32 size-[480px] rounded-full bg-brand/60 blur-3xl" />
-        <div className="absolute -bottom-40 -left-20 size-[420px] rounded-full bg-accent/25 blur-3xl" />
-        <div className="relative flex items-center gap-3">
-          <Logo className="size-11 rounded-[22%] ring-1 ring-white/15" />
-          <span className="text-lg font-semibold">KanGest</span>
-        </div>
-        <div className="relative max-w-md">
-          <h1 className="text-[38px] font-semibold leading-[1.1] tracking-tight">Facturação, stock e caixa num só lugar.</h1>
-          <p className="mt-4 text-white/70">Documentos certificáveis pela AGT, POS rápido com leitor de código de barras e relatórios em tempo real.</p>
-        </div>
-        <div className="relative text-[13px] text-white/50">{empresa ?? ""}</div>
-      </div>
-      <div className="flex min-h-0 flex-col overflow-y-auto">
-        {/* ecrãs pequenos (telemóvel, terminal POS): só uma faixa com a marca */}
-        <div className="flex items-center gap-2.5 bg-brand-700 px-5 py-3 text-white md:hidden">
-          <Logo className="size-8 rounded-[22%] ring-1 ring-white/15" />
-          <span className="font-semibold">KanGest</span>
-          {empresa && <span className="ml-auto truncate text-[12px] text-white/60">{empresa}</span>}
-        </div>
-        <div className="flex flex-1 items-center justify-center p-6 md:p-10">{children}</div>
-      </div>
-    </div>
-  );
-}
+/** A moldura dos ecrãs de acesso (montra do KanGest à esquerda, formulário à direita): em Acesso.tsx. */
+export { Moldura };

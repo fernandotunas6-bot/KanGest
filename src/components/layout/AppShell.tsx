@@ -1,27 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import {
-  ChevronDown,
-  ChevronRight,
-  Hand,
-  KeyRound,
-  Keyboard,
-  LayoutDashboard,
-  Lock,
-  LogOut,
-  Menu as IconeMenu,
-  Monitor,
-  Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Plus,
-  Search,
-  ShieldCheck,
-  ShoppingCart,
-  Star,
-  Sun,
-  X,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Hand, Keyboard, KeyRound, LayoutDashboard, Lock, LogOut, Menu as IconeMenu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Plus, Search, ShieldCheck, ShoppingCart, Star, Sun, UserRound, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { call } from "@/lib/api";
@@ -36,6 +15,8 @@ import { AvisoLicenca } from "@/components/AvisoLicenca";
 import { PaletaComandos } from "@/components/Comandos";
 import DocumentoModal from "@/components/DocumentoModal";
 import DoisPassos from "@/components/DoisPassos";
+import MeuPerfil, { Avatar } from "@/components/MeuPerfil";
+import { useMeuPerfil } from "@/lib/perfil";
 import type { Sessao } from "@/lib/types";
 
 const CHAVE_ABERTO = "kangest.menu.aberto";
@@ -68,6 +49,7 @@ export default function AppShell() {
   const qc = useQueryClient();
   const [senha, setSenha] = useState(false);
   const [doisPassos, setDoisPassos] = useState(false);
+  const [meuPerfil, setMeuPerfil] = useState(false);
   const [paleta, setPaleta] = useState(false);
   const [docAberto, setDocAberto] = useState<number | null>(null);
   const [aberto, setAberto] = useState<string | null>(() => lerLocal(CHAVE_ABERTO, "vendas") || null);
@@ -269,7 +251,7 @@ export default function AppShell() {
           <span className="hidden sm:contents">
             <BotaoTema />
           </span>
-          <MenuUtilizador sessao={sessao} onSenha={() => setSenha(true)} onDoisPassos={() => setDoisPassos(true)} onSair={sair} />
+          <MenuUtilizador sessao={sessao} onPerfil={() => setMeuPerfil(true)} onSenha={() => setSenha(true)} onDoisPassos={() => setDoisPassos(true)} onSair={sair} />
         </header>
 
         <main className="min-w-0 flex-1 overflow-y-auto">
@@ -291,6 +273,7 @@ export default function AppShell() {
       <DocumentoModal id={docAberto} onClose={() => setDocAberto(null)} />
       {senha && <AlterarSenha onClose={() => setSenha(false)} />}
       {doisPassos && <DoisPassos onClose={() => setDoisPassos(false)} />}
+      {meuPerfil && <MeuPerfil onClose={() => setMeuPerfil(false)} />}
     </div>
   );
 }
@@ -498,16 +481,28 @@ const DENSIDADES: { id: Densidade; label: string }[] = [
   { id: "compacta", label: "Compacta" },
 ];
 
-function MenuUtilizador({ sessao, onSenha, onDoisPassos, onSair }: { sessao: Sessao | null; onSenha: () => void; onDoisPassos: () => void; onSair: () => void }) {
+function MenuUtilizador({
+  sessao,
+  onPerfil,
+  onSenha,
+  onDoisPassos,
+  onSair,
+}: {
+  sessao: Sessao | null;
+  onPerfil: () => void;
+  onSenha: () => void;
+  onDoisPassos: () => void;
+  onSair: () => void;
+}) {
   const nav = useNavigate();
   const { tema, setTema, densidade, setDensidade, toque, setToque } = useAparencia();
-  const inicial = sessao?.nome.slice(0, 1).toUpperCase();
+  const foto = useMeuPerfil().data?.foto;
   return (
     <Popover
       className="w-72"
       botao={({ alternar, aberto }) => (
         <button onClick={alternar} className={cn("flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 transition hover:bg-sunken", aberto && "bg-sunken")} title="Conta e aparência">
-          <span className="grid size-7 place-items-center rounded-full bg-brand text-[12px] font-semibold text-white">{inicial}</span>
+          <Avatar nome={sessao?.nome} foto={foto} className="size-7 text-[12px]" />
           <span className="hidden max-w-[150px] truncate text-[13px] font-medium text-ink sm:inline">{sessao?.nome}</span>
           <ChevronDown className="hidden size-3.5 text-ink-3 sm:block" />
         </button>
@@ -516,7 +511,7 @@ function MenuUtilizador({ sessao, onSenha, onDoisPassos, onSair }: { sessao: Ses
       {(fechar) => (
         <>
           <div className="flex items-center gap-3 px-3 pb-3 pt-2">
-            <span className="grid size-10 place-items-center rounded-full bg-brand text-[15px] font-semibold text-white">{inicial}</span>
+            <Avatar nome={sessao?.nome} foto={foto} className="size-10 text-[15px]" />
             <div className="min-w-0 leading-tight">
               <div className="truncate font-medium">{sessao?.nome}</div>
               <div className="truncate text-[12px] text-ink-3">
@@ -525,6 +520,15 @@ function MenuUtilizador({ sessao, onSenha, onDoisPassos, onSair }: { sessao: Ses
             </div>
           </div>
           <div className="my-1 h-px bg-line" />
+          <MenuItem
+            icon={UserRound}
+            onClick={() => {
+              fechar();
+              onPerfil();
+            }}
+          >
+            O meu perfil
+          </MenuItem>
           <MenuItem
             icon={KeyRound}
             onClick={() => {

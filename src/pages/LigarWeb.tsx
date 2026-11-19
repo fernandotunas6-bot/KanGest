@@ -1,8 +1,11 @@
 import { useState, type FormEvent } from "react";
-import { KeyRound, MonitorSmartphone, ShieldCheck } from "lucide-react";
+import { ArrowRight, ShieldCheck } from "lucide-react";
 import { ligarWeb, ligacaoWeb } from "@/lib/api";
-import { Button, Field, Input } from "@/components/ui";
-import { Moldura } from "@/components/Sessao";
+import { Button } from "@/components/ui";
+import { BoasVindas, CampoAcesso, InputAcesso, InputSenha, Moldura, type SeccaoAjuda } from "@/components/Acesso";
+import PerguntasAcesso from "@/pages/PerguntasAcesso";
+
+const OBRIGATORIO = "Este campo é obrigatório";
 
 /**
  * Browser (telemóvel, tablet, terminal POS, outro computador) ainda sem ligação ao servidor KanGest:
@@ -14,10 +17,14 @@ export default function LigarWeb({ onLigado }: { onLigado: () => void }) {
   const [posto, setPosto] = useState(String(anterior?.posto ?? 1));
   const [erro, setErro] = useState("");
   const [busy, setBusy] = useState(false);
+  const [tocado, setTocado] = useState(false);
+  const [ajuda, setAjuda] = useState<{ seccao?: SeccaoAjuda } | null>(null);
   const seguro = window.isSecureContext;
 
   async function ligar(e: FormEvent) {
     e.preventDefault();
+    setTocado(true);
+    if (!chave || !posto.trim()) return;
     setBusy(true);
     setErro("");
     try {
@@ -30,37 +37,33 @@ export default function LigarWeb({ onLigado }: { onLigado: () => void }) {
     }
   }
 
+  const abrirAjuda = (seccao?: SeccaoAjuda) => setAjuda({ seccao });
+  if (ajuda) return <PerguntasAcesso seccao={ajuda.seccao ?? "aparelhos"} onVoltar={() => setAjuda(null)} onAjuda={abrirAjuda} />;
+
   return (
-    <Moldura>
-      <div className="w-full max-w-sm">
-        <div className="mb-6">
-          <div className="mb-4 inline-flex rounded-xl bg-brand-50 p-2.5 text-brand">
-            <MonitorSmartphone className="size-5" />
-          </div>
-          <h2 className="text-[24px] font-semibold tracking-tight">Ligar este aparelho</h2>
-          <p className="mt-1 text-ink-3">
-            Introduza a <b>chave de rede</b> do servidor KanGest da loja. Encontra-a no computador servidor, em Configurações → Rede.
-          </p>
-        </div>
-        <form onSubmit={ligar} className="space-y-4">
-          <Field label="Chave de rede">
-            <Input
-              autoFocus
-              required
-              type="password"
-              autoComplete="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              value={chave}
-              onChange={(e) => setChave(e.target.value)}
-              className="h-12 text-[16px]"
-            />
-          </Field>
-          <Field label="N.º do posto" hint="Define a série, o armazém, a impressora e o caixa deste aparelho. Pode mudá-lo depois.">
-            <Input type="number" inputMode="numeric" min={1} required value={posto} onChange={(e) => setPosto(e.target.value)} className="h-12 text-[16px]" />
-          </Field>
-          <Button size="lg" className="h-12 w-full" loading={busy}>
-            <KeyRound className="size-4" /> Ligar
+    <Moldura onAjuda={abrirAjuda}>
+      <div className="w-full max-w-[440px]">
+        <BoasVindas
+          texto={
+            <>
+              Ligue este aparelho ao servidor da loja com a <b className="text-ink-2">chave de rede</b>. Encontra-a no computador servidor, em
+              Configurações → Rede.
+            </>
+          }
+        />
+        <form noValidate onSubmit={ligar} className="space-y-5">
+          <CampoAcesso label="Chave de rede" erro={tocado && !chave && OBRIGATORIO}>
+            <InputSenha autoFocus autoComplete="off" autoCapitalize="off" spellCheck={false} value={chave} onChange={(e) => setChave(e.target.value)} invalido={tocado && !chave} />
+          </CampoAcesso>
+          <CampoAcesso
+            label="N.º do posto"
+            erro={tocado && !posto.trim() && OBRIGATORIO}
+            dica="Define a série, o armazém, a impressora e o caixa deste aparelho. Pode mudá-lo depois."
+          >
+            <InputAcesso type="number" inputMode="numeric" min={1} value={posto} onChange={(e) => setPosto(e.target.value)} invalido={tocado && !posto.trim()} />
+          </CampoAcesso>
+          <Button variant="accent" size="lg" className="h-12 w-full text-[15px]" loading={busy}>
+            Ligar <ArrowRight className="size-4" />
           </Button>
         </form>
         {busy && !window.crypto?.subtle && <p className="mt-3 text-[12px] text-ink-3">A preparar a chave de cifra neste aparelho… pode demorar alguns segundos.</p>}

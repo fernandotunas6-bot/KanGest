@@ -52,6 +52,8 @@ import { useEmpresa } from "@/components/PrintCabecalho";
 import { useAparencia } from "@/lib/aparencia";
 import { atributosDe, notaDaLinha, ramoPorId, resumoAtributos } from "@/lib/ramos";
 import { useMiniaturas } from "@/lib/fotos";
+import { useMeuPerfil } from "@/lib/perfil";
+import { Avatar } from "@/components/MeuPerfil";
 import { abrirVisorEcra, ecraInteiro, linhasVisorColuna, ouvirVisorPronto, publicarVisor, type EstadoVisor } from "@/lib/equipamento";
 
 interface Linha {
@@ -191,6 +193,7 @@ export default function Pos() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const { sessao, pode, tem, setSessao } = useSession();
+  const fotoPerfil = useMeuPerfil().data?.foto;
   const tabelas = useTabelas();
   const opcoes: PostoOpcoes = { ...OPCOES_PADRAO, ...(tabelas.data?.posto?.opcoes ?? {}) };
   const termica = !!opcoes.escpos?.ativo;
@@ -933,7 +936,9 @@ export default function Pos() {
             {agora.toLocaleDateString("pt-PT", { weekday: "short", day: "2-digit", month: "2-digit" })} · <b className="font-semibold text-ink">{agora.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</b>
           </span>
           <span className="flex items-center gap-2 text-[13px] text-ink-2">
-            <span className="grid size-7 place-items-center rounded-full bg-brand text-[12px] font-semibold text-white max-sm:hidden" title={sessao?.nome}>{sessao?.nome.slice(0, 1).toUpperCase()}</span>
+            <span className="max-sm:hidden" title={sessao?.nome}>
+              <Avatar nome={sessao?.nome} foto={fotoPerfil} className="size-7 text-[12px]" />
+            </span>
             <span className="hidden max-w-40 truncate xl:inline">{sessao?.nome}</span>
           </span>
           <Button variant="ghost" size="sm" onClick={bloquearSessao} title="Bloquear o posto (retoma-se com a senha ou o PIN; a venda fica como está)">
@@ -1718,11 +1723,18 @@ function Pagamento({
     }
   }
 
-  // numerário rápido: o que falta depois dos pontos
+  // numerário rápido (o que falta depois dos pontos): o valor certo e o que o cliente costuma entregar — as notas de
+  // 500, 1 000, 1 500, 2 000, 5 000 e 10 000 Kz e o total arredondado a essas notas; só o que chega, até 6 botões
   const restante = Math.max(0, total - emPontos);
-  const rapidos = [restante, Math.ceil(restante / 100000) * 100000, Math.ceil(restante / 500000) * 500000, Math.ceil(restante / 1000000) * 1000000]
-    .filter((v, i, a) => v > 0 && v >= restante && a.indexOf(v) === i)
-    .slice(0, 4);
+  const NOTAS_KZ = [500, 1000, 1500, 2000, 5000, 10000];
+  const rapidos =
+    restante > 0
+      ? [restante, ...[500, 1000, 2000, 5000, 10000].map((n) => Math.ceil(restante / (n * 100)) * n * 100), ...NOTAS_KZ.map((n) => n * 100)]
+          .filter((v) => v >= restante)
+          .sort((x, y) => x - y)
+          .filter((v, i, a) => a.indexOf(v) === i)
+          .slice(0, 6)
+      : [];
 
   return (
     <Modal
@@ -1821,7 +1833,7 @@ function Pagamento({
             </div>
             <div className="flex flex-col gap-3">
               <div className="text-[12px] font-medium uppercase tracking-wide text-ink-2">Numerário rápido</div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {rapidos.map((v) => (
                   <Button type="button" key={v} variant="secondary" size="lg" className="num" onClick={() => setValores({ ...(emPontos > 0 ? { DE: valores.DE } : {}), NU: (v / 100).toFixed(2).replace(".", ",") })}>
                     {kzNum(v)}

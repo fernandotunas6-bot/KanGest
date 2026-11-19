@@ -763,7 +763,7 @@ async fn despachar(st: &AppState, metodo: &str, params: Value) -> AppResult<Valu
 pub fn sessao_remota(metodo: &str, resposta: &Value) -> Option<Option<crate::state::Sessao>> {
     match metodo {
         // a sessão (e o seu estado: senha provisória, bloqueada) acompanha o servidor nos postos em rede
-        "auth.login" | "auth.loginPin" | "auth.sessao" | "auth.alterarSenha" | "auth.bloquear" | "auth.desbloquear" => {
+        "auth.login" | "auth.loginPin" | "auth.sessao" | "auth.alterarSenha" | "auth.bloquear" | "auth.desbloquear" | "auth.guardarPerfil" => {
             Some(serde_json::from_value(resposta.clone()).ok())
         }
         "auth.logout" => Some(None),

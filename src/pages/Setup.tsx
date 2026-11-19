@@ -1,10 +1,13 @@
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { Building2, DatabaseBackup, ShieldCheck } from "lucide-react";
+import { Building2, DatabaseBackup, Palette, ShieldCheck } from "lucide-react";
 import { call } from "@/lib/api";
 import { Button, Card, Field, Input, Select } from "@/components/ui";
 import { Logo } from "@/components/Logo";
 import { EscolherRamo } from "@/components/EscolherRamo";
+import { EscolherCores } from "@/components/EscolherCores";
+import { useAparencia } from "@/lib/aparencia";
+import type { Cores } from "@/lib/cores";
 import { Store } from "lucide-react";
 import { RestaurarCopia } from "@/pages/Configuracoes";
 
@@ -13,6 +16,12 @@ export default function Setup({ onDone }: { onDone: () => void }) {
   const [a, setA] = useState({ nome: "Administrador", login: "admin", senha: "", confirmar: "" });
   const [busy, setBusy] = useState(false);
   const [ramo, setRamo] = useState<string>("comercio");
+  const [cores, setCoresLocal] = useState<Cores>({ paleta: "petroleo" });
+  // o jogo escolhido vê-se logo neste ecrã
+  const escolherCores = (c: Cores) => {
+    setCoresLocal(c);
+    useAparencia.getState().setCores(c);
+  };
   // computador novo: restaurar uma cópia de segurança em vez de configurar do zero
   const [copia, setCopia] = useState("");
   const [restaurar, setRestaurar] = useState(false);
@@ -22,7 +31,7 @@ export default function Setup({ onDone }: { onDone: () => void }) {
     if (a.senha !== a.confirmar) return toast.error("As senhas não coincidem.");
     setBusy(true);
     try {
-      await call("setup.inicializar", { empresa: e, admin: { nome: a.nome, login: a.login, senha: a.senha }, ramo });
+      await call("setup.inicializar", { empresa: e, admin: { nome: a.nome, login: a.login, senha: a.senha }, ramo, cores });
       toast.success("Sistema configurado. Inicie sessão.");
       onDone();
     } catch (err) {
@@ -83,6 +92,14 @@ export default function Setup({ onDone }: { onDone: () => void }) {
           </div>
           <p className="mb-4 text-[13px] text-ink-3">O KanGest adapta os artigos e o POS ao seu negócio. Pode mudar depois em Configurações → Empresa.</p>
           <EscolherRamo valor={ramo} onChange={setRamo} />
+        </Card>
+
+        <Card className="mt-5 p-6">
+          <div className="mb-1 flex items-center gap-2 font-semibold">
+            <Palette className="size-5 text-brand" /> Cores do sistema
+          </div>
+          <p className="mb-4 text-[13px] text-ink-3">O jogo de cores do menu, dos botões e do ecrã de entrada. Pode mudar depois em Configurações → Aparência.</p>
+          <EscolherCores valor={cores} onChange={escolherCores} />
         </Card>
 
         <Card className="mt-5 p-6">
