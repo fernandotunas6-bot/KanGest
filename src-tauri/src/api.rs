@@ -1962,9 +1962,6 @@ async fn resolver_cliente(st: &AppState, c: &Chave, corpo: &mut Map<String, Valu
     Ok(())
 }
 
-/// Com documento de origem (nota de crédito, conversão de proforma ou encomenda) o programa não volta a pedir
-/// autorização de preço e desconto, porque o ecrã copia as linhas da origem. Pela API as linhas vêm de fora: sem as
-/// permissões de preço e desconto, cada artigo tem de estar na origem e o preço e o desconto são os da origem.
 /// Sem `armazem_id`, um documento com origem (FR de uma NE, NC de uma venda) fica no armazém da origem: a encomenda
 /// reservada na loja do levantamento sai do stock dessa loja, e a devolução volta para a loja onde se vendeu.
 async fn armazem_da_origem(st: &AppState, corpo: &mut Map<String, Value>) -> Result<(), Resposta> {
@@ -1979,22 +1976,31 @@ async fn armazem_da_origem(st: &AppState, corpo: &mut Map<String, Value>) -> Res
     Ok(())
 }
 
+/// Com documento de origem (nota de crédito, conversão de proforma ou encomenda) o programa não volta a pedir
+/// autorização de preço e desconto, porque o ecrã copia as linhas da origem. Pela API as linhas vêm de fora: a linha
+/// sem preço (ou sem desconto) leva o da linha da origem que lhe corresponde — o mesmo artigo e, quando a linha traz
+/// `descricao`, a mesma descrição; senão a seguinte desse artigo, pela ordem. Assim um artigo genérico com vários
+/// produtos (ex.: edições digitais de uma loja online, cada uma com o seu título e preço) fica com o preço certo em
+/// cada linha. Sem as permissões de preço e desconto, cada artigo tem de estar na origem e um preço ou desconto
+/// diferente é recusado.
 async fn precos_da_origem(st: &AppState, c: &Chave, corpo: &mut Map<String, Value>) -> Result<(), Resposta> {
     let Some(oid) = corpo.get("doc_origem_id").and_then(Value::as_i64) else { return Ok(()) };
     let (pode_preco, pode_desconto) = (c.tem("pos.alterar_preco"), c.tem("pos.desconto"));
-    if pode_preco && pode_desconto {
-        return Ok(());
-    }
     let global = corpo.get("desconto_global_pct").and_then(Value::as_f64).unwrap_or(0.0) > 0.0 || corpo.get("desconto_global_valor").and_then(Value::as_i64).unwrap_or(0) > 0;
     if global && !pode_desconto {
         return Err(c.exigir("pos.desconto").unwrap_err());
     }
-    let mut origem: HashMap<i64, (i64, f64)> = HashMap::new();
-    for (artigo, preco, desconto) in
-        sqlx::query_as::<_, (Option<i64>, i64, f64)>("SELECT artigo_id, preco_unitario, desconto_pct FROM documento_linhas WHERE documento_id = ? ORDER BY linha").bind(oid).fetch_all(&st.pool).await?
+    // linhas da origem por artigo, pela ordem: (preço, desconto, descrição, já usada)
+    let mut origem: HashMap<i64, Vec<(i64, f64, String, bool)>> = HashMap::new();
+    for (artigo, preco, desconto, descricao) in sqlx::query_as::<_, (Option<i64>, i64, f64, String)>(
+        "SELECT artigo_id, preco_unitario, desconto_pct, descricao FROM documento_linhas WHERE documento_id = ? ORDER BY linha",
+    )
+    .bind(oid)
+    .fetch_all(&st.pool)
+    .await?
     {
         if let Some(a) = artigo {
-            origem.entry(a).or_insert((preco, desconto));
+            origem.entry(a).or_default().push((preco, desconto, descricao, false));
         }
     }
     let Some(linhas) = corpo.get_mut("linhas").and_then(Value::as_array_mut) else { return Ok(()) };
@@ -2002,9 +2008,20 @@ async fn precos_da_origem(st: &AppState, c: &Chave, corpo: &mut Map<String, Valu
         let n = n + 1;
         let Some(o) = l.as_object_mut() else { continue };
         let artigo = o.get("artigo_id").and_then(Value::as_i64).unwrap_or_default();
-        let Some(&(preco, desconto)) = origem.get(&artigo) else {
+        let Some(candidatas) = origem.get_mut(&artigo) else {
+            if pode_preco && pode_desconto {
+                continue;
+            }
             return Err(Resposta::erro(422, "validacao", format!("Linha {n}: o artigo não está no documento de origem.")));
         };
+        let descricao = o.get("descricao").and_then(Value::as_str).map(str::trim).filter(|d| !d.is_empty());
+        let livre = |c: &(i64, f64, String, bool)| !c.3;
+        let i = descricao
+            .and_then(|d| candidatas.iter().position(|c| livre(c) && c.2.trim() == d))
+            .or_else(|| candidatas.iter().position(livre))
+            .unwrap_or(candidatas.len() - 1);
+        candidatas[i].3 = true;
+        let (preco, desconto) = (candidatas[i].0, candidatas[i].1);
         match o.get("preco_unitario").filter(|v| !v.is_null()).map(Value::as_i64) {
             None => {
                 o.insert("preco_unitario".into(), json!(preco));

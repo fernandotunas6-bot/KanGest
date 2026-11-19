@@ -220,8 +220,11 @@ code da AGT para mostrar ao cliente).
   (por exemplo, onde o cliente vai levantar a encomenda). Um documento com origem fica, sem `armazem_id`, no armazém
   da origem: a FR de uma NE sai do stock que a NE reservou e a nota de crédito devolve à loja onde se vendeu.
 - **Documento de origem** (`doc_origem_id`: nota de crédito, conversão de proforma ou de nota de encomenda): envie as
-  linhas sem preço — o preço e o desconto vêm da origem. Sem `pos.alterar_preco` / `pos.desconto`, cada artigo tem de
-  estar na origem e um preço ou desconto diferente é recusado.
+  linhas sem preço — o preço e o desconto vêm da linha da origem que corresponde a cada uma: o mesmo artigo e, se a
+  linha trouxer `descricao`, a mesma descrição; senão a seguinte desse artigo, pela ordem. Um artigo genérico com
+  vários produtos (ex.: `DIGITAL`, cada edição com o seu título e preço) fica assim com o preço certo em cada linha.
+  Sem `pos.alterar_preco` / `pos.desconto`, cada artigo tem de estar na origem e um preço ou desconto diferente é
+  recusado.
 - **Caixa:** os documentos da API não entram no caixa de nenhum posto (a venda da loja online não passa pela gaveta).
   Uma nota de crédito de uma venda paga fica como crédito do cliente; a devolução do dinheiro faz-se no programa
   (Contas a Receber → devolver) ou fora dele.
@@ -375,3 +378,5 @@ while True:
   `docs/openapi.json`, incluído no executável) e neste documento. Permissão nova para chaves: `PERMISSOES_API`.
 - Testes: `cargo test api` (unitários e o teste de integração `api_integracao`, que liga a API numa porta livre e faz
   os pedidos por HTTP). O servidor de demonstração da auditoria (`servidor_demo`) também liga a API na porta 7800.
+  `api_loja_online_contrato` repete os pedidos da loja online da Livraria Adventista (NE, FR, NC, anulação, stock por
+  livraria, relatórios e avisos): uma mudança na API que a parta falha aqui.

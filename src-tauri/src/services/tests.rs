@@ -4097,6 +4097,199 @@ async fn api_loja_online() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// Contrato com a loja online da Livraria Adventista (supabase/functions/app/kangest.ts, repositório do site): os
+/// pedidos exactamente como o site os faz — NE com o preço com IVA do site, produtos digitais no artigo genérico
+/// (cada um com o seu título e preço), portes, cliente pelo NIF; FR a partir da NE com as linhas sem preço; nota de
+/// crédito da FR; anulação da NE — e o que o site lê de volta (stock paginado, relatórios, avisos).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn api_loja_online_contrato() {
+    let _so_uma_api = API_UMA_DE_CADA_VEZ.lock().await;
+    let pasta = std::env::temp_dir().join(format!("kigest-loja-online-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let pool = db::abrir(&pasta.join("kigest.db")).await.expect("abrir base");
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Livraria, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let livro = rpc(&st, "artigos.guardar", json!({ "descricao": "O Desejado de Todas as Nações", "referencia": "LIV001", "taxa_iva_id": 1, "preco1": 500000 })).await["id"].as_i64().unwrap();
+    rpc(&st, "artigos.guardar", json!({ "descricao": "Edição digital", "referencia": "DIGITAL", "tipo": "S", "taxa_iva_id": 1, "preco1": 0 })).await;
+    rpc(&st, "artigos.guardar", json!({ "descricao": "Portes", "referencia": "PORTES", "tipo": "S", "taxa_iva_id": 1, "preco1": 0 })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": livro, "quantidade": 10, "preco_unitario": 300000 }] })).await;
+    let posto = rpc(&st, "posto.guardar", json!({ "descricao": "Loja online", "armazem_id": 1, "serie_prefixo": "W" })).await["id"].as_i64().unwrap();
+    // servidor central: a segunda livraria é outro armazém
+    let lubango = rpc(&st, "tabela.guardar", json!({ "tabela": "armazens", "descricao": "Livraria do Lubango" })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "armazem_id": lubango, "linhas": [{ "artigo_id": livro, "quantidade": 4, "preco_unitario": 300000 }] })).await;
+    let utilizador = rpc(&st, "utilizadores.guardar", json!({ "nome": "Loja Online", "login": "loja", "senha": "segredo99", "perfil": "GESTOR", "mudar_senha": false })).await["id"].as_i64().unwrap();
+    // as permissões que docs/KANGEST.md do site pede para a chave (sem pos.desconto)
+    let perms = json!(["api.artigos", "api.stock", "api.documentos", "vendas.proforma", "vendas.fatura_recibo", "vendas.nota_credito", "documentos.anular", "clientes", "relatorios.ver", "pos.alterar_preco"]);
+    let criada = rpc(&st, "api.chaveCriar", json!({ "nome": "Loja online", "utilizador_id": utilizador, "posto_id": posto, "permissoes": perms })).await;
+    let chave = criada["chave"].as_str().unwrap().to_string();
+    let chave_id = criada["id"].as_i64().unwrap();
+    let estado = rpc(&st, "api.estado", Value::Null).await;
+    let sem_efeito = estado["chaves"].as_array().unwrap().iter().find(|c| c["id"] == chave_id).unwrap()["sem_efeito"].clone();
+    assert_eq!(sem_efeito, json!([]), "um utilizador Gestor tem todas as permissões da chave da loja online");
+    let (porta_avisos, recebidos) = receptor_webhooks();
+    rpc(&st, "api.webhookGuardar", json!({ "nome": "Loja online", "url": format!("http://127.0.0.1:{porta_avisos}/webhooks/kangest?ligacao=central"),
+        "eventos": ["stock.alterado", "artigo.alterado", "documento.emitido", "documento.anulado"] })).await;
+
+    let porta = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let arc = std::sync::Arc::new(st);
+    crate::api::registar_estado(arc.clone());
+    rpc(&arc, "api.guardar", json!({ "ativo": true, "porta": porta, "rede": false })).await;
+    // como o site: Authorization, Accept, Content-Type e, nas emissões, Idempotency-Key
+    let pedir = |metodo: &str, caminho: &str, corpo: Option<&Value>, idem: Option<&str>| {
+        let mut extra = vec![("Accept", "application/json")];
+        if let Some(i) = idem {
+            extra.push(("Idempotency-Key", i));
+        }
+        let (s, _, v) = api_http(porta, metodo, &format!("/api/v1{caminho}"), Some(&chave), corpo, &extra);
+        (s, v)
+    };
+
+    // ---- encomenda 1001 feita: NE (corpoNE) ----
+    let ne_corpo = json!({
+        "tipo": "NE", "referencia": "1001", "observacoes": "Loja online · encomenda 1001", "armazem_id": 1,
+        "linhas": [
+            { "referencia": "LIV001", "quantidade": 2, "preco_com_iva": 513000 },
+            { "referencia": "DIGITAL", "quantidade": 1, "preco_com_iva": 150000, "descricao": "Caminho a Cristo (e-book)" },
+            { "referencia": "DIGITAL", "quantidade": 1, "preco_com_iva": 90000, "descricao": "Primeiros Escritos (e-book)" },
+            { "referencia": "PORTES", "quantidade": 1, "preco_com_iva": 250000, "descricao": "Portes de envio" }
+        ],
+        "cliente": { "nif": "5417189230", "nome": "Igreja do Huambo", "email": "tesouraria@igreja.ao", "telefone": "923456789" }
+    });
+    let (s, ne) = pedir("POST", "/documentos", Some(&ne_corpo), Some("ne-1001"));
+    assert_eq!(s, 201, "{ne}");
+    let ne_id = ne["id"].as_i64().unwrap();
+    assert!(ne["numero_doc"].as_str().unwrap().starts_with("NE W"), "{ne}");
+    assert_eq!(ne["armazem_id"], 1, "o site guarda o armazém da NE: {ne}");
+    let total_ne = ne["total"].as_i64().unwrap();
+    assert_eq!(total_ne, 2 * 513000 + 150000 + 90000 + 250000, "o total é o que o site cobrou: {ne}");
+    let descricoes: Vec<&str> = ne["linhas"].as_array().unwrap().iter().filter_map(|l| l["descricao"].as_str()).collect();
+    assert!(descricoes.contains(&"Caminho a Cristo (e-book)") && descricoes.contains(&"Primeiros Escritos (e-book)"), "o título do produto vai na linha do genérico: {descricoes:?}");
+    // repetir (ligação caída): o mesmo documento
+    let (s, de_novo) = pedir("POST", "/documentos", Some(&ne_corpo), Some("ne-1001"));
+    assert_eq!((s, de_novo["id"].as_i64()), (200, Some(ne_id)));
+
+    // ---- stock (sincronizarStock): paginado, por armazém, com o reservado e o disponível ----
+    let (s, pag) = pedir("GET", "/stock?limite=500&desde_id=0", None, None);
+    assert_eq!(s, 200, "{pag}");
+    assert_eq!(pag["mais"], false);
+    let l = pag["dados"].as_array().unwrap().iter().find(|d| d["referencia"] == "LIV001").expect("o livro no stock").clone();
+    let a = &l["armazens"][0];
+    assert_eq!((a["armazem_id"].as_i64(), a["quantidade"].as_f64(), a["reservado"].as_f64(), a["disponivel"].as_f64()), (Some(1), Some(10.0), Some(2.0), Some(8.0)), "{l}");
+
+    // ---- pagamento confirmado: FR a partir da NE (corpoFR), linhas sem preço, pagamento = total da NE ----
+    let fr_corpo = json!({
+        "tipo": "FR", "doc_origem_id": ne_id, "referencia": "1001",
+        "linhas": [
+            { "referencia": "LIV001", "quantidade": 2 },
+            { "referencia": "DIGITAL", "quantidade": 1, "descricao": "Caminho a Cristo (e-book)" },
+            { "referencia": "DIGITAL", "quantidade": 1, "descricao": "Primeiros Escritos (e-book)" },
+            { "referencia": "PORTES", "quantidade": 1, "descricao": "Portes de envio" }
+        ],
+        "pagamentos": [{ "modo": "MB", "valor": total_ne }]
+    });
+    let (s, fr) = pedir("POST", "/documentos", Some(&fr_corpo), Some("fr-1001"));
+    assert_eq!(s, 201, "{fr}");
+    assert_eq!(fr["total"].as_i64(), Some(total_ne), "a FR tem os preços da NE, linha a linha: {fr}");
+    assert_eq!(fr["armazem_id"], 1);
+    let fr_id = fr["id"].as_i64().unwrap();
+    let (_, ne_agora) = pedir("GET", &format!("/documentos/{ne_id}"), None, None);
+    assert_eq!(ne_agora["estado"], "F", "a NE fica facturada: {ne_agora}");
+    let (_, pag) = pedir("GET", "/stock?limite=500&desde_id=0", None, None);
+    let l = pag["dados"].as_array().unwrap().iter().find(|d| d["referencia"] == "LIV001").unwrap().clone();
+    assert_eq!((l["armazens"][0]["quantidade"].as_f64(), l["armazens"][0]["reservado"].as_f64()), (Some(8.0), Some(0.0)), "{l}");
+
+    // ---- reembolso: NC a partir da FR (corpoNC) ----
+    let nc_corpo = json!({
+        "tipo": "NC", "doc_origem_id": fr_id, "referencia": "1001", "motivo": "Reembolso da encomenda 1001 na loja online",
+        "linhas": fr_corpo["linhas"]
+    });
+    let (s, nc) = pedir("POST", "/documentos", Some(&nc_corpo), Some("nc-1001"));
+    assert_eq!(s, 201, "{nc}");
+    assert_eq!(nc["total"].as_i64().map(i64::abs), Some(total_ne), "{nc}");
+
+    // ---- uma chave com preço e desconto: a FR também leva os preços da NE (não os da ficha) ----
+    let k2 = rpc(&arc, "api.chaveCriar", json!({ "nome": "Loja online 2", "utilizador_id": utilizador, "posto_id": posto,
+        "permissoes": ["api.documentos", "vendas.proforma", "vendas.fatura_recibo", "pos.alterar_preco", "pos.desconto"] })).await["chave"].as_str().unwrap().to_string();
+    let pedir2 = |corpo: &Value, idem: &str| api_http(porta, "POST", "/api/v1/documentos", Some(&k2), Some(corpo), &[("Idempotency-Key", idem)]);
+    let (s, _, ne3) = pedir2(&json!({ "tipo": "NE", "referencia": "1003", "linhas": [{ "referencia": "LIV001", "quantidade": 1, "preco_com_iva": 456000 },
+        { "referencia": "DIGITAL", "quantidade": 1, "preco_com_iva": 120000, "descricao": "Hinário (e-book)" }] }), "ne-1003");
+    assert_eq!(s, 201, "{ne3}");
+    let (s, _, fr3) = pedir2(&json!({ "tipo": "FR", "doc_origem_id": ne3["id"], "referencia": "1003",
+        "linhas": [{ "referencia": "LIV001", "quantidade": 1 }, { "referencia": "DIGITAL", "quantidade": 1, "descricao": "Hinário (e-book)" }],
+        "pagamentos": [{ "modo": "TB", "valor": ne3["total"] }] }), "fr-1003");
+    assert_eq!((s, fr3["total"].as_i64()), (201, ne3["total"].as_i64()), "{fr3}");
+
+    // ---- encomenda 1004 para levantar no Lubango (servidor central): a NE reserva lá e a FR sai de lá ----
+    let (s, ne4) = pedir("POST", "/documentos", Some(&json!({ "tipo": "NE", "referencia": "1004", "armazem_id": lubango,
+        "linhas": [{ "referencia": "LIV001", "quantidade": 3, "preco_com_iva": 570000 }] })), Some("ne-1004"));
+    assert_eq!((s, ne4["armazem_id"].as_i64()), (201, Some(lubango)), "{ne4}");
+    let (s, fr4) = pedir("POST", "/documentos", Some(&json!({ "tipo": "FR", "doc_origem_id": ne4["id"], "referencia": "1004",
+        "linhas": [{ "referencia": "LIV001", "quantidade": 3 }], "pagamentos": [{ "modo": "MB", "valor": ne4["total"] }] })), Some("fr-1004"));
+    assert_eq!((s, fr4["armazem_id"].as_i64()), (201, Some(lubango)), "a FR sai do armazém da NE: {fr4}");
+    let (_, pag) = pedir("GET", "/stock?limite=500&desde_id=0", None, None);
+    let l = pag["dados"].as_array().unwrap().iter().find(|d| d["referencia"] == "LIV001").unwrap().clone();
+    let no_lubango = l["armazens"].as_array().unwrap().iter().find(|a| a["armazem_id"] == lubango).unwrap().clone();
+    assert_eq!((no_lubango["quantidade"].as_f64(), no_lubango["reservado"].as_f64()), (Some(1.0), Some(0.0)), "{l}");
+
+    // ---- encomenda 1002 cancelada com a NE no KanGest: anular ----
+    let (s, ne2) = pedir("POST", "/documentos", Some(&json!({ "tipo": "NE", "referencia": "1002", "linhas": [{ "referencia": "LIV001", "quantidade": 1, "preco_com_iva": 570000 }] })), Some("ne-1002"));
+    assert_eq!(s, 201, "{ne2}");
+    let (s, anulada) = pedir("POST", &format!("/documentos/{}/anular", ne2["id"]), Some(&json!({ "motivo": "Encomenda 1002 cancelada no site" })), None);
+    assert_eq!(s, 200, "{anulada}");
+    let (_, pag) = pedir("GET", "/stock?limite=500&desde_id=0", None, None);
+    let l = pag["dados"].as_array().unwrap().iter().find(|d| d["referencia"] == "LIV001").unwrap().clone();
+    assert_eq!(l["armazens"][0]["reservado"].as_f64(), Some(0.0), "a reserva desaparece: {l}");
+    // onde está a encomenda? (o painel do site)
+    let (_, docs) = pedir("GET", "/documentos?referencia=1001", None, None);
+    assert_eq!(docs["dados"].as_array().unwrap().len(), 3, "NE, FR e NC da encomenda 1001: {docs}");
+
+    // ---- vendas (sincronizarVendas): por mês, por canal; e por armazém num servidor central ----
+    let ano = chrono::Local::now().format("%Y").to_string();
+    let mes = chrono::Local::now().format("%Y-%m").to_string();
+    for agrupar in ["mes", "mes_armazem"] {
+        let (s, v) = pedir("GET", &format!("/relatorios/vendas?de={ano}-01-01&ate={ano}-12-31&agrupar={agrupar}&canal=api"), None, None);
+        assert_eq!(s, 200, "{v}");
+        let d = v["dados"].as_array().unwrap();
+        // o site lê o mês de `mes` ou de `chave` (linhasVendas)
+        let mes_de = |x: &Value| x["mes"].as_str().or(x["chave"].as_str()).unwrap_or_default().to_string();
+        assert!(!d.is_empty() && d.iter().all(|x| mes_de(x).starts_with(&mes) && x["total"].is_number() && x["docs"].is_number()), "{agrupar}: {v}");
+        assert_eq!(d.iter().map(|x| x["docs"].as_i64().unwrap()).sum::<i64>(), 4, "as FR e a NC da loja online (as NE não são vendas): {v}");
+        if agrupar == "mes_armazem" {
+            let armazens: Vec<i64> = d.iter().filter_map(|x| x["armazem_id"].as_i64()).collect();
+            assert!(armazens.contains(&1) && armazens.contains(&lubango), "uma linha por livraria: {v}");
+        }
+        let (s, b) = pedir("GET", &format!("/relatorios/vendas?de={ano}-01-01&ate={ano}-12-31&agrupar={agrupar}&canal=balcao"), None, None);
+        assert_eq!(s, 200, "{b}");
+    }
+
+    // ---- avisos (tratarAviso): o que o site lê de cada um ----
+    rpc(&arc, "artigos.guardar", json!({ "id": livro, "descricao": "O Desejado de Todas as Nações", "referencia": "LIV001", "taxa_iva_id": 1, "preco1": 520000 })).await;
+    let balcao = rpc(&arc, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": livro, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 592800 }] })).await;
+    let balcao_id = balcao["documento"]["id"].as_i64().unwrap();
+    while crate::webhooks::ciclo(&arc).await.unwrap() > 0 {}
+    let corpos: Vec<Value> = recebidos.lock().unwrap().iter().filter(|x| x.0.starts_with("/webhooks/kangest?ligacao=central")).map(|x| serde_json::from_str(&x.2).unwrap()).collect();
+    let ultimo = |evento: &str, f: &dyn Fn(&Value) -> bool| corpos.iter().rev().find(|c| c["evento"] == evento && f(&c["dados"])).cloned();
+    let stock = ultimo("stock.alterado", &|d| d["referencia"] == "LIV001").expect("aviso de stock");
+    let a = &stock["dados"]["armazens"][0];
+    assert!(a["armazem_id"].is_number() && a["quantidade"].is_number() && a["reservado"].is_number() && a["disponivel"].is_number(), "{stock}");
+    let artigo = ultimo("artigo.alterado", &|d| d["referencia"] == "LIV001").expect("aviso do artigo");
+    assert_eq!(artigo["dados"]["preco1_iva"], 592800, "{artigo}");
+    let venda = ultimo("documento.emitido", &|d| d["id"] == balcao_id).expect("aviso da venda ao balcão");
+    let d = &venda["dados"];
+    assert_eq!((d["tipo_codigo"].as_str(), d["api_chave_id"].is_null(), d["armazem_id"].as_i64(), d["estado"].as_str()), (Some("FR"), true, Some(1), Some("N")), "{venda}");
+    assert!(d["data_hora"].as_str().is_some_and(|h| h.len() >= 16) && d["numero_doc"].is_string() && d["total"].is_number(), "{venda}");
+    let linha = &d["linhas"][0];
+    assert!(linha["referencia"] == "LIV001" && linha["descricao"].is_string() && linha["quantidade"].is_number() && linha["total"].is_number(), "{venda}");
+    let da_loja = ultimo("documento.emitido", &|d| d["id"] == fr_id).expect("aviso da FR da loja online");
+    assert_eq!(da_loja["dados"]["api_chave_id"], chave_id, "o site ignora as vendas da própria chave: {da_loja}");
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 /// Receptor HTTP de avisos para os testes: guarda (caminho, cabeçalhos, corpo); responde 500 em /falha e 200 no resto.
 /// Avisos recebidos pelo receptor de teste: (caminho do pedido, cabeçalhos, corpo).
 type AvisosRecebidos = std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>;
