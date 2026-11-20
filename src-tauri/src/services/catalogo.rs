@@ -856,6 +856,9 @@ pub struct MoedaIn {
     simbolo: String,
     cambio: f64,
     ativo: Option<bool>,
+    /// aceite em numerário no pagamento do POS (`None` mantém o que estava)
+    #[serde(default)]
+    pos: Option<bool>,
 }
 
 /// Moedas e câmbios (frmMoeda / frmAlterarCambio do KIGEST).
@@ -871,15 +874,25 @@ pub async fn moeda_guardar(st: &AppState, m: MoedaIn) -> AppResult<Value> {
     if m.cambio < 0.0 {
         return Err(AppError::msg("Câmbio inválido."));
     }
+    let ativo = m.ativo.unwrap_or(true);
+    if m.pos == Some(true) {
+        if codigo == "AOA" {
+            return Err(AppError::msg("O Kwanza é a moeda do POS; as outras aceitam-se além dele."));
+        }
+        if !ativo || m.cambio <= 0.0 {
+            return Err(AppError::msg("Para aceitar esta moeda no POS, active-a e indique o câmbio do dia."));
+        }
+    }
     sqlx::query(
-        "INSERT INTO moedas (codigo, descricao, simbolo, cambio, ativo) VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(codigo) DO UPDATE SET descricao = ?2, simbolo = ?3, cambio = ?4, ativo = ?5",
+        "INSERT INTO moedas (codigo, descricao, simbolo, cambio, ativo, pos) VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, 0))
+         ON CONFLICT(codigo) DO UPDATE SET descricao = ?2, simbolo = ?3, cambio = ?4, ativo = ?5, pos = COALESCE(?6, pos)",
     )
     .bind(&codigo)
     .bind(m.descricao.trim())
     .bind(m.simbolo.trim())
     .bind(m.cambio)
-    .bind(m.ativo.unwrap_or(true) as i64)
+    .bind(ativo as i64)
+    .bind(m.pos.map(|p| p && ativo && m.cambio > 0.0 && codigo != "AOA").map(|p| p as i64))
     .execute(&st.pool)
     .await?;
     Ok(json!({ "codigo": codigo }))

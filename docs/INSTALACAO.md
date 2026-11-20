@@ -62,7 +62,9 @@ Os dados ficam em `~/Library/Application Support/ao.kigest.app`.
 
 - **Empresa nova:** o assistente pede os dados da empresa (nome, NIF), o ramo de actividade, o **jogo de cores** do
   sistema (verde-petróleo do KanGest, azul-marinho, azul petróleo e ouro, vinho e dourado, verde-floresta, grafite e
-  laranja, violeta, ou duas cores à escolha; muda-se depois em Configurações → Aparência) e o administrador. A experiência de 30 dias começa
+  laranja, violeta, ou duas cores à escolha; muda-se depois em Configurações → Aparência), as **moedas aceites em
+  numerário no POS** além do kwanza (dólar, euro, rand, yuan, cada uma com o câmbio do dia; nenhuma por omissão, muda-se
+  em Tabelas → Moedas) e o administrador. A experiência de 30 dias começa
   aqui; para a prender ao NIF e receber a licença sozinha, registe o KanGest em Sistema → Licença e Assinatura
   ([LICENCAS.md](LICENCAS.md)).
 - **Computador novo, com uma cópia de segurança:** no assistente, «Já tem uma cópia de segurança do KanGest?» restaura a

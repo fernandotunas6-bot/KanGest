@@ -1707,9 +1707,10 @@ function Pagamento({
 }) {
   const [tipo, setTipo] = useState<"FR" | "FT">("FR");
   const [valores, setValores] = useState<Record<string, string>>({ NU: (total / 100).toFixed(2).replace(".", ",") });
-  // numerário noutras moedas (as que têm câmbio do dia em Tabelas → Moedas): troco em kwanzas
-  const moedas = useQuery({ queryKey: ["moedas"], queryFn: () => call<{ codigo: string; simbolo: string; cambio: number; ativo: number }[]>("moedas.listar"), staleTime: 300_000 })
-    .data?.filter((m) => m.codigo !== "AOA" && m.ativo && m.cambio > 0) ?? [];
+  // numerário noutras moedas: só as escolhidas para o POS (na instalação ou em Tabelas → Moedas), com câmbio do dia;
+  // o troco sai em kwanzas
+  const moedas = useQuery({ queryKey: ["moedas"], queryFn: () => call<{ codigo: string; simbolo: string; cambio: number; ativo: number; pos?: number }[]>("moedas.listar"), staleTime: 300_000 })
+    .data?.filter((m) => m.codigo !== "AOA" && m.ativo && m.pos && m.cambio > 0) ?? [];
   const [estrangeiras, setEstrangeiras] = useState<Record<string, string>>({});
   const emMoeda = moedas.reduce((s, m) => s + Math.round(parseKz(estrangeiras[m.codigo] || "0") * m.cambio), 0);
   const [busy, setBusy] = useState(false);

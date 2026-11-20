@@ -15,11 +15,21 @@ export default function Moedas() {
   const tem = useSession((s) => s.tem);
   const lista = useQuery({ queryKey: ["moedas"], queryFn: () => call<Moeda[]>("moedas.listar") });
   const [editar, setEditar] = useState<Partial<Moeda> | null>(null);
+  const qc = useQueryClient();
+  async function alternarPos(m: Moeda) {
+    try {
+      await call("moedas.guardar", { codigo: m.codigo, descricao: m.descricao, simbolo: m.simbolo, cambio: m.cambio, ativo: m.ativo !== 0, pos: !m.pos });
+      toast.success(m.pos ? `${m.descricao} deixa de aparecer no pagamento do POS.` : `${m.descricao} passa a aparecer no pagamento do POS.`);
+      qc.invalidateQueries({ queryKey: ["moedas"] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
   return (
     <>
       <PageHeader
         title="Moedas e Câmbios"
-        subtitle="Câmbio usado nas compras em moeda estrangeira (Kz por 1 unidade)"
+        subtitle="Câmbio das compras e vendas em moeda estrangeira (Kz por 1 unidade) e moedas aceites no POS"
         actions={
           tem("compras.fatura") && (
             <Button onClick={() => setEditar({ cambio: 0, ativo: 1 })}>
@@ -38,6 +48,7 @@ export default function Moedas() {
               <Th className="text-right">Câmbio (Kz)</Th>
               <Th className="text-right">1 Kz =</Th>
               <Th>Estado</Th>
+              <Th>Aceite no POS</Th>
             </tr>
           </thead>
           <tbody>
@@ -51,6 +62,16 @@ export default function Moedas() {
                 </Td>
                 <Td className="num text-right text-ink-2">{m.cambio > 0 && m.codigo !== "AOA" ? `${fmtCambio.format(1 / m.cambio)} ${m.simbolo}` : "—"}</Td>
                 <Td>{m.codigo === "AOA" ? <Badge tone="brand">Moeda base</Badge> : m.ativo ? <Badge tone="ok">Activa</Badge> : <Badge>Inactiva</Badge>}</Td>
+                <Td onClick={(e) => e.stopPropagation()}>
+                  {m.codigo === "AOA" ? (
+                    <span className="text-[12.5px] text-ink-3">sempre</span>
+                  ) : (
+                    <label className="flex items-center gap-2 text-[13px]" title="Aparece no pagamento do POS (o cliente paga nesta moeda e o troco sai em kwanzas)">
+                      <input type="checkbox" disabled={!tem("compras.fatura")} checked={!!m.pos} onChange={() => alternarPos(m)} />
+                      {m.pos ? "Sim" : <span className="text-ink-3">Não</span>}
+                    </label>
+                  )}
+                </Td>
               </tr>
             ))}
           </tbody>
@@ -70,7 +91,7 @@ function MoedaForm({ inicial, onClose }: { inicial: Partial<Moeda>; onClose: () 
   async function guardar() {
     setBusy(true);
     try {
-      await call("moedas.guardar", { ...m, cambio: Number(cambio.replace(/\s/g, "").replace(",", ".")) || 0, ativo: m.ativo !== 0 });
+      await call("moedas.guardar", { ...m, cambio: Number(cambio.replace(/\s/g, "").replace(",", ".")) || 0, ativo: m.ativo !== 0, pos: !!m.pos });
       toast.success("Moeda guardada.");
       qc.invalidateQueries({ queryKey: ["moedas"] });
       qc.invalidateQueries({ queryKey: ["doc-auxiliares"] });
@@ -114,6 +135,13 @@ function MoedaForm({ inicial, onClose }: { inicial: Partial<Moeda>; onClose: () 
       </div>
       <label className="mt-4 flex items-center gap-2 text-ink-2">
         <input type="checkbox" checked={m.ativo !== 0} onChange={(e) => setM({ ...m, ativo: e.target.checked ? 1 : 0 })} /> Moeda activa
+      </label>
+      <label className="mt-2 flex items-start gap-2 text-ink-2">
+        <input type="checkbox" className="mt-1" checked={!!m.pos} onChange={(e) => setM({ ...m, pos: e.target.checked ? 1 : 0 })} />
+        <span>
+          Aceitar em numerário no POS
+          <span className="block text-[12.5px] text-ink-3">Aparece no pagamento: o cliente paga nesta moeda ao câmbio do dia e o troco sai em kwanzas.</span>
+        </span>
       </label>
       <p className="mt-4 flex items-start gap-2 rounded-lg bg-sunken px-3 py-2 text-[12.5px] text-ink-2">
         <Coins className="mt-0.5 size-4 shrink-0" /> O câmbio fica gravado em cada documento de compra; alterá-lo aqui não muda documentos já emitidos.

@@ -162,6 +162,8 @@ export interface Moeda {
   simbolo: string;
   cambio: number;
   ativo: number;
+  /** aceite em numerário no pagamento do POS (troco em kwanzas) */
+  pos?: number;
 }
 
 export interface Entidade {

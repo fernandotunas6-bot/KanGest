@@ -5427,3 +5427,38 @@ async fn leitor_de_codigos() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Moedas no pagamento do POS: só as escolhidas (na instalação ou em Tabelas → Moedas), activas e com câmbio.
+#[tokio::test]
+async fn moedas_aceites_no_pos() {
+    // instalação: escolhe-se o dólar com o câmbio; sem câmbio é recusado
+    let pasta = std::env::temp_dir().join(format!("kigest-moedas-pos-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let st = AppState::new(db::abrir(&pasta.join("kigest.db")).await.unwrap());
+    let base = json!({ "empresa": { "nome": "Loja Teste, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } });
+    let mut sem_cambio = base.clone();
+    sem_cambio["moedas_pos"] = json!([{ "codigo": "USD", "cambio": 0 }]);
+    assert!(rpc_err(&st, "setup.inicializar", sem_cambio).await.contains("câmbio"));
+    let mut com = base.clone();
+    com["moedas_pos"] = json!([{ "codigo": "USD", "cambio": 956.45 }]);
+    rpc(&st, "setup.inicializar", com).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    let moedas = rpc(&st, "moedas.listar", Value::Null).await;
+    let m = |c: &str| moedas.as_array().unwrap().iter().find(|x| x["codigo"] == c).unwrap().clone();
+    assert_eq!(m("USD")["pos"], 1);
+    assert_eq!(m("USD")["cambio"], 956.45);
+    assert_eq!(m("EUR")["pos"], 0);
+
+    // Tabelas → Moedas: aceitar exige câmbio; gravar sem dizer mantém; desmarcar tira
+    assert!(rpc_err(&st, "moedas.guardar", json!({ "codigo": "EUR", "descricao": "Euro", "simbolo": "€", "cambio": 0, "pos": true })).await.contains("câmbio"));
+    rpc(&st, "moedas.guardar", json!({ "codigo": "EUR", "descricao": "Euro", "simbolo": "€", "cambio": 1100, "pos": true })).await;
+    rpc(&st, "moedas.guardar", json!({ "codigo": "EUR", "descricao": "Euro", "simbolo": "€", "cambio": 1105 })).await;
+    let eur = |v: &Value| v.as_array().unwrap().iter().find(|x| x["codigo"] == "EUR").unwrap()["pos"].clone();
+    assert_eq!(eur(&rpc(&st, "moedas.listar", Value::Null).await), 1);
+    rpc(&st, "moedas.guardar", json!({ "codigo": "EUR", "descricao": "Euro", "simbolo": "€", "cambio": 1105, "pos": false })).await;
+    assert_eq!(eur(&rpc(&st, "moedas.listar", Value::Null).await), 0);
+    assert!(rpc_err(&st, "moedas.guardar", json!({ "codigo": "AOA", "descricao": "Kwanza", "simbolo": "Kz", "cambio": 1, "pos": true })).await.contains("Kwanza"));
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
