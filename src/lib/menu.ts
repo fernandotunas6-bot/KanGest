@@ -4,6 +4,7 @@
 import {
   Boxes,
   Contact,
+  GraduationCap,
   Landmark,
   Settings,
   ShoppingBag,
@@ -35,6 +36,17 @@ export interface GrupoMenu {
 
 /** Menu igual à barra de navegação do KIGEST GC (grupos e itens pela mesma ordem). */
 export const MENU: GrupoMenu[] = [
+  {
+    id: "escola",
+    titulo: "Escola",
+    icon: GraduationCap,
+    modos: ["escola"],
+    itens: [
+      { label: "Propinas e alunos", to: "/escola", perm: "escola" },
+      { label: "Devedores por turma", to: "/escola?vista=devedores", perm: "escola" },
+      { label: "Turmas e ano lectivo", to: "/escola?vista=turmas", perm: "escola" },
+    ],
+  },
   {
     id: "stock",
     titulo: "Gestão de Stock",

@@ -47,6 +47,8 @@ pub const PERMISSOES: &[&str] = &[
     "rh.funcionarios",
     "rh.processamento",
     "oficina",
+    // escola: turmas, matrículas, mapa de propinas e devedores
+    "escola",
     "sistema.saft",
     "sistema.backup",
     "sistema.series",
@@ -91,6 +93,7 @@ pub fn permissoes_perfil(perfil: &str) -> Vec<String> {
             "vendas.proforma",
             "clientes",
             "tesouraria.recibo",
+            "escola",
             "pos.quantidade",
             "pos.eliminar_linha",
             "pos.suspenso",
