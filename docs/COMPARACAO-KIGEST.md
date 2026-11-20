@@ -76,7 +76,7 @@ O importador lê a base `KigestGC` directamente. Cada tabela do KIGEST, e o que 
 |---|---|
 | `tbDocsCabessalhoSuspenso` (vendas suspensas) | Temporárias: devem ser fechadas no KIGEST antes de migrar |
 | `tbUsuarioPrivilegio` (permissões) | Os códigos não correspondem às permissões novas; revêem-se em Configurações → Utilizadores |
-| `tbArtigosCategoria`, `tbArtigosTipoInventario` | O KanGest organiza os artigos por família e subfamília |
+| `tbArtigosCategoria` | O KanGest organiza os artigos por família e subfamília (o tipo de inventário, `tbArtigosTipoInventario`, passa para a ficha do artigo) |
 | `tbRhFuncSubsidioSociasDetalhes` (subsídio de maternidade e outras prestações pagas) | Histórico de prestações já pagas; as prestações em curso registam-se em Recursos Humanos → Prestações Sociais |
 | `tbzconfigModosPagamento`, `tbZconfigRegimeIva`, `tbZconfigMeses` | Tabelas fixas que já existem no KanGest |
 | Séries antigas e configurações internas | As séries novas são criadas por posto e por ano |

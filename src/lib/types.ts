@@ -100,6 +100,8 @@ export interface Artigo {
   /** Leitura no POS: quantidade que o código trouxe (embalagem ou etiqueta de balança). */
   quantidade_lida?: number;
   etiqueta?: { tipo: "PESO" | "PRECO"; valor: number };
+  /** Tipo de inventário do SAF-T: M mercadorias, P matérias-primas, A produtos acabados, S subprodutos, T trabalhos em curso. */
+  tipo_inventario?: string;
   /** Código GS1 lido (DataMatrix dos medicamentos, GS1-128 das caixas): lote, validade e n.º de série. */
   gs1?: { gtin: string; lote?: string; validade?: string; serie?: string };
   /** PVP com IVA guardado de cada nível (valor mestre com «preços com IVA incluído»). */

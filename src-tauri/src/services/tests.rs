@@ -5462,3 +5462,39 @@ async fn moedas_aceites_no_pos() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Tipo de inventário do SAF-T por artigo (M, P, A, S, T): na ficha, em lote, no ficheiro e na importação do KIGEST.
+#[tokio::test]
+async fn tipo_de_inventario_no_saft() {
+    use super::importar::tipo_inventario_pela_descricao as pela_descricao;
+    assert_eq!(pela_descricao("Mercadorias"), Some("M"));
+    assert_eq!(pela_descricao("Matérias-primas, subsidiárias e de consumo"), Some("P"));
+    assert_eq!(pela_descricao("Produtos acabados e intermédios"), Some("A"));
+    assert_eq!(pela_descricao("Subprodutos, desperdícios e refugos"), Some("S"));
+    assert_eq!(pela_descricao("Produtos e trabalhos em curso"), Some("T"));
+    assert_eq!(pela_descricao("Outra coisa"), None);
+
+    let (st, pasta) = base_com_admin("tipo-inventario").await;
+    let farinha = rpc(&st, "artigos.guardar", json!({ "descricao": "Farinha (matéria-prima)", "taxa_iva_id": 1, "preco1": 50000, "tipo_inventario": "p" })).await["id"].as_i64().unwrap();
+    let pao = rpc(&st, "artigos.guardar", json!({ "descricao": "Pão", "taxa_iva_id": 1, "preco1": 10000 })).await["id"].as_i64().unwrap();
+    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": pao })).await["tipo_inventario"], "M", "por omissão: mercadoria");
+    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": farinha })).await["tipo_inventario"], "P");
+    assert!(rpc_err(&st, "artigos.guardar", json!({ "descricao": "X", "taxa_iva_id": 1, "preco1": 1, "tipo_inventario": "Z" })).await.contains("Tipo de inventário"));
+    // gravar sem o tipo mantém o que estava
+    rpc(&st, "artigos.guardar", json!({ "id": farinha, "descricao": "Farinha de trigo", "taxa_iva_id": 1, "preco1": 50000 })).await;
+    assert_eq!(rpc(&st, "artigos.obter", json!({ "id": farinha })).await["tipo_inventario"], "P");
+    rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": farinha, "quantidade": 10, "preco_unitario": 20000 }, { "artigo_id": pao, "quantidade": 5, "preco_unitario": 5000 }] })).await;
+    // em lote: o pão passa a produto acabado
+    rpc(&st, "artigos.lote", json!({ "ids": [pao], "accao": "tipo_inventario", "tipo_inventario": "A" })).await;
+    assert!(rpc_err(&st, "artigos.lote", json!({ "ids": [pao], "accao": "tipo_inventario", "tipo_inventario": "Q" })).await.contains("tipo de inventário"));
+    let ano: i32 = db::hoje()[..4].parse().unwrap();
+    let inv = rpc(&st, "saft.inventario", json!({ "ano": ano })).await;
+    let linha = |d: &str| inv["linhas"].as_array().unwrap().iter().find(|l| l["descricao"] == d).unwrap().clone();
+    assert_eq!(linha("Farinha de trigo")["tipo"], "Matérias-primas, subsidiárias e de consumo");
+    assert_eq!(linha("Farinha de trigo")["tipo_codigo"], "P");
+    assert_eq!(linha("Pão")["tipo"], "Produtos acabados e intermédios");
+    let tipos: Vec<&str> = inv["por_tipo"].as_array().unwrap().iter().map(|t| t["codigo"].as_str().unwrap()).collect();
+    assert_eq!(tipos, vec!["P", "A"], "{}", inv["por_tipo"]);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

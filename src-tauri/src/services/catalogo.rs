@@ -538,6 +538,9 @@ pub struct ArtigoIn {
     /// Dados do ramo (ISBN/autor, tamanho/cor, marca/modelo…): objecto JSON; `None` mantém os que existem.
     #[serde(default)]
     atributos: Option<Value>,
+    /// tipo de inventário do SAF-T (M, P, A, S, T); `None` mantém o que estava (M num artigo novo)
+    #[serde(default)]
+    tipo_inventario: Option<String>,
     /// Outros códigos de barras (ex.: embalagens); `None` mantém os que existem.
     #[serde(default)]
     codigos: Option<Vec<CodigoExtraIn>>,
@@ -641,6 +644,10 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
     if dup.is_some() {
         return Err(AppError::msg(format!("Já existe um artigo com a referência {referencia}.")));
     }
+    let tipo_inv = match a.tipo_inventario.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => Some(super::inventario::tipo_inventario(t).ok_or_else(|| AppError::msg("Tipo de inventário inválido (M, P, A, S ou T)."))?),
+        None => None,
+    };
     let q = if a.id.is_some() {
         "UPDATE artigos SET referencia=?1, codigo_barras=?2, descricao=?3, descricao_curta=?4, tipo=?5, familia_id=?6,
             subfamilia_id=?7, unidade_id=?8, taxa_iva_id=?9, motivo_isencao=?10, custo=?11, preco1=?12, preco2=?13,
@@ -678,6 +685,9 @@ pub async fn artigos_guardar(st: &AppState, a: ArtigoIn) -> AppResult<Value> {
     }
     let res = query.execute(&mut *tx).await?;
     let id = a.id.unwrap_or_else(|| res.last_insert_rowid());
+    if let Some(t) = tipo_inv {
+        sqlx::query("UPDATE artigos SET tipo_inventario = ? WHERE id = ?").bind(t).bind(id).execute(&mut *tx).await?;
+    }
     // código na balança (PLU) e outros códigos de barras
     if let Some(plu) = &a.codigo_balanca {
         let plu = plu.trim();
@@ -1081,6 +1091,9 @@ pub struct ArtigosLoteIn {
     percentagem: Option<f64>,
     /// arredondar o PVP novo a múltiplos deste valor, em kwanzas (0 = ao cêntimo)
     arredondar: Option<i64>,
+    /// tipo de inventário do SAF-T (M, P, A, S, T)
+    #[serde(default)]
+    tipo_inventario: Option<String>,
 }
 
 /// O mesmo a vários artigos de uma vez: activar, desactivar, mudar de família ou ajustar o PVP 1 numa percentagem.
@@ -1101,6 +1114,9 @@ pub async fn artigos_lote(st: &AppState, l: ArtigosLoteIn) -> AppResult<Value> {
             let existe: Option<i64> = sqlx::query_scalar("SELECT id FROM familias WHERE id = ?").bind(f).fetch_optional(&st.pool).await?;
             existe.ok_or_else(|| AppError::msg("A família escolhida já não existe."))?;
         }
+        "tipo_inventario" => {
+            l.tipo_inventario.as_deref().and_then(super::inventario::tipo_inventario).ok_or_else(|| AppError::msg("Escolha o tipo de inventário (M, P, A, S ou T)."))?;
+        }
         "preco" => {
             if !pct.is_finite() || pct == 0.0 || pct <= -100.0 || pct > 1000.0 {
                 return Err(AppError::msg("Indique uma percentagem entre -99,99% e 1 000% (diferente de zero)."));
@@ -1115,6 +1131,11 @@ pub async fn artigos_lote(st: &AppState, l: ArtigosLoteIn) -> AppResult<Value> {
         match l.accao.as_str() {
             "activar" => sqlx::query("UPDATE artigos SET ativo = 1 WHERE id = ?").bind(id).execute(&st.pool).await?,
             "desactivar" => sqlx::query("UPDATE artigos SET ativo = 0 WHERE id = ?").bind(id).execute(&st.pool).await?,
+            "tipo_inventario" => sqlx::query("UPDATE artigos SET tipo_inventario = ? WHERE id = ?")
+                .bind(l.tipo_inventario.as_deref().and_then(super::inventario::tipo_inventario))
+                .bind(id)
+                .execute(&st.pool)
+                .await?,
             "familia" => sqlx::query("UPDATE artigos SET familia_id = ?, subfamilia_id = NULL WHERE id = ? AND familia_id IS NOT ?")
                 .bind(l.familia_id)
                 .bind(id)

@@ -21,7 +21,25 @@ pub struct InventarioIn {
 }
 
 pub const METODO_CUSTEIO: &str = "Custo médio ponderado";
-pub const TIPO_MERCADORIA: &str = "Mercadorias";
+
+/// Tipos de inventário do SAF-T (código na ficha do artigo → nome no ficheiro).
+pub const TIPOS_INVENTARIO: &[(&str, &str)] = &[
+    ("M", "Mercadorias"),
+    ("P", "Matérias-primas, subsidiárias e de consumo"),
+    ("A", "Produtos acabados e intermédios"),
+    ("S", "Subprodutos, desperdícios e refugos"),
+    ("T", "Produtos e trabalhos em curso"),
+];
+
+/// O código de um tipo de inventário, validado (`None` se não for um dos cinco).
+pub fn tipo_inventario(codigo: &str) -> Option<&'static str> {
+    let c = codigo.trim().to_uppercase();
+    TIPOS_INVENTARIO.iter().find(|t| t.0 == c).map(|t| t.0)
+}
+
+fn nome_tipo(codigo: &str) -> &'static str {
+    TIPOS_INVENTARIO.iter().find(|t| t.0 == codigo).map(|t| t.1).unwrap_or(TIPOS_INVENTARIO[0].1)
+}
 
 pub async fn inventario(st: &AppState, i: InventarioIn) -> AppResult<Value> {
     st.exigir_perm("sistema.saft")?;
@@ -38,7 +56,7 @@ pub async fn inventario(st: &AppState, i: InventarioIn) -> AppResult<Value> {
     let rows = if provisorio {
         sqlx::query(
             "SELECT a.id, a.referencia, a.descricao, a.codigo_barras, u.abreviatura AS unidade, u.descricao AS unidade_desc,
-                    f.descricao AS familia, a.ativo,
+                    f.descricao AS familia, a.ativo, a.tipo_inventario,
                     CAST(COALESCE((SELECT SUM(s.quantidade) FROM stock s WHERE s.artigo_id = a.id), 0) AS REAL) AS quantidade,
                     a.custo_medio AS custo
              FROM artigos a
@@ -59,7 +77,7 @@ pub async fn inventario(st: &AppState, i: InventarioIn) -> AppResult<Value> {
               qtd AS (SELECT artigo_id, SUM(saldo) AS quantidade FROM mov WHERE n_arm = 1 GROUP BY artigo_id),
               cm AS (SELECT artigo_id, custo FROM mov WHERE n_art = 1)
              SELECT a.id, a.referencia, a.descricao, a.codigo_barras, u.abreviatura AS unidade, u.descricao AS unidade_desc,
-                    f.descricao AS familia, a.ativo,
+                    f.descricao AS familia, a.ativo, a.tipo_inventario,
                     CAST(COALESCE(q.quantidade, 0) AS REAL) AS quantidade, COALESCE(c.custo, a.custo_medio) AS custo
              FROM artigos a
              LEFT JOIN qtd q ON q.artigo_id = a.id
@@ -97,7 +115,8 @@ pub async fn inventario(st: &AppState, i: InventarioIn) -> AppResult<Value> {
             "referencia": referencia_art,
             "descricao": descricao,
             "codigo_barras": r.get::<Option<String>, _>("codigo_barras"),
-            "tipo": TIPO_MERCADORIA,
+            "tipo": nome_tipo(&r.get::<String, _>("tipo_inventario")),
+            "tipo_codigo": r.get::<String, _>("tipo_inventario"),
             "unidade": r.get::<Option<String>, _>("unidade").unwrap_or_else(|| "UN".into()),
             "unidade_desc": r.get::<Option<String>, _>("unidade_desc"),
             "familia": r.get::<Option<String>, _>("familia"),
@@ -119,6 +138,14 @@ pub async fn inventario(st: &AppState, i: InventarioIn) -> AppResult<Value> {
         "sem_operacoes": linhas.is_empty(),
         "total_artigos": linhas.len(),
         "total_valor": total,
+        "por_tipo": TIPOS_INVENTARIO
+            .iter()
+            .map(|(c, nome)| {
+                let ls: Vec<&Value> = linhas.iter().filter(|l| l["tipo_codigo"] == *c).collect();
+                json!({ "codigo": c, "tipo": nome, "artigos": ls.len(), "valor": ls.iter().map(|l| l["valor"].as_i64().unwrap_or(0)).sum::<i64>() })
+            })
+            .filter(|t| t["artigos"].as_u64() != Some(0))
+            .collect::<Vec<_>>(),
         "linhas": linhas,
         "negativos": negativos,
     }))

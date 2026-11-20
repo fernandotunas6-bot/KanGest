@@ -583,6 +583,7 @@ const TABELAS: &[(&str, &[&str])] = &[
     ("subfamilias", &["tbArtigosSubFamilia"]),
     ("armazens", &["tbzconfigArmazem"]),
     ("artigos", &["tbArtigos"]),
+    ("tipos_inventario", &["tbArtigosTipoInventario"]),
     ("stock", &["tbArtigosStock"]),
     ("clientes", &["tbClientes", "tbCliente", "vsClientes"]),
     ("fornecedores", &["tbFornecedores", "tbFornecedor", "vsFornecedores"]),
@@ -840,6 +841,7 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
     let subfamilias = if precisa_tabelas { ler_opt(fonte, &tabs, "subfamilias").await? } else { vec![] };
     let armazens = ler_opt(fonte, &tabs, "armazens").await?;
     let artigos = if op.artigos || op.documentos || op.lotes || op.oficina { ler_opt(fonte, &tabs, "artigos").await? } else { vec![] };
+    let tipos_inventario = if op.artigos { ler_opt(fonte, &tabs, "tipos_inventario").await? } else { vec![] };
     let stock = if op.stock { ler_opt(fonte, &tabs, "stock").await? } else { vec![] };
     let clientes = if op.clientes || op.documentos || op.oficina { ler_opt(fonte, &tabs, "clientes").await? } else { vec![] };
     let fornecedores = if op.fornecedores || op.documentos { ler_opt(fonte, &tabs, "fornecedores").await? } else { vec![] };
@@ -1043,6 +1045,15 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
     }
 
     // 4) artigos
+    // tipo de inventário do SAF-T (tbArtigosTipoInventario): pelo código (M, P, A, S, T) ou pela descrição
+    let tipos_inv: HashMap<i64, &'static str> = tipos_inventario
+        .iter()
+        .filter_map(|r| {
+            let id = i(r, &["IdTipoInventario", "IdArtigoTipoInventario", "Id"])?;
+            let codigo = t(r, &["Codigo", "Sigla", "Tipo", "CodTipoInventario"]).and_then(|c| super::inventario::tipo_inventario(&c));
+            Some((id, codigo.or_else(|| tipo_inventario_pela_descricao(&t(r, &["Descricao", "TipoInventario"]).unwrap_or_default()))?))
+        })
+        .collect();
     let mut n_art = 0;
     for r in &artigos {
         let id_k = i(r, &["IdArtigo", "Id"]);
@@ -1146,6 +1157,13 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
             mapas.artigos.insert(k, id);
         }
         mapas.artigos_ref.insert(referencia.to_lowercase(), id);
+        // tipo de inventário: o id da tabela de tipos, ou o código escrito no próprio artigo
+        let tipo_inv = i(r, &["IdTipoInventario", "IdArtigoTipoInventario"])
+            .and_then(|x| tipos_inv.get(&x).copied())
+            .or_else(|| t(r, &["TipoInventario", "CodTipoInventario"]).and_then(|c| super::inventario::tipo_inventario(&c).or_else(|| tipo_inventario_pela_descricao(&c))));
+        if let Some(ti) = tipo_inv {
+            sqlx::query("UPDATE artigos SET tipo_inventario = ? WHERE id = ?").bind(ti).bind(id).execute(&mut *tx).await?;
+        }
         n_art += 1;
     }
     if !artigos.is_empty() {
@@ -2819,6 +2837,24 @@ async fn n_rh_historico(tx: &mut Transaction<'_, Sqlite>, rel: &mut Relatorio, x
     Ok(())
 }
 
+/// O tipo de inventário pela descrição do KIGEST («Mercadorias», «Matérias-primas…», «Produtos acabados…»…).
+pub(crate) fn tipo_inventario_pela_descricao(d: &str) -> Option<&'static str> {
+    let d = d.to_lowercase();
+    if d.contains("mercadoria") {
+        Some("M")
+    } else if d.contains("mat") && (d.contains("prima") || d.contains("subsidi") || d.contains("consumo")) {
+        Some("P")
+    } else if d.contains("acabad") || d.contains("intermédi") || d.contains("intermedi") {
+        Some("A")
+    } else if d.contains("subproduto") || d.contains("desperd") || d.contains("refugo") {
+        Some("S")
+    } else if d.contains("curso") {
+        Some("T")
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::certificado_no_rodape;
@@ -2831,3 +2867,4 @@ mod testes {
         assert_eq!(certificado_no_rodape("Processado por computador"), None);
     }
 }
+
