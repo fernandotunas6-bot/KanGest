@@ -169,6 +169,15 @@ export default function NovoDocumento() {
     setEntrega("");
   }, [codigo]);
 
+  // retenção na fonte habitual da entidade (ficha do cliente ou do fornecedor): vem escolhida e pode tirar-se
+  useEffect(() => {
+    if (eStock || tipo?.credito) return;
+    const r = entidade?.retencao;
+    setRetencoes(r && aux?.retencoes.some((x) => x.codigo === r) ? [r] : []);
+    // só quando muda a entidade (não a cada mudança da lista de retenções)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entidade?.id]);
+
   // Facturar uma ordem de serviço da oficina (?ordem=id)
   useEffect(() => {
     if (!ordemId) return;

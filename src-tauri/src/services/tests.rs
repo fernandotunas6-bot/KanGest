@@ -5498,3 +5498,59 @@ async fn tipo_de_inventario_no_saft() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Retenção na fonte feita no pagamento: o cliente retém ao pagar (recibo com o recebido mais o retido) e a
+/// retenção habitual na ficha do cliente. O SAF-T leva a retenção no pagamento.
+#[tokio::test]
+async fn retencao_no_recibo_e_habitual_do_cliente() {
+    let (st, pasta) = base_com_admin("retencao-recibo").await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let servico = rpc(&st, "artigos.guardar", json!({ "descricao": "Manutenção", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    // retenção habitual: na ficha do cliente; desconhecida recusada; «» tira
+    let cli = rpc(&st, "entidades.guardar", json!({ "nome": "Empresa Grande, SA", "nif": "5417000099", "retencao": "II" })).await["id"].as_i64().unwrap();
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": cli })).await["retencao"], "II");
+    assert!(rpc_err(&st, "entidades.guardar", json!({ "id": cli, "nome": "Empresa Grande, SA", "nif": "5417000099", "retencao": "ZZ" })).await.contains("ZZ"));
+    rpc(&st, "entidades.guardar", json!({ "id": cli, "nome": "Empresa Grande, SA", "nif": "5417000099" })).await;
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": cli })).await["retencao"], "II", "sem o campo mantém");
+    // gravar a ficha tal como a lista a devolve (o `estado` vem como número da base)
+    let mut ficha = rpc(&st, "entidades.obter", json!({ "id": cli })).await;
+    ficha["telefone"] = json!("923000000");
+    assert_eq!(ficha["estado"], 0);
+    rpc(&st, "entidades.guardar", ficha).await;
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": cli })).await["telefone"], "923000000");
+
+    // factura a crédito de 1 000,00 + IVA 14% = 1 140,00
+    let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": servico, "quantidade": 1 }] })).await;
+    let ft_id = ft["documento"]["id"].as_i64().unwrap();
+    assert_eq!(ft["documento"]["total"], 114000);
+    // recibo: o cliente retém 6,5% de Imposto Industrial sobre 1 000,00 (65,00) e paga 1 075,00
+    let rc_falta = rpc_err(&st, "documentos.emitir", json!({ "tipo": "RC", "entidade_id": cli, "liquidar": [{ "documento_id": ft_id, "valor": 114000 }], "retencoes": [{ "codigo": "II" }], "pagamentos": [{ "modo": "TB", "valor": 100000 }] })).await;
+    assert!(rc_falta.contains("insuficiente"), "{rc_falta}");
+    let rc = rpc(&st, "documentos.emitir", json!({ "tipo": "RC", "entidade_id": cli, "liquidar": [{ "documento_id": ft_id, "valor": 114000 }], "retencoes": [{ "codigo": "II" }], "pagamentos": [{ "modo": "TB", "valor": 107500 }] })).await;
+    assert_eq!(rc["documento"]["total"], 114000);
+    assert_eq!(rc["documento"]["total_retencao"], 6500);
+    let pendente: i64 = sqlx::query_scalar("SELECT valor_pendente FROM documentos WHERE id = ?").bind(ft_id).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(pendente, 0, "o recebido mais o retido liquidam a factura toda");
+    let extrato = rpc(&st, "contas.extrato", json!({ "entidade_id": cli })).await;
+    assert_eq!(extrato["saldo"], 0, "{extrato}");
+
+    // o valor retido pode vir escrito (o do comprovativo do cliente); a parte de outra factura
+    let ft2 = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": servico, "quantidade": 2 }] })).await["documento"]["id"].as_i64().unwrap();
+    let rc2 = rpc(&st, "documentos.emitir", json!({ "tipo": "RC", "entidade_id": cli, "liquidar": [{ "documento_id": ft2, "valor": 114000 }], "retencoes": [{ "codigo": "II", "valor": 6000 }], "pagamentos": [{ "modo": "NU", "valor": 108000 }] })).await;
+    assert_eq!(rc2["documento"]["total_retencao"], 6000, "metade da factura: base 1 000,00; vale o valor escrito");
+    // factura com a retenção já na emissão: o recibo não a repete
+    let ft3 = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": servico, "quantidade": 1 }], "retencoes": [{ "codigo": "II" }] })).await["documento"]["id"].as_i64().unwrap();
+    let e = rpc_err(&st, "documentos.emitir", json!({ "tipo": "RC", "entidade_id": cli, "liquidar": [{ "documento_id": ft3, "valor": 107500 }], "retencoes": [{ "codigo": "II" }], "pagamentos": [{ "modo": "NU", "valor": 107500 }] })).await;
+    assert!(e.contains("não se repete"), "{e}");
+
+    // SAF-T: o pagamento leva a retenção (recebido + retido = total)
+    let saft = rpc(&st, "saft.exportar", json!({ "de": "2000-01-01", "ate": "2100-12-31" })).await;
+    validar_xsd(saft["ficheiro"].as_str().unwrap());
+    let xml = std::fs::read_to_string(saft["ficheiro"].as_str().unwrap()).unwrap();
+    let pagamento = xml.split("<Payment>").nth(1).expect("um pagamento");
+    assert!(pagamento.contains("<PaymentAmount>1075.00</PaymentAmount>"), "{pagamento}");
+    assert!(pagamento.contains("<WithholdingTaxType>II</WithholdingTaxType>") && pagamento.contains("<WithholdingTaxAmount>65.00</WithholdingTaxAmount>"), "{pagamento}");
+    assert!(pagamento.find("</DocumentTotals>").unwrap() < pagamento.find("<WithholdingTax>").unwrap(), "a retenção vem depois dos totais");
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

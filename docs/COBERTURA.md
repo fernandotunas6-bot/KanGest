@@ -82,7 +82,7 @@ Legenda: ✅ feito · 🟡 parcial · ❌ falta
 | Recibo Cliente / Estorno de Recibo | ✅ (estorno = anular recibo) |
 | Factura Recibo (autofacturação) | ✅ |
 | Adiantamento de Cliente | ✅ (recibo de adiantamento RA; o crédito compensa-se nos recibos, devolve-se ou regulariza-se) |
-| Retenção na fonte (IRT, II, IS, IPU, IAC, IVA cativo) | ✅ (SAF-T WithholdingTax) |
+| Retenção na fonte (IRT, II, IS, IPU, IAC, IVA cativo) | ✅ na factura ou **no pagamento**: no recibo de cliente (o cliente retém ao pagar) e no pagamento a fornecedor (a empresa retém ao pagar), sobre a parte sem IVA do que se liquida, com o valor do comprovativo se for outro; o recebido mais o retido liquidam a factura. **Retenção habitual** na ficha do cliente ou do fornecedor (vem escolhida nas facturas e nos recibos). SAF-T: WithholdingTax nas facturas e nos pagamentos |
 | Relatórios: por artigo, entidade, dia, operador, tipo de pagamento, documento | ✅ |
 | Relatórios: por ponto (posto), por vendedor, artigos por entidade, detalhes de documentos | ✅ |
 | Comissões de vendedores (taxa por vendedor e por família, lançamento nos salários) | ✅ (novo no KanGest) |
