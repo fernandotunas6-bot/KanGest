@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Avenças: contratos de prestação de serviços que se facturam periodicamente (mensal, trimestral,
 //! semestral, anual). Cada período por facturar gera uma factura (FT) com a data do dia em que se
 //! factura — o período facturado vai na descrição das linhas e nas observações.

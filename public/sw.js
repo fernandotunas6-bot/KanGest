@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 /*
  * Service worker do KanGest no browser (PWA). Guarda só a «casca» da aplicação — a página, o código,
  * os estilos e os ícones — para abrir depressa e mostrar uma mensagem clara quando o servidor não

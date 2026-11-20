@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Verificação em dois passos (TOTP, RFC 6238), como nos programas na nuvem: depois da senha, um código de 6
 //! algarismos que muda de 30 em 30 segundos numa aplicação de autenticação (Google Authenticator, Microsoft
 //! Authenticator, Authy…), ou um dos códigos de recuperação (cada um serve uma vez).

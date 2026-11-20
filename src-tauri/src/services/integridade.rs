@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Verificação da integridade dos documentos assinados (cadeia AGT) — o que faria um auditor:
 //! série a série, refaz a mensagem de cada documento (`Data;DataHora;Número;Total;HashAnterior`),
 //! confirma a assinatura com as chaves públicas conhecidas, a numeração sem saltos, os 4 caracteres

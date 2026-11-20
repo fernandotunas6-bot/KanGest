@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Cópias de segurança (Fr_CopiaSeguranca do KIGEST).
 //!
 //! - Automáticas: ao abrir o programa e de N em N horas enquanto está aberto (por omissão 4), e no

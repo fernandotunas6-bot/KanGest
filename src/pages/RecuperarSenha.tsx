@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 import { useState, type FormEvent, type ReactNode } from "react";
 import { CheckCircle2, ShieldCheck, Smartphone } from "lucide-react";
 import { call } from "@/lib/api";

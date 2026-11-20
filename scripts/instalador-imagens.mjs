@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 // Imagens do instalador de Windows (NSIS) com o logótipo do KanGest:
 //   src-tauri/icons/nsis-cabecalho.bmp  150 × 57  (cabeçalho das páginas interiores)
 //   src-tauri/icons/nsis-lateral.bmp    164 × 314 (páginas de boas-vindas e de fim)

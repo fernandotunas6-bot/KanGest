@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Auditoria das fichas: o antes e o depois de cada gravação (o selo em cadeia está em `crate::auditoria`).
 //!
 //! O `dispatch` pergunta a `alvo` se o método mexe numa ficha. Se sim, lê a ficha antes, corre o método e, se correu

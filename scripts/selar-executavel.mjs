@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 // Selo de integridade do executável (beforeBundleCommand do Tauri): corre depois de compilar e antes de empacotar,
 // assina o resumo do executável com a chave do produtor e grava src-tauri/selo/selo.json, que vai com a aplicação.
 // Ver docs/SEGURANCA.md.

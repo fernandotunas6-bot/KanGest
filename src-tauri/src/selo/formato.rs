@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Resumo do conteúdo de um executável para o selo de integridade. Partilhado com a ferramenta que sela na compilação
 //! oficial (`scripts/selo`), por isso só usa a biblioteca padrão e o `sha2`.
 //!

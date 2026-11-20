@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 import { invoke } from "@tauri-apps/api/core";
 import { gcm } from "@noble/ciphers/aes";
 import { pbkdf2Async } from "@noble/hashes/pbkdf2";

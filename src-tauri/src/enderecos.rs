@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! IPv4 e IPv6 ao mesmo tempo (dupla pilha) em todas as ligações do KanGest: o servidor dos postos em rede, a API,
 //! as impressoras de rede e os diagnósticos.
 //!

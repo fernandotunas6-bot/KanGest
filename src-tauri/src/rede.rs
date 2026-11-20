@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Postos em rede: uma máquina guarda a base de dados (modo **servidor**) e os outros
 //! postos (modo **cliente**) trabalham sobre ela, em vez de cada instalação ter a sua base.
 //!

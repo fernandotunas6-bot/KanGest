@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 /**
  * Livro Excel (.xlsx) escrito de raiz, sem bibliotecas: um .zip («stored», sem compressão) com o XML mínimo do
  * formato Office Open XML. Os números saem como números (o Excel soma-os), os valores em kwanzas com

@@ -1,3 +1,6 @@
+# KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+# © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 """Versões -720 (720×450) das capturas do site, a partir das de 1440×900 em site-fonte/assets/ecras.
 
     python3 scripts/auditoria/miniaturas-site.py

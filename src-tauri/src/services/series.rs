@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Séries de documentos (Fr_SeriesDocumento / Fr_AdicionarSerie do KIGEST): série por defeito,
 //! período de validade, séries de documentos manuais, bloqueio e série por posto.
 

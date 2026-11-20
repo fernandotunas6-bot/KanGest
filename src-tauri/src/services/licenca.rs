@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Licença do KanGest, verificada no próprio computador (sem internet).
 //!
 //! Uma licença é «KG1.<dados>.<assinatura>»: os dados (JSON em base64url) dizem o NIF da empresa, o plano, os postos

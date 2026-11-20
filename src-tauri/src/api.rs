@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! API de integração: outros sistemas (loja online, contabilidade, BI, apps) ligam-se ao KanGest por HTTP
 //! com chaves de acesso.
 //!

@@ -1,3 +1,6 @@
+# KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+# © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 """Junta até 4 capturas numa folha reduzida (para rever muitas de uma vez).
    python3 folha.py <saida.png> <captura1.png> [...]   — tamanho original via W e H."""
 import os, sys

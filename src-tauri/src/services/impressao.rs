@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Impressão térmica directa em ESC/POS e abertura de gaveta (Fr_Impressao do KIGEST POS).
 //!
 //! Sem ESC/POS o talão sai pelo diálogo de impressão do sistema (HTML), que não corta o papel

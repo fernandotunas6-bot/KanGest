@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Ramos de actividade: o perfil do negócio e os dados próprios de cada ramo nos artigos.
 //!
 //! O ecrã decide que campos mostra em cada ramo (src/lib/ramos.ts); aqui guarda-se o ramo escolhido,

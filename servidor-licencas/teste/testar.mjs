@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 // Teste do servidor de licenças sem rede: node teste/testar.mjs
 // Usa uma chave de teste gerada na hora (ou a de KANGEST_CHAVE_SERVIDOR, para gerar exemplos para o KanGest).
 import assert from "node:assert/strict";

@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 // Capturas do site (site-fonte/assets/ecras) com a interface actual, a partir do servidor de demonstração
 // (ver README.md desta pasta: servidor na porta 7799 e frontend na 1422). Usa o Playwright com o Chromium.
 //

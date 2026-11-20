@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! SAF-T de inventários (AGT): as existências de cada artigo no fim do exercício (31 de Dezembro), com a quantidade,
 //! a unidade e o valor ao custo médio ponderado, o critério valorimétrico do KanGest.
 //!

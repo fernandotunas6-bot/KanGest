@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Segredos do produtor do software, embutidos na compilação oficial (ver `build.rs` e
 //! docs/CERTIFICACAO-AGT.md): a chave que assina os documentos, o n.º do certificado AGT, as
 //! credenciais e a chave de software da Facturação Electrónica e a chave pública das actualizações.

@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronRight, Hand, Keyboard, KeyRound, LayoutDashboard, Lock, LogOut, Menu as IconeMenu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Plus, Search, ShieldCheck, ShoppingCart, Star, Sun, UserRound, X } from "lucide-react";

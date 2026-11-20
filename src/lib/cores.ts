@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 /**
  * Jogos de cores do sistema (Configurações → Aparência e a instalação): a cor principal (menu, botões, ligações) e a
  * de destaque (Abrir POS, Pagar, avisos). Os tons de cada uma — claros, escuros e os do tema escuro — calculam-se

@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Segredos guardados na configuração (tabela `config`): chave do contribuinte da Facturação
 //! Electrónica, senhas e, nas compilações de desenvolvimento, a chave de assinatura.
 //!
