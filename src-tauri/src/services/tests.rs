@@ -5886,3 +5886,41 @@ async fn vale_de_caixa_com_linhas() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Vendedor habitual do cliente: entra nas vendas que não indicam outro; o indicado prevalece; 0 tira.
+#[tokio::test]
+async fn vendedor_habitual_do_cliente() {
+    let (st, pasta) = base_com_admin("vendedor-habitual").await;
+    let ana = rpc(&st, "rh.funcionarioGuardar", json!({ "nome": "Ana Vendedora", "salario_base": 20000000 })).await["id"].as_i64().unwrap();
+    let rui = rpc(&st, "rh.funcionarioGuardar", json!({ "nome": "Rui Vendedor", "salario_base": 20000000 })).await["id"].as_i64().unwrap();
+    assert!(rpc_err(&st, "entidades.guardar", json!({ "nome": "Cliente X", "vendedor_id": 999 })).await.contains("funcionário activo"));
+    let cli = rpc(&st, "entidades.guardar", json!({ "nome": "Hotel Baía", "nif": "5417002211", "vendedor_id": ana })).await["id"].as_i64().unwrap();
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": cli })).await["vendedor_id"], ana);
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    let vendedor_do = |doc: &Value| doc["documento"]["id"].as_i64().unwrap();
+    let ft = |vendedor: Option<i64>| {
+        let st = &st;
+        async move {
+            let mut p = json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 1 }] });
+            if let Some(v) = vendedor {
+                p["vendedor_id"] = json!(v);
+            }
+            rpc(st, "documentos.emitir", p).await
+        }
+    };
+    let ler = |id: i64| {
+        let st = &st;
+        async move { sqlx::query_scalar::<_, Option<i64>>("SELECT vendedor_id FROM documentos WHERE id = ?").bind(id).fetch_one(&st.pool).await.unwrap() }
+    };
+    // sem vendedor no documento: o habitual; com outro indicado: esse
+    assert_eq!(ler(vendedor_do(&ft(None).await)).await, Some(ana));
+    assert_eq!(ler(vendedor_do(&ft(Some(rui)).await)).await, Some(rui));
+    // guardar a ficha sem dizer nada mantém; 0 tira
+    rpc(&st, "entidades.guardar", json!({ "id": cli, "nome": "Hotel Baía", "nif": "5417002211" })).await;
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": cli })).await["vendedor_id"], ana);
+    rpc(&st, "entidades.guardar", json!({ "id": cli, "nome": "Hotel Baía", "nif": "5417002211", "vendedor_id": 0 })).await;
+    assert!(rpc(&st, "entidades.obter", json!({ "id": cli })).await["vendedor_id"].is_null());
+    assert_eq!(ler(vendedor_do(&ft(None).await)).await, None);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

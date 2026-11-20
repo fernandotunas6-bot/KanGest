@@ -232,6 +232,7 @@ function EntidadeForm({ inicial, onClose, onNovo }: { inicial: Partial<Entidade>
   const nifOk = nifValido(e.nif, e.pais ?? "AO");
   // retenções na fonte (para a retenção habitual)
   const retencoes = useQuery({ queryKey: ["doc-auxiliares"], queryFn: () => call<{ retencoes: { codigo: string; descricao: string; percentagem: number }[] }>("documentos.auxiliares"), staleTime: 300_000 }).data?.retencoes ?? [];
+  const vendedores = useQuery({ queryKey: ["vendedores"], queryFn: () => call<{ id: number; nome: string }[]>("rh.vendedores"), staleTime: 300_000 }).data ?? [];
 
   async function guardar(depois: "fechar" | "novo" = "fechar") {
     if (busy) return;
@@ -409,6 +410,18 @@ function EntidadeForm({ inicial, onClose, onNovo }: { inicial: Partial<Entidade>
               ))}
             </Select>
           </Field>
+          {e.tipo !== "F" && vendedores.length > 0 && (
+            <Field label="Vendedor habitual" hint="Vem escolhido nas vendas a este cliente (POS, facturas, avenças) e conta nas comissões">
+              <Select value={e.vendedor_id ? String(e.vendedor_id) : ""} onChange={(x) => set("vendedor_id", x.target.value ? Number(x.target.value) : 0)}>
+                <option value="">Nenhum</option>
+                {vendedores.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.nome}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <div className="col-span-2 mt-2 border-t border-line pt-4 text-[12px] font-medium uppercase tracking-wide text-ink-2">Contactos e dados pessoais</div>
           <Field label={e.nif && /^\d{10}$/.test(e.nif) ? "Pessoa de contacto" : "Pessoa de contacto (se for empresa)"}>
             <Input value={e.pessoa_contacto ?? ""} maxLength={120} onChange={(x) => set("pessoa_contacto", x.target.value)} />

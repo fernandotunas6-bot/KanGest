@@ -81,6 +81,9 @@ pub struct EntidadeIn {
     /// retenção na fonte habitual (código da tabela de retenções; "" tira; `None` mantém)
     #[serde(default)]
     retencao: Option<String>,
+    /// vendedor habitual (funcionário): entra nas vendas que não indicam outro; 0 tira; `None` mantém
+    #[serde(default)]
+    vendedor_id: Option<i64>,
     /// dados pessoais e de contacto (`None` mantém; «» apaga)
     #[serde(default)]
     pessoa_contacto: Option<String>,
@@ -151,6 +154,15 @@ pub async fn guardar(st: &AppState, e: EntidadeIn) -> AppResult<Value> {
             )));
         }
     }
+    // vendedor habitual: um funcionário activo (0 tira o que havia)
+    let vendedor: Option<Option<i64>> = match e.vendedor_id {
+        None => None,
+        Some(v) if v <= 0 => Some(None),
+        Some(v) => {
+            let ok: Option<i64> = sqlx::query_scalar("SELECT id FROM funcionarios WHERE id = ? AND ativo = 1").bind(v).fetch_optional(&st.pool).await?;
+            Some(Some(ok.ok_or_else(|| AppError::msg("O vendedor habitual não é um funcionário activo."))?))
+        }
+    };
     // retenção habitual: tem de ser uma das retenções activas («» tira a que havia)
     let retencao: Option<Option<String>> = match e.retencao.as_deref().map(str::trim) {
         None => None,
@@ -189,6 +201,9 @@ pub async fn guardar(st: &AppState, e: EntidadeIn) -> AppResult<Value> {
     let id = e.id.unwrap_or_else(|| res.last_insert_rowid());
     if let Some(r) = retencao {
         sqlx::query("UPDATE entidades SET retencao = ? WHERE id = ?").bind(r).bind(id).execute(&st.pool).await?;
+    }
+    if let Some(v) = vendedor {
+        sqlx::query("UPDATE entidades SET vendedor_id = ? WHERE id = ?").bind(v).bind(id).execute(&st.pool).await?;
     }
     for (coluna, valor) in pessoais {
         sqlx::query(&format!("UPDATE entidades SET {coluna} = ? WHERE id = ?")).bind(valor).bind(id).execute(&st.pool).await?;

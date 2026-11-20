@@ -469,7 +469,16 @@ export default function NovoDocumento() {
             <div className="grid grid-cols-4 items-end gap-4">
               {!eStock && (
                 <div className="col-span-2">
-                  <EntidadePicker tipo={eCompra ? "F" : "C"} valor={entidade} onChange={setEntidade} bloqueado={!!origemId && !!tipo.credito} />
+                  <EntidadePicker
+                    tipo={eCompra ? "F" : "C"}
+                    valor={entidade}
+                    onChange={(ent) => {
+                      setEntidade(ent);
+                      // vendedor habitual do cliente, se ainda não se escolheu outro
+                      if (!eCompra && !vendedor && ent.vendedor_id) setVendedor(String(ent.vendedor_id));
+                    }}
+                    bloqueado={!!origemId && !!tipo.credito}
+                  />
                 </div>
               )}
               <Field label="Data">
