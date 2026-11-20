@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Minus, Plus, Printer, Tags, Trash2 } from "lucide-react";
+import { call } from "@/lib/api";
 import { comIva, kz } from "@/lib/format";
+import { bip, useLeitor } from "@/lib/leitor";
 import { svgBarras } from "@/lib/barcode";
 import { imprimir } from "@/lib/print";
 import type { Artigo } from "@/lib/types";
@@ -36,6 +38,17 @@ export default function Etiquetas() {
   function juntar(a: Artigo) {
     setLinhas((ls) => (ls.some((l) => l.artigo.id === a.id) ? ls.map((l) => (l.artigo.id === a.id ? { ...l, copias: l.copias + 1 } : l)) : [...ls, { artigo: a, copias: 1 }]));
   }
+  // leitor com o cursor fora da pesquisa (ex.: no n.º de cópias): junta o artigo lido
+  useLeitor(async (l) => {
+    try {
+      const a = await call<Artigo | null>("artigos.codigo", { codigo: l.codigo });
+      bip(!!a);
+      if (a) juntar(a);
+      else toast.warning(`Nenhum artigo com o código ${l.codigo}.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  });
   const copias = (id: number, n: number) => setLinhas((ls) => ls.map((l) => (l.artigo.id === id ? { ...l, copias: Math.max(1, Math.min(500, n)) } : l)));
 
   function imprimirEtiquetas() {

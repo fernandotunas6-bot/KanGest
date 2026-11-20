@@ -22,11 +22,67 @@ O KanGest trabalha com o equipamento habitual de um posto de facturação: termi
 
 ## Leitor de código de barras
 
-Qualquer leitor USB que funcione como teclado serve (é o modo de origem da maioria).
+Serve qualquer leitor USB ou sem fios (Bluetooth, 2,4 GHz) que funcione como teclado, que é o modo de origem da
+maioria. O KanGest reconhece a leitura pela velocidade: o leitor escreve muito mais depressa do que uma pessoa.
 
-- A leitura entra sempre na pesquisa, mesmo que o operador tenha tocado numa linha ou num botão antes de ler.
-- O leitor deve terminar a leitura com **Enter**. Os que terminam com **Tab** também são aceites.
-- Procura pelo código de barras e pela referência do artigo. `3*código` lança 3 unidades.
+**Onde lê**
+
+- **POS:**
+  - a leitura entra na venda mesmo que o operador tenha tocado numa linha, num botão ou noutro campo antes de ler;
+  - `3*código` vende 3 unidades.
+- **Documentos** (compras, entradas e saídas de stock, facturas…): junta a linha, mesmo com o cursor numa quantidade
+  ou nas observações (o que o leitor lá escreveu é tirado).
+- **Inventário:** cada leitura soma 1 à contagem do artigo (ou as unidades da embalagem lida) e marca a linha.
+- **Etiquetas:** junta o artigo.
+- **Lista de artigos:** abre o artigo lido; se nenhum tiver o código, abre uma ficha nova já com ele.
+- **Ficha do artigo:** avisa quando o último algarismo de um EAN/UPC não bate com os outros (código mal escrito ou
+  mal lido).
+
+**Que códigos reconhece**
+
+- O código de barras, a referência e os outros códigos do artigo (embalagens: uma caixa de 12 vende 12).
+- As etiquetas da balança (peso ou preço).
+- UPC-A de 12 algarismos e EAN-13 com o zero à frente (um encontra o outro), e GTIN-14 das caixas.
+- ISBN com hífenes ou de 10 algarismos (os livros guardam-se em ISBN-13).
+- **GS1** (o DataMatrix dos medicamentos e o GS1-128 das caixas):
+  - procura pelo GTIN;
+  - no POS, mostra o lote e a validade e **não junta à venda um artigo com a validade passada**;
+  - nas entradas de stock, preenche o lote e a validade da linha.
+- O prefixo que alguns leitores acrescentam («]E0», «]C1», «]d2»…) é ignorado.
+
+**Código desconhecido no POS**
+
+O POS mostra o código e o tipo e oferece duas saídas:
+
+- **Juntar ao artigo:** é outra embalagem ou outro código de um artigo que já existe. Diz-se quantas unidades o
+  código vende e o leitor passa a reconhecê-lo. Fica na auditoria.
+- **Criar artigo novo:** abre a ficha com o código.
+
+**Som**
+
+Um bip agudo quando o artigo existe e dois graves quando não existe.
+
+**Configurar e testar** (em **Configurações → Postos e impressão → Configurar**, valem só para o aparelho)
+
+- Ligar ou desligar o som.
+- Marcar **Leitor sem fios**: os leitores sem fios mandam os caracteres mais devagar e o KanGest dá-lhes mais
+  tempo.
+- O campo **Testar o leitor** mostra:
+  - o código e o tipo, e se o dígito de controlo está certo;
+  - os milissegundos por carácter e como o leitor acaba a leitura (Enter, Tab ou nada);
+  - o artigo encontrado.
+
+O leitor deve acabar a leitura com **Enter**. Os que acabam com **Tab** também são aceites, e os que não mandam nada
+no fim são reconhecidos quando param de escrever.
+
+**Câmara**
+
+Nos telemóveis e tablets Android (Chrome), o botão da câmara na pesquisa do POS lê:
+
+- EAN, UPC, Code 128, Code 39 e ITF;
+- DataMatrix e QR.
+
+No iPhone e no Windows o browser ainda não sabe ler códigos com a câmara, e o botão não aparece.
 
 ## Impressora térmica (ESC/POS)
 

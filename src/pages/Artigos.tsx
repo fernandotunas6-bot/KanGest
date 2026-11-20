@@ -12,6 +12,7 @@ import { ArtigoPicker } from "@/components/Pickers";
 import { useSession } from "@/store/session";
 import { Atalho, Badge, BotaoCancelar, Button, Card, Confirmar, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 import { useJaUsado, useSujo } from "@/lib/ficha";
+import { bip, gtinValido, useLeitor } from "@/lib/leitor";
 import { atributosDe, ramoPorId, resumoAtributos, type Ramo } from "@/lib/ramos";
 import { prepararFoto, useMiniaturas } from "@/lib/fotos";
 import { InputData } from "@/components/InputData";
@@ -35,6 +36,13 @@ export default function Artigos() {
   const [sp, setSp] = useSearchParams();
   // ?id=… (pesquisa global, Ctrl+K): abre logo a ficha do artigo
   useEffect(() => {
+    // ?novo=código (POS → «Criar artigo com este código»): ficha nova com o código de barras lido
+    const novo = sp.get("novo");
+    if (novo) {
+      setSp({}, { replace: true });
+      if (tem("artigos.criar")) novoArtigo(novo);
+      return;
+    }
     const id = Number(sp.get("id"));
     if (!id) return;
     setSp({}, { replace: true });
@@ -63,15 +71,44 @@ export default function Artigos() {
       return n;
     });
   }
-  function novoArtigo() {
+  function novoArtigo(codigo?: string) {
     setOrigem(undefined);
     setVez((v) => v + 1);
     // valores por omissão do ramo (serviços à hora, farmácia com lotes, restauração sem stock…)
     const n = ramo.novoArtigo ?? {};
     const tipo = n.tipo ?? "P";
     const unidade = tabelas.data?.unidades.find((u) => u.abreviatura === n.unidade)?.id ?? 1;
-    setEditar({ tipo, taxa_iva_id: 1, unidade_id: unidade, familia_id: 1, controla_stock: tipo === "P" && n.controla_stock !== false ? 1 : 0, controla_lote: n.controla_lote ? 1 : 0, ativo: 1 });
+    setEditar({
+      tipo,
+      taxa_iva_id: 1,
+      unidade_id: unidade,
+      familia_id: 1,
+      controla_stock: tipo === "P" && n.controla_stock !== false ? 1 : 0,
+      controla_lote: n.controla_lote ? 1 : 0,
+      ativo: 1,
+      ...(typeof codigo === "string" && codigo ? { codigo_barras: codigo } : {}),
+    });
   }
+  // leitor de códigos na lista: abre o artigo lido; se nenhum o tiver, uma ficha nova já com o código
+  useLeitor(async (l) => {
+    try {
+      const a = await call<Artigo | null>("artigos.codigo", { codigo: l.codigo });
+      if (a) {
+        bip(true);
+        if (!tem("artigos.editar")) return toast.info(`${a.referencia} · ${a.descricao}`);
+        setOrigem(undefined);
+        setEditar(await call<Artigo>("artigos.obter", { id: a.id }));
+      } else {
+        bip(false);
+        if (tem("artigos.criar")) {
+          toast.info(`Nenhum artigo tem o código ${l.codigo}: ficha nova com ele.`);
+          novoArtigo(l.codigo);
+        } else toast.warning(`Nenhum artigo com o código ${l.codigo}.`);
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }, !editar && !lote);
   async function emLote(accao: string, extra: Record<string, unknown> = {}) {
     try {
       const r = await call<{ alterados: number }>("artigos.lote", { ids: seleccionados.map((a) => a.id), accao, ...extra });
@@ -125,7 +162,7 @@ export default function Artigos() {
               </Button>
             </Link>
             {tem("artigos.criar") && (
-              <Button onClick={novoArtigo}>
+              <Button onClick={() => novoArtigo()}>
                 <Plus className="size-4" /> Novo artigo
               </Button>
             )}
@@ -281,7 +318,7 @@ export default function Artigos() {
           inicial={editar}
           origem={origem}
           onClose={() => setEditar(null)}
-          onNovo={tem("artigos.criar") ? novoArtigo : undefined}
+          onNovo={tem("artigos.criar") ? () => novoArtigo() : undefined}
           onClonar={
             tem("artigos.criar")
               ? (c) => {
@@ -694,7 +731,12 @@ function ArtigoForm({
           <Field label="Referência" hint={a.id ? undefined : "Vazio = automática"} erro={jaUsado(refUsada)}>
             <Input value={a.referencia ?? ""} onChange={(e) => set("referencia", e.target.value)} />
           </Field>
-          <Field label={ramo.rotuloCodigo ?? "Código de barras"} hint={ramo.id === "livraria" ? "ISBN-10 ou 13, com ou sem hífenes" : undefined} erro={jaUsado(cobarUsado)}>
+          <Field
+            label={ramo.rotuloCodigo ?? "Código de barras"}
+            hint={ramo.id === "livraria" ? "ISBN-10 ou 13, com ou sem hífenes" : undefined}
+            erro={jaUsado(cobarUsado)}
+            aviso={gtinValido(a.codigo_barras ?? "") === false ? "O último algarismo não bate com os outros (EAN/UPC): confirme o código." : undefined}
+          >
             <Input value={a.codigo_barras ?? ""} onChange={(e) => set("codigo_barras", e.target.value)} />
           </Field>
           <Field label="Família">

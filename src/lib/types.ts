@@ -100,6 +100,8 @@ export interface Artigo {
   /** Leitura no POS: quantidade que o código trouxe (embalagem ou etiqueta de balança). */
   quantidade_lida?: number;
   etiqueta?: { tipo: "PESO" | "PRECO"; valor: number };
+  /** Código GS1 lido (DataMatrix dos medicamentos, GS1-128 das caixas): lote, validade e n.º de série. */
+  gs1?: { gtin: string; lote?: string; validade?: string; serie?: string };
   /** PVP com IVA guardado de cada nível (valor mestre com «preços com IVA incluído»). */
   pvp1?: number | null;
   pvp2?: number | null;

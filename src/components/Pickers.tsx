@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Search } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce } from "@/lib/hooks";
+import { bip } from "@/lib/leitor";
 import { kz, qtd } from "@/lib/format";
 import type { Artigo, Entidade } from "@/lib/types";
 import { Field, Input, cn } from "@/components/ui";
@@ -63,7 +65,8 @@ export function ArtigoPicker({
   filtro,
   className,
 }: {
-  onPick: (a: Artigo) => void;
+  /** `quantidade`: a que o código lido vale (embalagem de 12, etiqueta da balança); sem ela, 1 */
+  onPick: (a: Artigo, quantidade?: number) => void;
   placeholder?: string;
   /** Exclui artigos da lista (ex.: kits na composição de outro kit). */
   filtro?: (a: Artigo) => boolean;
@@ -73,8 +76,33 @@ export function ArtigoPicker({
   const dq = useDebounce(q);
   const lista = useQuery({ queryKey: ["art-picker", dq], queryFn: () => call<Artigo[]>("artigos.listar", { q: dq, limite: 12 }), enabled: dq.length > 0 });
   const itens = (lista.data ?? []).filter((a) => !filtro || filtro(a));
+  // Enter (o leitor acaba a leitura com ele): primeiro o código exacto — com a embalagem, a balança e o GS1 —, só
+  // depois o primeiro da pesquisa; a pesquisa ainda pode estar atrasada em relação ao que o leitor escreveu
+  async function escolherPeloTexto() {
+    const texto = q.trim();
+    if (!texto) return;
+    try {
+      const a = await call<Artigo | null>("artigos.codigo", { codigo: texto });
+      if (a && (!filtro || filtro(a))) {
+        bip(true);
+        onPick(a, a.quantidade_lida);
+        setQ("");
+        return;
+      }
+      const r = (await call<Artigo[]>("artigos.listar", { q: texto, limite: 12 })).filter((x) => !filtro || filtro(x));
+      if (r[0]) {
+        onPick(r[0]);
+        setQ("");
+      } else {
+        bip(false);
+        toast.warning(`Nenhum artigo com «${texto}».`);
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
   return (
-    <div className={cn("relative", className)}>
+    <div className={cn("relative", className)} data-leitor>
       <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
       <Input
         className="pl-9"
@@ -82,9 +110,9 @@ export function ArtigoPicker({
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && itens[0]) {
-            onPick(itens[0]);
-            setQ("");
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void escolherPeloTexto();
           }
         }}
       />

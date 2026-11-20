@@ -327,6 +327,25 @@ pub(super) async fn registar_ficha(st: &AppState, tabela: &'static str, id: i64,
     registar_mudanca(st, Alvo { tabela, chave: "id", param: "id", acao }, Some(&id.to_string()), antes, agora, None).await
 }
 
+/// Uma nota numa ficha que não muda a linha dela (ex.: um código de barras novo noutra tabela): fica como alteração.
+pub(super) async fn registar_nota(st: &AppState, tabela: &'static str, id: i64, detalhe: &str, depois: Value) -> AppResult<()> {
+    cadeia::registar(
+        &st.pool,
+        Linha {
+            utilizador_id: st.sessao_opcional().map(|s| s.id),
+            acao: "ALTERAR",
+            detalhe,
+            entidade: Some(tabela),
+            registo_id: Some(&id.to_string()),
+            antes: None,
+            depois: Some(&depois),
+            posto_id: Some(st.posto().id),
+            origem: origem(),
+        },
+    )
+    .await
+}
+
 async fn registar_mudanca(st: &AppState, a: Alvo, chave: Option<&str>, antes: Option<Value>, agora: Option<Value>, motivo: Option<&str>) -> AppResult<()> {
     // «eliminar» uma ficha já usada desactiva-a: fica como desactivação
     let acao = match (a.acao, &agora) {

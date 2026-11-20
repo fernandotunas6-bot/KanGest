@@ -5375,3 +5375,55 @@ async fn eliminar_com_seguranca_e_accoes_em_lote() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Leitor de códigos: prefixo AIM, UPC-A contra EAN-13, GS1 (DataMatrix dos medicamentos) com lote e validade,
+/// ISBN-10, e associar a um artigo um código que o leitor não conhecia.
+#[tokio::test]
+async fn leitor_de_codigos() {
+    use super::catalogo::{gtin_valido, interpretar_codigo};
+    assert!(gtin_valido("5601234567892") && gtin_valido("012345678905") && gtin_valido("05601234567892") && gtin_valido("96385074"));
+    assert!(!gtin_valido("5601234567890"));
+    let l = interpretar_codigo("]E05601234567892\r");
+    assert_eq!(l.limpo, "5601234567892");
+    assert!(interpretar_codigo("012345678905").candidatos.contains(&"0012345678905".to_string()));
+    // DataMatrix com o prefixo AIM: GTIN e validade
+    let g = interpretar_codigo("]d2010560123456789217271231");
+    assert_eq!(g.gs1.as_ref().unwrap()["validade"], "2027-12-31");
+    // validade só com o mês (dia 00), lote até ao separador FNC1, série
+    let g = interpretar_codigo("01056012345678921727120010LOTE42\u{1d}21SER9");
+    let gs1 = g.gs1.expect("GS1");
+    assert_eq!(gs1["gtin"], "05601234567892");
+    assert_eq!(gs1["validade"], "2027-12");
+    assert_eq!(gs1["lote"], "LOTE42");
+    assert_eq!(gs1["serie"], "SER9");
+    assert!(g.candidatos.contains(&"5601234567892".to_string()));
+    // com parênteses (o texto impresso por baixo)
+    let g = interpretar_codigo("(01)05601234567892(17)271231(10)L7");
+    assert_eq!(g.gs1.unwrap()["lote"], "L7");
+    // ISBN-10 com hífenes → ISBN-13
+    assert!(interpretar_codigo("0-306-40615-2").candidatos.contains(&"9780306406157".to_string()));
+
+    let (st, pasta) = base_com_admin("leitor").await;
+    let arroz = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz", "taxa_iva_id": 1, "preco1": 100000, "codigo_barras": "5601234567892" })).await["id"].as_i64().unwrap();
+    let cola = rpc(&st, "artigos.guardar", json!({ "descricao": "Cola lata", "taxa_iva_id": 1, "preco1": 30000, "codigo_barras": "0012345678905" })).await["id"].as_i64().unwrap();
+    assert_eq!(rpc(&st, "artigos.codigo", json!({ "codigo": "]E05601234567892" })).await["id"], arroz);
+    assert_eq!(rpc(&st, "artigos.codigo", json!({ "codigo": "012345678905" })).await["id"], cola, "UPC-A de 12 algarismos encontra o EAN-13 com o zero");
+    let r = rpc(&st, "artigos.codigo", json!({ "codigo": "01056012345678921727123110L9\u{1d}" })).await;
+    assert_eq!(r["id"], arroz);
+    assert_eq!(r["gs1"]["validade"], "2027-12-31");
+    // a API de integração lê da mesma maneira
+    assert_eq!(super::catalogo::ler_codigo(&st.pool, "012345678905").await.unwrap(), Some((cola, None)));
+
+    // código desconhecido: associa-se a um artigo (caixa de 6) e passa a vender 6
+    assert!(rpc(&st, "artigos.codigo", json!({ "codigo": "7891234567895" })).await.is_null());
+    let r = rpc(&st, "artigos.associarCodigo", json!({ "artigo_id": cola, "codigo": "7891234567895", "quantidade": 6, "descricao": "Caixa de 6" })).await;
+    assert_eq!(r["id"], cola);
+    assert_eq!(r["quantidade_lida"], 6.0);
+    assert_eq!(rpc(&st, "artigos.codigo", json!({ "codigo": "7891234567895" })).await["quantidade_lida"], 6.0);
+    assert!(rpc_err(&st, "artigos.associarCodigo", json!({ "artigo_id": arroz, "codigo": "7891234567895" })).await.contains("Cola lata"));
+    assert!(rpc_err(&st, "artigos.associarCodigo", json!({ "artigo_id": arroz, "codigo": "012345678905" })).await.contains("já está"));
+    let h = rpc(&st, "auditoria.historico", json!({ "entidade": "artigos", "registo_id": cola })).await;
+    assert_eq!(h[0]["depois"]["outro_codigo"], "7891234567895");
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

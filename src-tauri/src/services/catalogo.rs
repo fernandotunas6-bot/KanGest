@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::db;
 use crate::error::{AppError, AppResult};
@@ -219,87 +219,198 @@ pub fn ler_etiqueta(codigo: &str, regras: &[RegraBalanca]) -> Option<(String, St
 /// Devolve o artigo com `quantidade_lida` quando o código traz a quantidade.
 pub async fn artigos_codigo(st: &AppState, c: CodigoIn) -> AppResult<Value> {
     st.sessao()?;
-    let codigo = c.codigo.trim();
+    let leitura = interpretar_codigo(&c.codigo);
+    let Some((id, lido)) = ler_interpretado(&st.pool, &leitura).await? else { return Ok(Value::Null) };
     let armazem = st.posto().armazem_id;
-    let row = sqlx::query(&format!("{ARTIGO_SELECT} WHERE a.ativo = 1 AND (a.codigo_barras = ? OR a.referencia = ?) LIMIT 1"))
-        .bind(armazem)
-        .bind(codigo)
-        .bind(codigo)
-        .fetch_optional(&st.pool)
-        .await?;
-    if let Some(r) = row {
-        return Ok(db::row_json(&r));
-    }
-    // código adicional (ex.: embalagem de 12)
-    let extra: Option<(i64, f64)> = sqlx::query_as("SELECT artigo_id, quantidade FROM artigo_codigos WHERE codigo = ?").bind(codigo).fetch_optional(&st.pool).await?;
-    if let Some((id, q)) = extra {
-        let r = sqlx::query(&format!("{ARTIGO_SELECT} WHERE a.ativo = 1 AND a.id = ?")).bind(armazem).bind(id).fetch_optional(&st.pool).await?;
-        return Ok(r.map(|r| {
-            let mut v = db::row_json(&r);
-            if (q - 1.0).abs() > 1e-9 {
-                v["quantidade_lida"] = json!(q);
-            }
-            v
-        })
-        .unwrap_or(Value::Null));
-    }
-    // etiqueta de balança
-    if let Some((plu, tipo, valor)) = ler_etiqueta(codigo, &regras_balanca(&st.pool).await?) {
-        let r = sqlx::query(&format!(
-            "{ARTIGO_SELECT} WHERE a.ativo = 1 AND a.codigo_balanca IS NOT NULL AND CAST(a.codigo_balanca AS INTEGER) = CAST(? AS INTEGER) LIMIT 1"
-        ))
-        .bind(armazem)
-        .bind(&plu)
-        .fetch_optional(&st.pool)
-        .await?;
-        if let Some(r) = r {
-            let mut v = db::row_json(&r);
-            let quantidade = if tipo == "PESO" {
-                valor
-            } else {
-                // etiqueta com o preço (com IVA): a quantidade é o preço a dividir pelo PVP ao kg
-                let pvp = v["preco1_iva"].as_i64().unwrap_or(0);
-                if pvp <= 0 {
-                    return Err(AppError::msg(format!("O artigo da etiqueta ({}) não tem preço de venda.", v["descricao"].as_str().unwrap_or(""))));
-                }
-                (valor / pvp as f64 * 1_000_000.0).round() / 1_000_000.0
-            };
-            v["quantidade_lida"] = json!(quantidade);
-            v["etiqueta"] = json!({ "tipo": tipo, "valor": valor });
-            return Ok(v);
+    let Some(r) = sqlx::query(&format!("{ARTIGO_SELECT} WHERE a.ativo = 1 AND a.id = ?")).bind(armazem).bind(id).fetch_optional(&st.pool).await? else {
+        return Ok(Value::Null);
+    };
+    let mut v = db::row_json(&r);
+    if let Some(l) = lido {
+        let q = l["quantidade"].as_f64().unwrap_or(1.0);
+        if l["origem"] == "balanca" {
+            v["quantidade_lida"] = json!(q);
+            v["etiqueta"] = json!({ "tipo": l["tipo"], "valor": l["valor"] });
+        } else if (q - 1.0).abs() > 1e-9 {
+            // código adicional (ex.: embalagem de 12)
+            v["quantidade_lida"] = json!(q);
         }
     }
-    Ok(Value::Null)
+    if let Some(g) = leitura.gs1 {
+        v["gs1"] = g;
+    }
+    Ok(v)
+}
+
+/// Um código lido, já limpo: as formas a procurar (o próprio e as equivalentes) e, num código GS1 (o DataMatrix dos
+/// medicamentos, o GS1-128 das caixas), o GTIN, o lote, a validade e o n.º de série.
+pub struct Leitura {
+    pub limpo: String,
+    pub candidatos: Vec<String>,
+    pub gs1: Option<Value>,
+}
+
+/// Dígito de controlo de um GTIN (EAN-8, UPC-A, EAN-13, GTIN-14): o último algarismo bate com os outros.
+pub fn gtin_valido(c: &str) -> bool {
+    if !matches!(c.len(), 8 | 12 | 13 | 14) || !c.chars().all(|x| x.is_ascii_digit()) {
+        return false;
+    }
+    let d: Vec<u32> = c.chars().filter_map(|x| x.to_digit(10)).collect();
+    let (corpo, controlo) = d.split_at(d.len() - 1);
+    // da direita para a esquerda, pesos 3, 1, 3, 1…
+    let soma: u32 = corpo.iter().rev().enumerate().map(|(i, x)| x * if i % 2 == 0 { 3 } else { 1 }).sum();
+    (10 - soma % 10) % 10 == controlo[0]
+}
+
+/// GS1 (AI 01 + GTIN-14 e, a seguir, 17 validade, 10 lote, 21 série, 11/13/15 datas). Os campos de comprimento
+/// variável acabam no separador de grupos (FNC1, \x1d) ou no fim; também aceita a forma com parênteses do texto.
+fn ler_gs1(c: &str) -> Option<Value> {
+    let texto = if c.starts_with("(01)") { c.replace('(', "\u{1d}").replace(')', "") } else { c.to_string() };
+    let mut s = texto.trim_start_matches('\u{1d}');
+    if !s.is_ascii() || !s.starts_with("01") || s.len() < 16 {
+        return None;
+    }
+    let mut campos = Map::new();
+    let data = |v: &str| {
+        let (a, m, d) = (&v[0..2], &v[2..4], &v[4..6]);
+        if d == "00" {
+            format!("20{a}-{m}")
+        } else {
+            format!("20{a}-{m}-{d}")
+        }
+    };
+    while s.len() >= 2 {
+        let ai = &s[..2];
+        let fixo = match ai {
+            "01" | "02" => Some(14),
+            "11" | "13" | "15" | "17" => Some(6),
+            "10" | "21" => None,
+            _ => break,
+        };
+        let resto = &s[2..];
+        let (valor, depois) = match fixo {
+            Some(n) if resto.len() >= n => (&resto[..n], &resto[n..]),
+            Some(_) => break,
+            None => match resto.find('\u{1d}') {
+                Some(k) => (&resto[..k], &resto[k..]),
+                None => (resto, ""),
+            },
+        };
+        if fixo.is_some() && !valor.chars().all(|x| x.is_ascii_digit()) {
+            break;
+        }
+        let nome = match ai {
+            "01" => "gtin",
+            "02" => "gtin_conteudo",
+            "17" => "validade",
+            "11" => "producao",
+            "13" => "embalagem",
+            "15" => "consumir_antes",
+            "10" => "lote",
+            _ => "serie",
+        };
+        let v = if matches!(ai, "11" | "13" | "15" | "17") { data(valor) } else { valor.to_string() };
+        campos.insert(nome.into(), json!(v));
+        s = depois.trim_start_matches('\u{1d}');
+    }
+    let gtin = campos.get("gtin")?.as_str()?.to_string();
+    gtin_valido(&gtin).then_some(Value::Object(campos))
+}
+
+/// Limpa o que o leitor enviou e diz por que formas se procura. Aceita:
+/// - o prefixo AIM que alguns leitores acrescentam («]E0» EAN, «]C1» GS1-128, «]d2» DataMatrix, «]Q3» QR);
+/// - UPC-A (12) e EAN-13 com o zero à frente, e GTIN-14 (caixas) com zeros à esquerda;
+/// - ISBN com hífenes ou ISBN-10 (os livros guardam-se em ISBN-13);
+/// - GS1: procura-se pelo GTIN (o lote e a validade vêm à parte).
+pub fn interpretar_codigo(bruto: &str) -> Leitura {
+    let mut limpo: String = bruto.chars().filter(|x| *x == '\u{1d}' || !x.is_control()).collect::<String>().trim().to_string();
+    if limpo.starts_with(']') && limpo.chars().count() > 3 {
+        limpo = limpo.chars().skip(3).collect::<String>().trim().to_string();
+    }
+    let gs1 = ler_gs1(&limpo);
+    let mut candidatos: Vec<String> = Vec::new();
+    let mut juntar = |c: String| {
+        if !c.is_empty() && !candidatos.contains(&c) {
+            candidatos.push(c);
+        }
+    };
+    let base = match gs1.as_ref().and_then(|g| g["gtin"].as_str()) {
+        Some(g) => g.to_string(),
+        None => {
+            let sem_gs = limpo.replace('\u{1d}', "");
+            juntar(sem_gs.clone());
+            sem_gs
+        }
+    };
+    // só algarismos (ISBN e códigos com hífenes ou espaços)
+    let digitos: String = base.chars().filter(|x| !matches!(x, '-' | ' ')).collect();
+    if !digitos.is_empty() && digitos.chars().all(|x| x.is_ascii_digit()) {
+        juntar(digitos.clone());
+        match digitos.len() {
+            12 => {
+                juntar(format!("0{digitos}"));
+                juntar(format!("00{digitos}"));
+            }
+            13 | 14 => {
+                let mut d = digitos.as_str();
+                while d.len() > 12 && d.starts_with('0') {
+                    d = &d[1..];
+                    juntar(d.to_string());
+                }
+                if digitos.len() == 14 && digitos.starts_with("000000") {
+                    juntar(digitos[6..].to_string()); // EAN-8 numa caixa
+                }
+                if digitos.len() == 13 {
+                    juntar(format!("0{digitos}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    if super::ramos::parece_isbn(&base) {
+        if let Some(i) = super::ramos::isbn13(&base) {
+            juntar(i);
+        }
+    }
+    let limpo = limpo.replace('\u{1d}', "");
+    Leitura { limpo, candidatos, gs1 }
 }
 
 /// Leitura de um código para a API de integração: (artigo, leitura). A leitura só vem quando o código vale
 /// outra quantidade que não 1: embalagem (`{"origem": "embalagem", "quantidade", "descricao"}`) ou etiqueta
 /// de balança (`{"origem": "balanca", "tipo", "valor", "quantidade"}`). Mesma ordem que o leitor do POS.
 pub async fn ler_codigo(p: &sqlx::SqlitePool, codigo: &str) -> AppResult<Option<(i64, Option<Value>)>> {
-    let codigo = codigo.trim();
-    if codigo.is_empty() {
+    ler_interpretado(p, &interpretar_codigo(codigo)).await
+}
+
+async fn ler_interpretado(p: &sqlx::SqlitePool, l: &Leitura) -> AppResult<Option<(i64, Option<Value>)>> {
+    if l.candidatos.is_empty() {
         return Ok(None);
     }
-    // 1. código de barras ou referência do artigo
-    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM artigos WHERE ativo = 1 AND (codigo_barras = ?1 OR referencia = ?1) ORDER BY codigo_barras = ?1 DESC, id LIMIT 1")
+    // 1. código de barras ou referência do artigo (em todas as formas do código)
+    for codigo in &l.candidatos {
+        let id: Option<i64> = sqlx::query_scalar("SELECT id FROM artigos WHERE ativo = 1 AND (codigo_barras = ?1 OR referencia = ?1) ORDER BY codigo_barras = ?1 DESC, id LIMIT 1")
+            .bind(codigo)
+            .fetch_optional(p)
+            .await?;
+        if let Some(id) = id {
+            return Ok(Some((id, None)));
+        }
+    }
+    // 2. código adicional (outra embalagem)
+    for codigo in &l.candidatos {
+        let extra: Option<(i64, f64, Option<String>)> = sqlx::query_as(
+            "SELECT c.artigo_id, c.quantidade, c.descricao FROM artigo_codigos c JOIN artigos a ON a.id = c.artigo_id WHERE c.codigo = ? AND a.ativo = 1",
+        )
         .bind(codigo)
         .fetch_optional(p)
         .await?;
-    if let Some(id) = id {
-        return Ok(Some((id, None)));
-    }
-    // 2. código adicional (outra embalagem)
-    let extra: Option<(i64, f64, Option<String>)> = sqlx::query_as(
-        "SELECT c.artigo_id, c.quantidade, c.descricao FROM artigo_codigos c JOIN artigos a ON a.id = c.artigo_id WHERE c.codigo = ? AND a.ativo = 1",
-    )
-    .bind(codigo)
-    .fetch_optional(p)
-    .await?;
-    if let Some((id, q, d)) = extra {
-        return Ok(Some((id, ((q - 1.0).abs() > 1e-9 || d.is_some()).then(|| json!({ "origem": "embalagem", "quantidade": q, "descricao": d })))));
+        if let Some((id, q, d)) = extra {
+            return Ok(Some((id, ((q - 1.0).abs() > 1e-9 || d.is_some()).then(|| json!({ "origem": "embalagem", "quantidade": q, "descricao": d })))));
+        }
     }
     // 3. etiqueta de balança (EAN-13 com o código do artigo e o peso ou o preço com IVA)
-    let Some((plu, tipo, valor)) = ler_etiqueta(codigo, &regras_balanca(p).await?) else { return Ok(None) };
+    let Some((plu, tipo, valor)) = ler_etiqueta(&l.limpo, &regras_balanca(p).await?) else { return Ok(None) };
     let artigo: Option<(i64, i64, String)> = sqlx::query_as(
         "SELECT a.id,
                 CASE WHEN a.pvp1 IS NOT NULL AND CAST(ROUND(a.pvp1 * 100.0 / (100 + t.percentagem)) AS INTEGER) = a.preco1 THEN a.pvp1
@@ -322,6 +433,65 @@ pub async fn ler_codigo(p: &sqlx::SqlitePool, codigo: &str) -> AppResult<Option<
         (valor / pvp as f64 * 1_000_000.0).round() / 1_000_000.0
     };
     Ok(Some((id, Some(json!({ "origem": "balanca", "tipo": tipo, "valor": valor, "quantidade": quantidade })))))
+}
+
+#[derive(Deserialize)]
+pub struct AssociarCodigoIn {
+    artigo_id: i64,
+    codigo: String,
+    #[serde(default)]
+    quantidade: Option<f64>,
+    #[serde(default)]
+    descricao: Option<String>,
+}
+
+/// Junta a um artigo um código que o leitor não conhecia (outra embalagem, o código do fornecedor…) sem abrir a
+/// ficha; num código GS1 guarda-se o GTIN. Devolve o artigo, pronto a vender.
+pub async fn associar_codigo(st: &AppState, a: AssociarCodigoIn) -> AppResult<Value> {
+    st.exigir_perm("artigos.editar")?;
+    let l = interpretar_codigo(&a.codigo);
+    let codigo = match l.gs1.as_ref().and_then(|g| g["gtin"].as_str()) {
+        Some(g) if g.starts_with('0') => g[1..].to_string(),
+        Some(g) => g.to_string(),
+        None => l.limpo.clone(),
+    };
+    if codigo.is_empty() || codigo.chars().count() > 64 {
+        return Err(AppError::msg("Leia ou escreva o código (até 64 caracteres)."));
+    }
+    let quantidade = a.quantidade.unwrap_or(1.0);
+    if !(quantidade > 0.0 && quantidade <= 100_000.0) {
+        return Err(AppError::msg("A quantidade que o código vende tem de ser maior que zero."));
+    }
+    if let Some((id, _)) = ler_interpretado(&st.pool, &l).await? {
+        let nome: String = sqlx::query_scalar("SELECT referencia || ' «' || descricao || '»' FROM artigos WHERE id = ?").bind(id).fetch_one(&st.pool).await?;
+        return Err(AppError::msg(format!("O código {codigo} já está no artigo {nome}.")));
+    }
+    let descricao: String = sqlx::query_scalar("SELECT descricao FROM artigos WHERE id = ? AND ativo = 1")
+        .bind(a.artigo_id)
+        .fetch_optional(&st.pool)
+        .await?
+        .ok_or_else(|| AppError::msg("Escolha um artigo activo."))?;
+    let desc = a.descricao.map(|d| d.trim().to_string()).filter(|d| !d.is_empty());
+    sqlx::query("INSERT INTO artigo_codigos (artigo_id, codigo, descricao, quantidade) VALUES (?, ?, ?, ?)")
+        .bind(a.artigo_id)
+        .bind(&codigo)
+        .bind(&desc)
+        .bind(quantidade)
+        .execute(&st.pool)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::Database(d) if d.message().contains("UNIQUE") => AppError::msg(format!("O código {codigo} já está noutro artigo (pode estar desactivado).")),
+            e => e.into(),
+        })?;
+    super::auditoria::registar_nota(
+        st,
+        "artigos",
+        a.artigo_id,
+        &format!("Artigo «{descricao}» (n.º {}): código de barras {codigo} associado pelo leitor", a.artigo_id),
+        json!({ "outro_codigo": codigo, "quantidade": quantidade, "descricao_codigo": desc }),
+    )
+    .await?;
+    artigos_codigo(st, CodigoIn { codigo }).await
 }
 
 #[derive(Deserialize)]

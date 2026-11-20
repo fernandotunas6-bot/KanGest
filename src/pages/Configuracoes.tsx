@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Activity, CheckCircle2, DatabaseBackup, Globe, ImagePlus, Inbox, Monitor, MonitorSmartphone, Network, Plus, Printer, Server, Wifi, XCircle } from "lucide-react";
+import { Activity, CheckCircle2, DatabaseBackup, Globe, ImagePlus, Inbox, Monitor, MonitorSmartphone, Network, Plus, Printer, ScanBarcode, Server, Wifi, XCircle } from "lucide-react";
 import { abrirVisorEcra, logoParaRaster } from "@/lib/equipamento";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import EmailConfig from "@/components/EmailConfig";
+import { ConfigLeitorAparelho } from "@/components/Leitor";
 import AparenciaConfig from "@/components/AparenciaConfig";
 import { imprimir } from "@/lib/print";
 import { call, descricaoDispositivo, esquecerLigacao, levarFicheiro, ligacaoWeb, MODO_WEB, reiniciar } from "@/lib/api";
@@ -674,6 +675,12 @@ function Postos() {
                 </span>
               </div>
             )}
+          </div>
+          <div className="mt-6 border-t border-line pt-4">
+            <div className="mb-3 flex items-center gap-2 text-[12px] font-medium uppercase tracking-wide text-ink-2">
+              <ScanBarcode className="size-4" /> Leitor de código de barras (este aparelho)
+            </div>
+            <ConfigLeitorAparelho />
           </div>
         </Modal>
       )}
