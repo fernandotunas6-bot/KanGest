@@ -105,6 +105,22 @@ Sem impressão directa, o talão sai pelo diálogo de impressão do sistema, em 
 
 Ligada à impressora térmica (cabo RJ11). Abre em todas as vendas, só com numerário ou nunca. A maioria usa o pino 2. No POS, o botão «Gaveta» (Ctrl+G) abre-a e exige a permissão de movimentos de caixa.
 
+## Pagamento noutra moeda
+
+O POS recebe sempre kwanzas. No pagamento, a caixa «Noutra moeda (troco em Kz)» mostra **só as moedas aceites no
+POS**:
+
+- escolhem-se na instalação ou em **Tabelas → Moedas**, na coluna «Aceite no POS» ou na ficha da moeda;
+- cada moeda tem de estar activa e com o câmbio do dia;
+- as outras moedas activas continuam a servir nas compras e nos documentos em moeda estrangeira, mas não ocupam o
+  pagamento do POS;
+- sem nenhuma marcada, a caixa não aparece.
+
+O troco sai em kwanzas. No fecho de caixa, o que entrou noutra moeda aparece à parte, na moeda («Em USD (na
+gaveta)»).
+
+Numa base que já existia, fica marcado só o dólar, se tiver câmbio.
+
 ## Visor de cliente
 
 Em **Visor de cliente**:

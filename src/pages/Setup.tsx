@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { Building2, DatabaseBackup, Palette, ShieldCheck } from "lucide-react";
+import { Building2, Coins, DatabaseBackup, Palette, ShieldCheck } from "lucide-react";
 import { call } from "@/lib/api";
 import { Button, Card, Field, Input, Select } from "@/components/ui";
 import { Logo } from "@/components/Logo";
@@ -10,6 +10,15 @@ import { useAparencia } from "@/lib/aparencia";
 import type { Cores } from "@/lib/cores";
 import { Store } from "lucide-react";
 import { RestaurarCopia } from "@/pages/Configuracoes";
+import { cn } from "@/components/ui";
+
+/** Moedas que se podem aceitar em numerário no POS logo na instalação (as da tabela de moedas de origem). */
+const MOEDAS_POS = [
+  { codigo: "USD", nome: "Dólar americano", simbolo: "US$" },
+  { codigo: "EUR", nome: "Euro", simbolo: "€" },
+  { codigo: "ZAR", nome: "Rand sul-africano", simbolo: "R" },
+  { codigo: "CNY", nome: "Yuan chinês", simbolo: "¥" },
+];
 
 export default function Setup({ onDone }: { onDone: () => void }) {
   const [e, setE] = useState({ nome: "", nif: "", endereco: "", localidade: "Luanda", provincia: "Luanda", telefone: "", email: "", regime_iva: "GERAL" });
@@ -17,6 +26,8 @@ export default function Setup({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [ramo, setRamo] = useState<string>("comercio");
   const [cores, setCoresLocal] = useState<Cores>({ paleta: "petroleo" });
+  // moedas aceites em numerário no POS, com o câmbio do dia (nenhuma: o POS só recebe kwanzas)
+  const [moedasPos, setMoedasPos] = useState<Record<string, string>>({});
   // o jogo escolhido vê-se logo neste ecrã
   const escolherCores = (c: Cores) => {
     setCoresLocal(c);
@@ -29,9 +40,12 @@ export default function Setup({ onDone }: { onDone: () => void }) {
   async function guardar(ev: FormEvent) {
     ev.preventDefault();
     if (a.senha !== a.confirmar) return toast.error("As senhas não coincidem.");
+    const moedas_pos = Object.entries(moedasPos).map(([codigo, c]) => ({ codigo, cambio: Number(c.replace(/\s/g, "").replace(",", ".")) || 0 }));
+    const semCambio = moedas_pos.find((m) => m.cambio <= 0);
+    if (semCambio) return toast.error(`Indique o câmbio do dia de ${MOEDAS_POS.find((x) => x.codigo === semCambio.codigo)?.nome ?? semCambio.codigo} (quantos kwanzas vale 1).`);
     setBusy(true);
     try {
-      await call("setup.inicializar", { empresa: e, admin: { nome: a.nome, login: a.login, senha: a.senha }, ramo, cores });
+      await call("setup.inicializar", { empresa: e, admin: { nome: a.nome, login: a.login, senha: a.senha }, ramo, cores, moedas_pos });
       toast.success("Sistema configurado. Inicie sessão.");
       onDone();
     } catch (err) {
@@ -100,6 +114,52 @@ export default function Setup({ onDone }: { onDone: () => void }) {
           </div>
           <p className="mb-4 text-[13px] text-ink-3">O jogo de cores do menu, dos botões e do ecrã de entrada. Pode mudar depois em Configurações → Aparência.</p>
           <EscolherCores valor={cores} onChange={escolherCores} />
+        </Card>
+
+        <Card className="mt-5 p-6">
+          <div className="mb-1 flex items-center gap-2 font-semibold">
+            <Coins className="size-5 text-brand" /> Moedas no POS
+          </div>
+          <p className="mb-4 text-[13px] text-ink-3">
+            O POS recebe sempre kwanzas. Marque só as moedas que aceita em numerário (o troco sai em kwanzas): só essas aparecem no pagamento. Pode mudar depois em Tabelas →
+            Moedas.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {MOEDAS_POS.map((m) => {
+              const marcada = m.codigo in moedasPos;
+              return (
+                <div key={m.codigo} className={cn("flex items-center gap-3 rounded-xl border px-3 py-2.5", marcada ? "border-brand/40 bg-brand-50/50" : "border-line")}>
+                  <label className="flex min-w-0 flex-1 items-center gap-2 text-[14px]">
+                    <input
+                      type="checkbox"
+                      checked={marcada}
+                      onChange={(x) =>
+                        setMoedasPos((v) => {
+                          const n = { ...v };
+                          if (x.target.checked) n[m.codigo] = "";
+                          else delete n[m.codigo];
+                          return n;
+                        })
+                      }
+                    />
+                    <span className="truncate">
+                      {m.nome} <span className="text-ink-3">({m.simbolo})</span>
+                    </span>
+                  </label>
+                  {marcada && (
+                    <Input
+                      aria-label={`Câmbio do ${m.nome} em kwanzas`}
+                      className="num h-9 w-28 text-right"
+                      inputMode="decimal"
+                      placeholder="Kz por 1"
+                      value={moedasPos[m.codigo]}
+                      onChange={(x) => setMoedasPos((v) => ({ ...v, [m.codigo]: x.target.value }))}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </Card>
 
         <Card className="mt-5 p-6">

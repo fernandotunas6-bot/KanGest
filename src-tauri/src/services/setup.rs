@@ -53,6 +53,15 @@ pub struct InicializarIn {
     /// Jogo de cores escolhido na instalação (ver aparencia.rs); sem ele, as cores do KanGest.
     #[serde(default)]
     cores: Option<Value>,
+    /// Moedas aceites em numerário no POS, com o câmbio do dia (sem nenhuma, o POS só recebe kwanzas).
+    #[serde(default)]
+    moedas_pos: Vec<MoedaPosIn>,
+}
+
+#[derive(Deserialize)]
+pub struct MoedaPosIn {
+    codigo: String,
+    cambio: f64,
 }
 
 async fn gravar_empresa(st: &AppState, e: &EmpresaIn) -> AppResult<()> {
@@ -99,7 +108,17 @@ pub async fn inicializar(st: &AppState, i: InicializarIn) -> AppResult<Value> {
     if let Some(c) = i.cores.as_ref() {
         super::aparencia::validar_cores(c)?;
     }
+    for m in &i.moedas_pos {
+        let existe: Option<String> = sqlx::query_scalar("SELECT descricao FROM moedas WHERE codigo = ? AND codigo <> 'AOA'").bind(m.codigo.trim().to_uppercase()).fetch_optional(&st.pool).await?;
+        let nome = existe.ok_or_else(|| AppError::msg(format!("Moeda desconhecida: {}.", m.codigo)))?;
+        if !(m.cambio.is_finite() && m.cambio > 0.0) {
+            return Err(AppError::msg(format!("Indique o câmbio do dia de {nome} (quantos kwanzas vale 1) para o aceitar no POS.")));
+        }
+    }
     gravar_empresa(st, &i.empresa).await?;
+    for m in &i.moedas_pos {
+        sqlx::query("UPDATE moedas SET pos = 1, ativo = 1, cambio = ? WHERE codigo = ?").bind(m.cambio).bind(m.codigo.trim().to_uppercase()).execute(&st.pool).await?;
+    }
     if let Some(r) = i.ramo.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
         super::ramos::gravar_ramo(&st.pool, r).await?;
     }
