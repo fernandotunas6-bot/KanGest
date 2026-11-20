@@ -5,12 +5,13 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Link, useSearchParams } from "react-router-dom";
-import { BookOpen, Database, Download, Info, Keyboard, Mail, Phone, RefreshCw, ShieldCheck } from "lucide-react";
+import { BookOpen, Database, Download, Info, Keyboard, Mail, Phone, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
 import { call, MODO_WEB } from "@/lib/api";
 import { numero } from "@/lib/format";
 import { MENU } from "@/lib/menu";
 import { Button, Card, Field, Input, PageHeader, cn } from "@/components/ui";
 import { useSession } from "@/store/session";
+import { useLicenca } from "@/lib/licenca";
 
 interface Info {
   versao: string;
@@ -350,7 +351,18 @@ function Atualizacoes() {
 }
 
 /** Autoria e direitos: quem desenvolveu o KanGest e o aviso de protecção (igual ao do ficheiro LICENSE). */
+/**
+ * O selo de integridade do executável, dito por palavras (ver src-tauri/src/selo). Só se mostra quando diz alguma
+ * coisa: válido ou alterado (sem selo — compilação sem as chaves do selo — e «a confirmar» não se mostram).
+ */
+const SELOS: Partial<Record<string, { texto: string; alerta: boolean }>> = {
+  VALIDO: { texto: "Selo de integridade válido: este KanGest é o original, sem alterações.", alerta: false },
+  ALTERADO: { texto: "O executável foi alterado: reinstale o KanGest a partir do site. Até lá não se emitem documentos.", alerta: true },
+};
+
 function Autoria() {
+  const selo = useLicenca().data?.selo;
+  const s = selo ? SELOS[selo] : undefined;
   return (
     <Card className="col-span-2 flex flex-wrap items-center gap-x-8 gap-y-3 border-brand/25 bg-brand-50/40 p-5">
       <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -362,6 +374,12 @@ function Autoria() {
           <div className="text-[12.5px] text-ink-2">
             © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar, descompilar ou redistribuir o KanGest sem autorização escrita do autor.
           </div>
+          {s && (
+            <div className={cn("mt-1.5 flex items-center gap-1.5 text-[12.5px] font-medium", s.alerta ? "text-danger" : "text-ok")}>
+              {s.alerta ? <ShieldAlert className="size-4 shrink-0" /> : <ShieldCheck className="size-4 shrink-0" />}
+              {s.texto}
+            </div>
+          )}
         </div>
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1 text-[13.5px]">
