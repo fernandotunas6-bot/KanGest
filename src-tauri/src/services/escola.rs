@@ -591,6 +591,17 @@ async fn mapa(st: &AppState, ano: i64, turma: Option<i64>) -> AppResult<(Vec<Str
     Ok((chaves, linhas))
 }
 
+/// Alunos com propinas por facturar até hoje (para o aviso no painel).
+pub async fn por_facturar(p: &sqlx::SqlitePool) -> AppResult<i64> {
+    Ok(sqlx::query_scalar(
+        "SELECT COUNT(*) FROM matriculas m JOIN avencas v ON v.id = m.avenca_id
+         WHERE m.estado = 'ACTIVA' AND v.ativo = 1 AND v.proxima <= ?1 AND (v.fim IS NULL OR v.fim = '' OR v.proxima <= v.fim)",
+    )
+    .bind(txt(hoje()))
+    .fetch_one(p)
+    .await?)
+}
+
 pub async fn propinas(st: &AppState, f: AnoFiltro) -> AppResult<Value> {
     st.exigir_perm(PERMISSAO)?;
     let mut c = st.pool.acquire().await?;

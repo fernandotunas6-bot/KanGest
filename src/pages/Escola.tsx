@@ -5,13 +5,16 @@ import { useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowRightLeft, Ban, FileCheck2, GraduationCap, HandCoins, Plus, Search, Trash2, Wallet } from "lucide-react";
+import { ArrowRightLeft, Ban, FileCheck2, GraduationCap, HandCoins, Plus, Printer, Search, Trash2, Wallet } from "lucide-react";
 import { call } from "@/lib/api";
-import { kz, parseKz, toInputKz } from "@/lib/format";
+import { data, hojeISO, kz, parseKz, toInputKz } from "@/lib/format";
+import { imprimir } from "@/lib/print";
 import type { Entidade } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Badge, Button, Card, Confirmar, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Stat, Table, Td, Th, cn } from "@/components/ui";
 import { EntidadePicker } from "@/components/Pickers";
+import { PrintPortal } from "@/components/DocumentoPrint";
+import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 
 /**
  * Escola, só a parte financeira: o aluno é o cliente que paga; a turma diz a propina; a matrícula gera a
@@ -315,7 +318,8 @@ function Matricular({ ano, turmas, onClose, onFeito }: { ano: Ano; turmas: Turma
   const [cliente, setCliente] = useState<Entidade | null>(null);
   const [turma, setTurma] = useState(String(turmas[0]?.id ?? ""));
   const [desconto, setDesconto] = useState("");
-  const hoje = new Date().toISOString().slice(0, 7);
+  // mês local (o UTC daria o mês anterior perto da meia-noite do dia 1)
+  const hoje = hojeISO().slice(0, 7);
   const [primeiro, setPrimeiro] = useState(hoje < ano.inicio.slice(0, 7) ? ano.inicio.slice(0, 7) : hoje > ano.fim.slice(0, 7) ? ano.fim.slice(0, 7) : hoje);
   const [busy, setBusy] = useState(false);
 
@@ -442,12 +446,56 @@ function MudarTurma({ linha, turmas, onClose, onFeito }: { linha: LinhaPropina; 
 
 function ListaDevedores({ ano }: { ano: Ano }) {
   const nav = useNavigate();
+  const empresa = useEmpresa();
   const d = useQuery({ queryKey: ["escola-devedores", ano.id], queryFn: () => call<Devedores>("escola.devedores", { ano_lectivo_id: ano.id }) });
   if (!d.data) return null;
   if (!d.data.turmas.length) return <Card><Empty icon={<HandCoins className="size-6" />} title="Não há propinas em dívida" text="Todas as propinas facturadas estão pagas." /></Card>;
+  const alunos = d.data.turmas.reduce((s, t) => s + t.alunos.length, 0);
   return (
     <div className="space-y-4">
-      <Stat label="Total em dívida" value={kz(d.data.total)} tone="danger" hint={`${d.data.turmas.reduce((s, t) => s + t.alunos.length, 0)} alunos em ${d.data.turmas.length} ${d.data.turmas.length === 1 ? "turma" : "turmas"}`} />
+      <div className="flex flex-wrap items-end gap-3">
+        <Stat label="Total em dívida" value={kz(d.data.total)} tone="danger" hint={`${alunos} ${alunos === 1 ? "aluno" : "alunos"} em ${d.data.turmas.length} ${d.data.turmas.length === 1 ? "turma" : "turmas"}`} />
+        <Button variant="secondary" onClick={imprimir}>
+          <Printer className="size-4" /> Imprimir lista
+        </Button>
+      </div>
+      {/* lista para imprimir: uma turma a seguir à outra, com o total de cada uma */}
+      <PrintPortal>
+        <div className="p-2 text-[11px] text-black">
+          <CabecalhoEmpresa empresa={empresa} titulo={`Propinas em dívida — ${ano.designacao}`} numero={data(hojeISO())} />
+          <div className="my-3 text-[13px] font-semibold">Total em dívida: {kz(d.data.total)}</div>
+          {d.data.turmas.map((t) => (
+            <table key={t.turma_id} className="mb-4 w-full border-collapse text-left">
+              <thead>
+                <tr>
+                  <th colSpan={4} className="pb-1 text-[12px]">
+                    {t.turma}
+                  </th>
+                  <th className="pb-1 text-right text-[12px]">{kz(t.total)}</th>
+                </tr>
+                <tr className="border-b border-black">
+                  <th>Aluno</th>
+                  <th>Telefone</th>
+                  <th className="text-right">Meses</th>
+                  <th>Desde</th>
+                  <th className="text-right">Em dívida</th>
+                </tr>
+              </thead>
+              <tbody>
+                {t.alunos.map((a) => (
+                  <tr key={a.entidade_id} className="border-b border-black/20">
+                    <td>{a.nome}</td>
+                    <td>{a.telefone ?? ""}</td>
+                    <td className="text-right">{a.meses}</td>
+                    <td>{nomeMes(a.desde)}</td>
+                    <td className="text-right">{kz(a.valor)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ))}
+        </div>
+      </PrintPortal>
       {d.data.turmas.map((t) => (
         <Card key={t.turma_id}>
           <div className="flex items-center justify-between border-b border-line p-3">

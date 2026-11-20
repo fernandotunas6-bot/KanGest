@@ -5791,10 +5791,20 @@ async fn escola_propinas_e_devedores() {
     assert_eq!(linha(&p, "Carla Mendes")["celulas"][0]["estado"], "BOLSA");
     assert_eq!(linha(&p, "Ana Silva")["celulas"][3]["estado"], "FUTURO");
 
+    // as propinas gerem-se no ecrã Escola: fora da lista de avenças, que não as altera, apaga nem factura sem ids
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["alertas"]["propinas_por_facturar"], 2);
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["alertas"]["avencas_por_facturar"], 0);
+    assert_eq!(rpc(&st, "avencas.listar", Value::Null).await.as_array().unwrap().len(), 0);
+    let av = ana["avenca_id"].as_i64().unwrap();
+    assert!(rpc_err(&st, "avencas.apagar", json!({ "id": av })).await.contains("ecrã Escola"));
+    assert!(rpc_err(&st, "avencas.guardar", json!({ "id": av, "entidade_id": ana_cli, "descricao": "x", "periodicidade": "MENSAL", "proxima": format!("{}-01", m1(0)), "linhas": [{ "artigo_id": 1, "quantidade": 1 }] })).await.contains("ecrã Escola"));
+    assert_eq!(rpc(&st, "avencas.emitir", json!({})).await["emitidos"].as_array().unwrap().len(), 0);
+
     // facturar: uma factura por mês e por aluno, isenta; repetir não duplica
     let e = rpc(&st, "avencas.emitir", json!({ "ids": ids })).await;
     assert_eq!(e["emitidos"].as_array().unwrap().len(), 6, "{e}");
     assert_eq!(rpc(&st, "avencas.emitir", json!({ "ids": ids })).await["emitidos"].as_array().unwrap().len(), 0);
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["alertas"]["propinas_por_facturar"], 0);
     let p = rpc(&st, "escola.propinas", json!({ "ano_lectivo_id": ano })).await;
     let a = linha(&p, "Ana Silva");
     assert_eq!((a["em_divida"].as_i64(), a["meses_em_divida"].as_i64()), (Some(9000000), Some(3)));
