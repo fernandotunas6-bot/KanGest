@@ -43,7 +43,7 @@ function Vitrine() {
       <div className="relative grid grid-cols-3 gap-4 px-6 pb-6">
         {NOVIDADES.map((n) => (
           <article key={n.titulo} className="relative aspect-[16/10] overflow-hidden rounded-lg shadow-lg ring-1 ring-black/10">
-            <img src={n.imagem} alt="" draggable={false} className="absolute inset-0 size-full object-cover object-top" />
+            <img src={n.imagem} alt="" draggable={false} className="kg-captura-verde absolute inset-0 size-full object-cover object-top" />
             <div className="absolute inset-0 bg-gradient-to-b from-nav/95 via-nav/70 to-nav/15" />
             <div className="relative p-3.5 text-white">
               <div className="text-[10.5px] font-semibold uppercase tracking-wider text-accent">{n.etiqueta}</div>
