@@ -24,7 +24,7 @@ pub async fn pendentes(st: &AppState, f: PendentesIn) -> AppResult<Value> {
     let hoje = db::hoje();
     let docs = sqlx::query(
         "SELECT d.id, d.numero_doc, d.tipo_codigo, t.descricao AS tipo_desc, d.data_emissao, d.data_vencimento, d.entidade_id,
-                d.entidade_nome, d.entidade_nif, d.total, d.valor_pendente, d.doc_externo,
+                d.entidade_nome, d.entidade_nif, d.total, d.valor_pendente, d.doc_externo, d.total_liquido, d.total_iva, d.total_retencao,
                 CAST(julianday(?1) - julianday(COALESCE(d.data_vencimento, d.data_emissao)) AS INTEGER) AS dias_atraso
          FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo
          WHERE d.estado = 'N' AND d.valor_pendente > 0 AND t.grupo = ?2

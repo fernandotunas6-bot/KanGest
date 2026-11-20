@@ -46,6 +46,19 @@ use serde_json::Value;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
+/// Sim/não vindo do ecrã como `true`/`false` ou como na base (`1`/`0`, «1»/«0»): as fichas lidas da base e
+/// devolvidas ao gravar trazem os números (ex.: o `estado` da entidade).
+pub(crate) fn bool_flexivel<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    use serde::Deserialize;
+    Ok(match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => None,
+        Some(Value::Bool(b)) => Some(b),
+        Some(Value::Number(n)) => Some(n.as_f64().unwrap_or(0.0) != 0.0),
+        Some(Value::String(s)) => Some(matches!(s.trim().to_lowercase().as_str(), "1" | "true" | "sim")),
+        Some(_) => return Err(serde::de::Error::custom("esperado sim/não")),
+    })
+}
+
 fn p<T: DeserializeOwned>(v: Value) -> AppResult<T> {
     // Aceita `null` como objecto vazio para métodos sem parâmetros obrigatórios.
     let v = if v.is_null() { Value::Object(Default::default()) } else { v };

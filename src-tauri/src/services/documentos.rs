@@ -99,6 +99,9 @@ pub struct RetencaoIn {
     codigo: String,
     /// Se omitida, usa a taxa configurada.
     percentagem: Option<f64>,
+    /// Num recibo ou pagamento: o valor retido escrito (o do comprovativo do cliente); sem ele, calcula-se.
+    #[serde(default)]
+    valor: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -1187,22 +1190,34 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
 
     // ---------- liquidações (recibo de cliente / pagamento a fornecedor) ----------
     let mut liquidacoes: Vec<(i64, i64)> = Vec::new();
+    // retenção na fonte feita no pagamento (o cliente retém ao pagar, ou a empresa ao pagar ao fornecedor): a base é a
+    // parte sem IVA (e o IVA, no IVA cativo) do que se liquida de cada documento
+    let (mut base_liq_rec, mut base_iva_rec) = (0i64, 0i64);
     if liquida {
         if i.liquidar.is_empty() {
             return Err(AppError::msg("Seleccione os documentos a liquidar."));
         }
         for lq in &i.liquidar {
-            let (ent, pend, estado): (Option<i64>, i64, String) =
-                sqlx::query_as("SELECT entidade_id, valor_pendente, estado FROM documentos WHERE id = ?")
-                    .bind(lq.documento_id)
-                    .fetch_optional(&mut *tx)
-                    .await?
-                    .ok_or_else(|| AppError::msg("Documento a liquidar não encontrado."))?;
+            let (ent, pend, estado, d_total, d_liq, d_iva, d_ret, d_num): (Option<i64>, i64, String, i64, i64, i64, i64, String) = sqlx::query_as(
+                "SELECT entidade_id, valor_pendente, estado, total, total_liquido, total_iva, total_retencao, numero_doc FROM documentos WHERE id = ?",
+            )
+            .bind(lq.documento_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| AppError::msg("Documento a liquidar não encontrado."))?;
             if ent != entidade_id || estado != "N" {
                 return Err(AppError::msg("Documento a liquidar inválido para esta entidade."));
             }
             if lq.valor <= 0 || lq.valor > pend {
                 return Err(AppError::msg("Valor a liquidar superior ao valor em dívida."));
+            }
+            if !i.retencoes.is_empty() && d_ret > 0 {
+                return Err(AppError::msg(format!("O documento {d_num} já tem a retenção na fonte na factura: não se repete no pagamento.")));
+            }
+            if d_total > 0 {
+                let f = lq.valor as f64 / d_total as f64;
+                base_liq_rec += (d_liq as f64 * f).round() as i64;
+                base_iva_rec += (d_iva as f64 * f).round() as i64;
             }
             liquidacoes.push((lq.documento_id, lq.valor));
         }
@@ -1275,8 +1290,16 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
             .await?
             .ok_or_else(|| AppError::msg(format!("Retenção desconhecida: {}", rt.codigo)))?;
         let pct = rt.percentagem.unwrap_or_else(|| row.get("percentagem")).clamp(0.0, 100.0);
-        let base = if row.get::<String, _>("base") == "IVA" { total_iva } else { total_liquido };
-        retencoes.push((row.get("codigo"), row.get("descricao"), pct, base, r(base as f64 * pct / 100.0)));
+        let (b_liq, b_iva) = if liquida { (base_liq_rec, base_iva_rec) } else { (total_liquido, total_iva) };
+        let base = if row.get::<String, _>("base") == "IVA" { b_iva } else { b_liq };
+        let valor = match rt.valor.filter(|_| liquida) {
+            Some(v) if v < 0 => return Err(AppError::msg("O valor retido não pode ser negativo.")),
+            Some(v) => v,
+            None => r(base as f64 * pct / 100.0),
+        };
+        if valor > 0 {
+            retencoes.push((row.get("codigo"), row.get("descricao"), pct, base, valor));
+        }
     }
     let total_retencao: i64 = retencoes.iter().map(|x| x.4).sum();
     if total_retencao > total {

@@ -222,6 +222,8 @@ function EntidadeForm({ inicial, onClose, onNovo }: { inicial: Partial<Entidade>
   // NIF que já está noutra ficha activa (avisa enquanto se escreve)
   const nifOutro = useJaUsado<{ id: number; nome: string }>("entidades.nifUsado", "nif", e.nif, e.id, inicial.nif);
   const nifOk = nifValido(e.nif, e.pais ?? "AO");
+  // retenções na fonte (para a retenção habitual)
+  const retencoes = useQuery({ queryKey: ["doc-auxiliares"], queryFn: () => call<{ retencoes: { codigo: string; descricao: string; percentagem: number }[] }>("documentos.auxiliares"), staleTime: 300_000 }).data?.retencoes ?? [];
 
   async function guardar(depois: "fechar" | "novo" = "fechar") {
     if (busy) return;
@@ -381,6 +383,16 @@ function EntidadeForm({ inicial, onClose, onNovo }: { inicial: Partial<Entidade>
               </Field>
             </>
           )}
+          <Field label="Retenção na fonte habitual" hint="Vem escolhida nas facturas e nos recibos desta entidade (ex.: empresas que retêm o Imposto Industrial ao pagar)">
+            <Select value={e.retencao ?? ""} onChange={(x) => set("retencao", x.target.value)}>
+              <option value="">Nenhuma</option>
+              {retencoes.map((r) => (
+                <option key={r.codigo} value={r.codigo}>
+                  {r.descricao} ({r.percentagem.toLocaleString("pt-PT")}%)
+                </option>
+              ))}
+            </Select>
+          </Field>
         </div>
       </AbasFicha>
     </Modal>

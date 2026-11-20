@@ -67,6 +67,7 @@ pub struct EntidadeIn {
     /// País (código ISO de 2 letras; AO por omissão).
     pais: Option<String>,
     /// Entidade pública (SAF-T «Faturação para o Estado»).
+    #[serde(default, deserialize_with = "super::bool_flexivel")]
     estado: Option<bool>,
     observacoes: Option<String>,
     telefone: Option<String>,
@@ -74,6 +75,9 @@ pub struct EntidadeIn {
     limite_credito: Option<i64>,
     desconto: Option<f64>,
     nivel_preco: Option<i64>,
+    /// retenção na fonte habitual (código da tabela de retenções; "" tira; `None` mantém)
+    #[serde(default)]
+    retencao: Option<String>,
 }
 
 /// Formato do NIF angolano: 10 algarismos (empresas e NIF atribuído pela AGT), o n.º do BI das pessoas
@@ -127,6 +131,15 @@ pub async fn guardar(st: &AppState, e: EntidadeIn) -> AppResult<Value> {
             )));
         }
     }
+    // retenção habitual: tem de ser uma das retenções activas («» tira a que havia)
+    let retencao: Option<Option<String>> = match e.retencao.as_deref().map(str::trim) {
+        None => None,
+        Some("") => Some(None),
+        Some(c) => {
+            let existe: Option<String> = sqlx::query_scalar("SELECT codigo FROM retencoes WHERE codigo = ? AND ativo = 1").bind(c).fetch_optional(&st.pool).await?;
+            Some(Some(existe.ok_or_else(|| AppError::msg(format!("Retenção na fonte desconhecida: {c}.")))?))
+        }
+    };
     let sql = if e.id.is_some() {
         "UPDATE entidades SET tipo=?1, nome=?2, nif=?3, endereco=?4, localidade=?5, provincia=?6, telefone=?7,
            email=?8, limite_credito=?9, desconto=?10, nivel_preco=?11, pais=?12, estado=?13, observacoes=?14 WHERE id = ?15"
@@ -153,7 +166,11 @@ pub async fn guardar(st: &AppState, e: EntidadeIn) -> AppResult<Value> {
         q = q.bind(id);
     }
     let res = q.execute(&st.pool).await?;
-    Ok(json!({ "id": e.id.unwrap_or_else(|| res.last_insert_rowid()) }))
+    let id = e.id.unwrap_or_else(|| res.last_insert_rowid());
+    if let Some(r) = retencao {
+        sqlx::query("UPDATE entidades SET retencao = ? WHERE id = ?").bind(r).bind(id).execute(&st.pool).await?;
+    }
+    Ok(json!({ "id": id }))
 }
 
 /// Documentos em dívida de uma entidade (para emitir recibo).

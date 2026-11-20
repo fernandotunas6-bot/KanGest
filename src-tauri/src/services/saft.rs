@@ -564,6 +564,8 @@ async fn gerar_facturacao(st: &AppState, i: &SaftIn, estado: bool) -> AppResult<
         el(&mut x, 10, "NetTotal", &m(d.total));
         el(&mut x, 10, "GrossTotal", &m(d.total));
         x.push_str("        </DocumentTotals>\n");
+        // retenção na fonte feita no pagamento: o recebido mais o retido dá o total liquidado
+        retencoes(&mut x, p, d, 8).await?;
         x.push_str("      </Payment>\n");
     }
     x.push_str("    </Payments>\n");

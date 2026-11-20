@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 import { call } from "@/lib/api";
@@ -29,6 +29,11 @@ interface Pendente {
   total: number;
   valor_pendente: number;
   dias_atraso: number;
+  /** para a retenção na fonte feita no pagamento: a parte sem IVA e o IVA do documento */
+  total_liquido: number;
+  total_iva: number;
+  /** retenção já posta na factura (não se repete no pagamento) */
+  total_retencao: number;
 }
 
 /** Recibo de cliente (RC) ou Pagamento a fornecedor (VRC). */
@@ -45,6 +50,11 @@ export default function Recibo({ tipo = "RC" }: { tipo?: "RC" | "VRC" }) {
   const [compensar, setCompensar] = useState("");
   const [busy, setBusy] = useState(false);
   const [emitido, setEmitido] = useState<number | null>(null);
+  // retenção na fonte feita no pagamento (o cliente retém ao pagar; ou a empresa, ao pagar ao fornecedor)
+  const retencoes = useQuery({ queryKey: ["doc-auxiliares"], queryFn: () => call<{ retencoes: { codigo: string; descricao: string; percentagem: number; base: string }[] }>("documentos.auxiliares"), staleTime: 300_000 }).data?.retencoes ?? [];
+  const [retencao, setRetencao] = useState("");
+  // valor retido escrito à mão (o do comprovativo); vazio = calculado
+  const [retidoTxt, setRetidoTxt] = useState("");
 
   useEffect(() => {
     setEntidade(null);
@@ -59,13 +69,26 @@ export default function Recibo({ tipo = "RC" }: { tipo?: "RC" | "VRC" }) {
     });
     call<Credito[]>("contas.creditos", { entidade_id: entidade.id, grupo: fornecedor ? "COMPRAS" : "VENDAS" }).then(setCreditos);
     setCompensar("");
+    // a retenção habitual da ficha da entidade vem escolhida
+    setRetencao(entidade.retencao ?? "");
+    setRetidoTxt("");
   }, [entidade, fornecedor]);
 
   const total = Object.values(valores).reduce((s, v) => s + parseKz(v || "0"), 0);
   const divida = pendentes.reduce((s, p) => s + p.valor_pendente, 0);
   const creditoTotal = creditos.reduce((s, c) => s + c.credito_disponivel, 0);
-  const cs = Math.min(parseKz(compensar || "0"), creditoTotal, total);
-  const dinheiro = total - cs;
+  // base da retenção: a parte sem IVA (ou o IVA, no IVA cativo) do que se liquida de cada documento
+  const liquidados = pendentes.filter((p) => parseKz(valores[p.id] || "0") > 0);
+  const jaRetida = liquidados.filter((p) => p.total_retencao > 0);
+  const ret = retencoes.find((r) => r.codigo === retencao);
+  const base = liquidados.reduce((s, p) => {
+    const f = p.total > 0 ? parseKz(valores[p.id] || "0") / p.total : 0;
+    return s + Math.round((ret?.base === "IVA" ? p.total_iva : p.total_liquido) * f);
+  }, 0);
+  const retidoCalculado = ret ? Math.round((base * ret.percentagem) / 100) : 0;
+  const retido = !ret || jaRetida.length ? 0 : retidoTxt.trim() ? Math.min(parseKz(retidoTxt), total) : retidoCalculado;
+  const cs = Math.min(parseKz(compensar || "0"), creditoTotal, total - retido);
+  const dinheiro = total - retido - cs;
 
   async function emitir() {
     setBusy(true);
@@ -77,7 +100,14 @@ export default function Recibo({ tipo = "RC" }: { tipo?: "RC" | "VRC" }) {
         { modo: "CS", valor: cs },
         { modo, valor: dinheiro },
       ].filter((p) => p.valor > 0);
-      const d = await call<DocCompleto>("documentos.emitir", { tipo, entidade_id: entidade?.id, liquidar, pagamentos });
+      const comRetencao = !!ret && retido > 0;
+      const d = await call<DocCompleto>("documentos.emitir", {
+        tipo,
+        entidade_id: entidade?.id,
+        liquidar,
+        pagamentos,
+        retencoes: comRetencao ? [{ codigo: ret.codigo, valor: retido }] : [],
+      });
       toast.success(`${d.documento.numero_doc} emitido.`);
       qc.invalidateQueries();
       setEmitido(d.documento.id);
@@ -181,10 +211,43 @@ export default function Recibo({ tipo = "RC" }: { tipo?: "RC" | "VRC" }) {
             </tbody>
           </Table>
           {!pendentes.length && <p className="py-10 text-center text-ink-3">Não há documentos em dívida para esta entidade.</p>}
+          {!!retencoes.length && (
+            <div className="flex flex-wrap items-end gap-4 border-t border-line px-5 py-4">
+              <Field label={fornecedor ? "Retenção na fonte (feita por nós ao pagar)" : "Retenção na fonte (feita pelo cliente ao pagar)"}>
+                <Select
+                  className="w-72"
+                  value={retencao}
+                  onChange={(e) => {
+                    setRetencao(e.target.value);
+                    setRetidoTxt("");
+                  }}
+                >
+                  <option value="">Sem retenção</option>
+                  {retencoes.map((r) => (
+                    <option key={r.codigo} value={r.codigo}>
+                      {r.descricao} ({r.percentagem.toLocaleString("pt-PT")}%)
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {ret && !jaRetida.length && (
+                <Field label="Valor retido" hint={`Calculado: ${kz(retidoCalculado)} (${ret.percentagem.toLocaleString("pt-PT")}% de ${kz(base)}${ret.base === "IVA" ? " de IVA" : " sem IVA"}). Corrija pelo comprovativo, se for outro.`}>
+                  <Input className="num h-10 w-40 text-right" value={retidoTxt} placeholder={toInputKz(retidoCalculado)} onChange={(e) => setRetidoTxt(e.target.value)} />
+                </Field>
+              )}
+              {ret && jaRetida.length > 0 && (
+                <p className="pb-2 text-[13px] text-accent-ink">
+                  {jaRetida.map((p) => p.numero_doc).join(", ")} já {jaRetida.length > 1 ? "têm" : "tem"} a retenção na factura: não se repete no pagamento.
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex items-center justify-end gap-6 border-t border-line px-5 py-4">
-            {cs > 0 && (
+            {(cs > 0 || retido > 0) && (
               <span className="text-[13px] text-ink-2">
-                Compensação {kz(cs)} · {t?.modos_pagamento.find((m) => m.codigo === modo)?.descricao ?? modo} {kz(dinheiro)}
+                {retido > 0 && `Retido ${kz(retido)} · `}
+                {cs > 0 && `Compensação ${kz(cs)} · `}
+                {t?.modos_pagamento.find((m) => m.codigo === modo)?.descricao ?? modo} {kz(dinheiro)}
               </span>
             )}
             <span className="text-ink-2">
