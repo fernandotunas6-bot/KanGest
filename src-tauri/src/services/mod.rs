@@ -349,6 +349,7 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "caixa.sessoes" => caixa::sessoes(st).await,
         "caixa.abrir" => caixa::abrir(st, p(params)?).await,
         "caixa.movimento" => caixa::movimento(st, p(params)?).await,
+        "caixa.movimentoObter" => caixa::movimento_obter(st, p(params)?).await,
         "caixa.fechar" => caixa::fechar(st, p(params)?).await,
 
         // ---- recursos humanos ----

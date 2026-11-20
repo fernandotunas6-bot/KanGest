@@ -5851,3 +5851,38 @@ async fn escola_propinas_e_devedores() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Vale de caixa: saída com várias linhas, a quem se entregou e quem registou; o caixa desconta o total.
+#[tokio::test]
+async fn vale_de_caixa_com_linhas() {
+    let (st, pasta) = base_com_admin("vale-caixa").await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 2000000 })).await;
+    // à moda antiga (uma linha) continua a funcionar
+    let r = rpc(&st, "caixa.movimento", json!({ "tipo": "ENTRADA", "valor": 500000, "descricao": "Reforço de trocos" })).await;
+    assert!(r["movimento_id"].as_i64().is_some());
+    // vale com linhas: o total é a soma; a rubrica comum fica no movimento
+    let r = rpc(&st, "caixa.movimento", json!({ "tipo": "SAIDA", "modo": "NU", "beneficiario": "João Motorista", "linhas": [
+        { "descricao": "Combustível", "rubrica": "Viatura", "valor": 1500000 },
+        { "descricao": "Portagem", "rubrica": "Viatura", "valor": 200000 },
+    ] })).await;
+    let id = r["movimento_id"].as_i64().unwrap();
+    assert_eq!((r["entradas"].as_i64(), r["saidas"].as_i64()), (Some(500000), Some(1700000)));
+    assert_eq!(r["numerario_esperado"], 2000000 + 500000 - 1700000);
+    let v = rpc(&st, "caixa.movimentoObter", json!({ "id": id })).await;
+    assert_eq!((v["valor"].as_i64(), v["descricao"].as_str(), v["rubrica"].as_str()), (Some(1700000), Some("Combustível e mais 1"), Some("Viatura")));
+    assert_eq!((v["beneficiario"].as_str(), v["utilizador"].as_str(), v["modo"].as_str()), (Some("João Motorista"), Some("Admin"), Some("Numerário")));
+    assert_eq!(v["linhas"].as_array().unwrap().len(), 2);
+    assert_eq!(v["linhas"][1]["valor"], 200000);
+    // rubricas diferentes: sem rubrica comum
+    let r = rpc(&st, "caixa.movimento", json!({ "tipo": "SAIDA", "descricao": "Despesas do dia", "linhas": [
+        { "descricao": "Água", "rubrica": "Limpeza", "valor": 100000 }, { "descricao": "Pão", "valor": 50000 } ] })).await;
+    let v = rpc(&st, "caixa.movimentoObter", json!({ "id": r["movimento_id"] })).await;
+    assert_eq!((v["descricao"].as_str(), v["rubrica"].is_null()), (Some("Despesas do dia"), true));
+    // recusas
+    assert!(rpc_err(&st, "caixa.movimento", json!({ "tipo": "SAIDA", "linhas": [{ "descricao": "Sem valor", "valor": 0 }] })).await.contains("descrição e de um valor"));
+    let muitas: Vec<Value> = (0..31).map(|i| json!({ "descricao": format!("L{i}"), "valor": 100 })).collect();
+    assert!(rpc_err(&st, "caixa.movimento", json!({ "tipo": "SAIDA", "linhas": muitas })).await.contains("30 linhas"));
+    assert!(rpc_err(&st, "caixa.movimento", json!({ "tipo": "SAIDA", "valor": 0, "descricao": "x" })).await.contains("valor"));
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
