@@ -37,13 +37,13 @@ export const MODOS: Modo[] = [
     id: "escola",
     nome: "Escola e colégio",
     subtitulo: "Gestão Escolar",
-    descricao: "Propinas mensais, matrículas e emolumentos, encarregados e devedores.",
+    descricao: "Propinas mensais, matrículas, pagamentos e devedores.",
     icone: GraduationCap,
     dicas: [
       "Propinas facturadas todos os meses, sem repetir",
-      "Matrícula, confirmação, declarações e certificados",
+      "Pagamentos com recibo e conta corrente de cada aluno",
+      "Devedores por turma",
       "Ensino isento de IVA (art. 12.º, n.º 1, al. l) do CIVA — M21)",
-      "Recibos, contas correntes e devedores",
     ],
   },
   {
@@ -77,13 +77,10 @@ export interface ArtigoBase {
   motivo_isencao?: string;
 }
 
-/** Propinas e emolumentos que quase todas as escolas cobram; os preços põem-se na revisão. */
-export const ARTIGOS_ESCOLA: ArtigoBase[] = [
-  { referencia: "PROP", descricao: "Propina mensal", unidade: "MES" },
-  { referencia: "INSC", descricao: "Inscrição / exame de admissão" },
-  { referencia: "MATR", descricao: "Matrícula" },
-  { referencia: "CONF", descricao: "Confirmação de matrícula" },
-  { referencia: "DECL", descricao: "Declaração de frequência" },
-  { referencia: "CERT", descricao: "Certificado de habilitações" },
-  { referencia: "CART", descricao: "Cartão de estudante" },
-].map((a) => ({ ...a, familia: FAMILIA_ENSINO, preco: 0, tipo: "S" as const, motivo_isencao: MOTIVO_ENSINO }));
+/** O essencial para cobrar: a propina mensal e a matrícula (outros emolumentos criam-se em Artigos). */
+export function artigosEscola(propina = 0, matricula = 0): ArtigoBase[] {
+  return [
+    { referencia: "PROP", descricao: "Propina mensal", unidade: "MES", preco: propina },
+    { referencia: "MATR", descricao: "Matrícula", preco: matricula },
+  ].map((a) => ({ ...a, familia: FAMILIA_ENSINO, tipo: "S" as const, motivo_isencao: MOTIVO_ENSINO }));
+}

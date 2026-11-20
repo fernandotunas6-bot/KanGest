@@ -17,7 +17,7 @@ import { call, descricaoDispositivo, esquecerLigacao, levarFicheiro, ligacaoWeb,
 import { instalarPwa, usePwa } from "@/lib/pwa";
 import { qrcode, qrSvgPath } from "@/lib/qrcode";
 import { ramoPorId } from "@/lib/ramos";
-import { ARTIGOS_ESCOLA, FAMILIA_ENSINO, MODOS as MODOS_GESTAO, modoPorId, type ModoId } from "@/lib/modos";
+import { FAMILIA_ENSINO, MODOS as MODOS_GESTAO, artigosEscola, modoPorId, type ModoId } from "@/lib/modos";
 import { EscolherRamo } from "@/components/EscolherRamo";
 import { useTabelas } from "@/lib/hooks";
 import { anfitriaoUrl, dataHora, parseKz, toInputKz } from "@/lib/format";
@@ -1228,10 +1228,10 @@ function TipoGestao() {
   async function mudar() {
     if (!novo) return;
     try {
-      const base = novo === "escola" && !temEnsino && criarBase ? { familias: [FAMILIA_ENSINO], artigos: ARTIGOS_ESCOLA } : undefined;
+      const base = novo === "escola" && !temEnsino && criarBase ? { familias: [FAMILIA_ENSINO], artigos: artigosEscola() } : undefined;
       const r = await call<{ artigos: number }>("modo.definir", { modo: novo, base });
       await qc.invalidateQueries({ queryKey: ["tabelas"] });
-      toast.success(`Tipo de gestão: ${modoPorId(novo).nome}.${r.artigos ? ` ${r.artigos} artigos de propinas e emolumentos criados (ponha os preços em Artigos).` : ""}`);
+      toast.success(`Tipo de gestão: ${modoPorId(novo).nome}.${r.artigos ? " Propina mensal e matrícula criadas: ponha os preços em Artigos." : ""}`);
       setNovo(null);
     } catch (e) {
       toast.error((e as Error).message);
@@ -1281,8 +1281,7 @@ function TipoGestao() {
             <label className="mt-3 flex items-start gap-2 text-[13.5px]">
               <input type="checkbox" className="mt-1" checked={criarBase} onChange={(e) => setCriarBase(e.target.checked)} />
               <span>
-                Criar também a família «{FAMILIA_ENSINO}» com {ARTIGOS_ESCOLA.length} artigos (propina mensal, matrícula, confirmação, declarações…), isentos de IVA (M21). Os
-                preços põem-se depois em Artigos.
+                Criar também a propina mensal e a matrícula (família «{FAMILIA_ENSINO}», isentas de IVA — M21). Os preços põem-se depois em Artigos.
               </span>
             </label>
           )}
