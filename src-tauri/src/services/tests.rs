@@ -5590,3 +5590,32 @@ async fn dados_pessoais_do_cliente() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Tops do painel à escolha: artigos, clientes, famílias, operadores; por valor ou quantidade; num período.
+#[tokio::test]
+async fn tops_do_painel() {
+    let (st, pasta) = base_com_admin("tops").await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let bebidas = rpc(&st, "tabela.guardar", json!({ "tabela": "familias", "descricao": "Bebidas" })).await["id"].as_i64().unwrap();
+    let agua = rpc(&st, "artigos.guardar", json!({ "descricao": "Água", "taxa_iva_id": 1, "preco1": 10000, "familia_id": bebidas, "tipo": "S" })).await["id"].as_i64().unwrap();
+    let mesa = rpc(&st, "artigos.guardar", json!({ "descricao": "Mesa", "taxa_iva_id": 1, "preco1": 500000, "tipo": "S" })).await["id"].as_i64().unwrap();
+    let cli = rpc(&st, "entidades.guardar", json!({ "nome": "Escola Kianda", "nif": "5417000123" })).await["id"].as_i64().unwrap();
+    // 10 águas a pronto (114,00 cada com IVA = 1 140,00) e uma mesa a crédito (5 700,00)
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": agua, "quantidade": 10 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": mesa, "quantidade": 1 }] })).await;
+    let top = |tipo: &str, ordem: &str| rpc(&st, "relatorios.top", json!({ "tipo": tipo, "periodo": "mes", "ordem": ordem }));
+    let nomes = |v: &Value| v["linhas"].as_array().unwrap().iter().map(|l| l["nome"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(nomes(&top("artigos", "valor").await), vec!["Mesa", "Água"]);
+    assert_eq!(nomes(&top("artigos", "quantidade").await), vec!["Água", "Mesa"]);
+    let clientes = top("clientes", "valor").await;
+    assert_eq!(nomes(&clientes)[0], "Escola Kianda");
+    assert_eq!(nomes(&clientes).len(), 2, "o mesmo cliente não se repete: {:?}", nomes(&clientes));
+    assert_eq!(clientes["total_periodo"], 114000 + 570000);
+    assert_eq!(nomes(&top("familias", "valor").await), vec!["(sem família)", "Bebidas"]);
+    assert_eq!(nomes(&top("operadores", "quantidade").await), vec!["Admin"]);
+    assert_eq!(top("operadores", "quantidade").await["linhas"][0]["quantidade"], 2);
+    assert!(rpc_err(&st, "relatorios.top", json!({ "tipo": "x" })).await.contains("Tipo inválido"));
+    assert!(rpc_err(&st, "relatorios.top", json!({ "periodo": "seculo" })).await.contains("Período inválido"));
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

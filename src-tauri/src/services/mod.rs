@@ -397,6 +397,7 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "dashboard" => relatorios::dashboard(st).await,
         "relatorios.vendas" => relatorios::vendas(st, p(params)?).await,
         "relatorios.sintese" => relatorios::sintese(st, p(params)?).await,
+        "relatorios.top" => relatorios::top(st, p(params)?).await,
         "relatorios.irtC" => relatorios::irt_c_obter(st).await,
         "relatorios.irtCGuardar" => relatorios::irt_c_guardar(st, p(params)?).await,
         "relatorios.stock" => relatorios::stock(st, p(params)?).await,

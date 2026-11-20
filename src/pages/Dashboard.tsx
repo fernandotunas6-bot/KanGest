@@ -278,27 +278,7 @@ export default function Dashboard() {
           )}
         </Card>
 
-        <Card className="p-5">
-          <div className="mb-3 font-semibold">Artigos mais vendidos (mês)</div>
-          {d?.top_artigos.length ? (
-            <ol className="space-y-2.5">
-              {d.top_artigos.slice(0, 6).map((a, i) => (
-                <li key={a.referencia} className="flex items-center gap-3">
-                  <span className="num grid size-6 shrink-0 place-items-center rounded-md bg-sunken text-[12px] text-ink-2">{i + 1}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13.5px]">{a.descricao}</div>
-                    <div className="text-[12px] text-ink-3">{qtd(a.quantidade)} unid.</div>
-                  </div>
-                  <span className="num text-[13.5px] font-medium">{kz(a.total)}</span>
-                </li>
-              ))}
-            </ol>
-          ) : d ? (
-            <p className="py-8 text-center text-ink-3">Sem vendas este mês.</p>
-          ) : (
-            <Esqueleto />
-          )}
-        </Card>
+        <TopPainel />
       </div>
 
       <Card className="mt-4">
@@ -372,5 +352,103 @@ function ListaBarras({ linhas, total, vazio }: { linhas: { nome: string; valor: 
         </div>
       ))}
     </div>
+  );
+}
+
+type TipoTop = "artigos" | "clientes" | "familias" | "vendedores" | "operadores";
+type PeriodoTop = "hoje" | "semana" | "mes" | "30dias" | "ano";
+interface PrefTop {
+  tipo: TipoTop;
+  periodo: PeriodoTop;
+  ordem: "valor" | "quantidade";
+}
+const TIPOS_TOP: Record<TipoTop, { titulo: string; unidade: string }> = {
+  artigos: { titulo: "Artigos mais vendidos", unidade: "unid." },
+  clientes: { titulo: "Melhores clientes", unidade: "documentos" },
+  familias: { titulo: "Famílias que mais vendem", unidade: "unid." },
+  vendedores: { titulo: "Vendedores", unidade: "documentos" },
+  operadores: { titulo: "Quem mais vendeu", unidade: "documentos" },
+};
+const PERIODOS_TOP: Record<PeriodoTop, string> = { hoje: "hoje", semana: "7 dias", mes: "este mês", "30dias": "30 dias", ano: "este ano" };
+const CHAVE_TOP = "kangest.painel.top";
+
+/** Os «tops» do painel, à escolha de cada utilizador (fica neste aparelho): o quê, o período e a ordem. */
+function TopPainel() {
+  const kz = useKz();
+  const [pref, setPref] = useState<PrefTop>(() => {
+    try {
+      return { tipo: "artigos", periodo: "mes", ordem: "valor", ...JSON.parse(localStorage.getItem(CHAVE_TOP) ?? "{}") };
+    } catch {
+      return { tipo: "artigos", periodo: "mes", ordem: "valor" };
+    }
+  });
+  const mudar = (p: Partial<PrefTop>) => {
+    const n = { ...pref, ...p };
+    setPref(n);
+    try {
+      localStorage.setItem(CHAVE_TOP, JSON.stringify(n));
+    } catch {
+      /* sem armazenamento: vale até fechar */
+    }
+  };
+  const q = useQuery({
+    queryKey: ["painel-top", pref],
+    queryFn: () => call<{ total_periodo: number; linhas: { chave: string | number; nome: string; quantidade: number; total: number }[] }>("relatorios.top", { ...pref, n: 6 }),
+    refetchInterval: 60_000,
+    placeholderData: (x) => x,
+  });
+  const linhas = q.data?.linhas ?? [];
+  const maior = Math.max(1, ...linhas.map((l) => (pref.ordem === "quantidade" ? l.quantidade : l.total)));
+  const sel = "rounded-md border border-line bg-surface px-1.5 py-0.5 text-[12.5px] font-normal text-ink-2 outline-none hover:border-line-strong focus:border-brand";
+  return (
+    <Card className={cn("p-5 transition-opacity", q.isFetching && "opacity-80")}>
+      <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <select aria-label="O quê" className={cn(sel, "font-semibold text-ink")} value={pref.tipo} onChange={(e) => mudar({ tipo: e.target.value as TipoTop })}>
+          {Object.entries(TIPOS_TOP).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v.titulo}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Período" className={sel} value={pref.periodo} onChange={(e) => mudar({ periodo: e.target.value as PeriodoTop })}>
+          {Object.entries(PERIODOS_TOP).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Ordenar por" className={sel} value={pref.ordem} onChange={(e) => mudar({ ordem: e.target.value as PrefTop["ordem"] })}>
+          <option value="valor">por valor</option>
+          <option value="quantidade">por {TIPOS_TOP[pref.tipo].unidade === "unid." ? "quantidade" : "n.º de documentos"}</option>
+        </select>
+      </div>
+      {linhas.length ? (
+        <ol className="space-y-2.5">
+          {linhas.map((a, i) => {
+            const v = pref.ordem === "quantidade" ? a.quantidade : a.total;
+            return (
+              <li key={`${a.chave}-${i}`} className="flex items-center gap-3">
+                <span className="num grid size-6 shrink-0 place-items-center rounded-md bg-sunken text-[12px] text-ink-2">{i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13.5px]">{a.nome}</div>
+                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-sunken">
+                    <div className="h-full rounded-full bg-brand/70" style={{ width: `${Math.max(4, (v / maior) * 100)}%` }} />
+                  </div>
+                  <div className="mt-0.5 text-[12px] text-ink-3">
+                    {qtd(a.quantidade)} {TIPOS_TOP[pref.tipo].unidade === "documentos" && a.quantidade === 1 ? "documento" : TIPOS_TOP[pref.tipo].unidade}
+                    {q.data && q.data.total_periodo > 0 && ` · ${Math.round((a.total / q.data.total_periodo) * 100)}% das vendas`}
+                  </div>
+                </div>
+                <span className="num text-[13.5px] font-medium">{kz(a.total)}</span>
+              </li>
+            );
+          })}
+        </ol>
+      ) : q.data ? (
+        <p className="py-8 text-center text-ink-3">Sem vendas {PERIODOS_TOP[pref.periodo]}.</p>
+      ) : (
+        <Esqueleto />
+      )}
+    </Card>
   );
 }
