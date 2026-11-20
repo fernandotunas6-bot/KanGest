@@ -2,7 +2,7 @@
 // © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 
 import { Fragment, forwardRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
-import { ArrowLeft, Building2, Check, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Building2, Check, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { abrirExterno } from "@/lib/api";
 import { cn } from "@/components/ui";
 import { Logo } from "@/components/Logo";
@@ -73,13 +73,28 @@ export function RodapeAcesso({ onAjuda }: { onAjuda?: (s?: SeccaoAjuda) => void 
     { rotulo: "Site do KanGest", acao: () => void abrirExterno(SITE) },
   ];
   return (
-    <footer className="flex shrink-0 flex-wrap items-center justify-center gap-x-8 gap-y-1.5 bg-nav px-6 py-3.5 text-[13px] text-white/85">
-      {ligacoes.map((l) => (
-        <button key={l.rotulo} type="button" onClick={l.acao} className="hover:text-white hover:underline">
-          {l.rotulo}
-        </button>
-      ))}
+    <footer className="flex shrink-0 flex-col items-center gap-1.5 bg-nav px-6 py-3 text-[13px] text-white/85">
+      <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-1.5">
+        {ligacoes.map((l) => (
+          <button key={l.rotulo} type="button" onClick={l.acao} className="hover:text-white hover:underline">
+            {l.rotulo}
+          </button>
+        ))}
+      </div>
+      <SeloProteccao />
     </footer>
+  );
+}
+
+/** Selo de protecção: o KanGest é obra protegida; copiar ou alterar exige autorização do autor. */
+export function SeloProteccao({ className }: { className?: string }) {
+  return (
+    <p className={cn("flex items-center justify-center gap-1.5 text-center text-[11.5px] leading-snug text-white/60", className)}>
+      <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
+      <span>
+        Software protegido · © 2026 Valentino Canguele — cópia ou alteração proibidas sem autorização
+      </span>
+    </p>
   );
 }
 
