@@ -192,6 +192,8 @@ export interface Entidade {
   ativo?: number;
   /** retenção na fonte habitual (código da tabela de retenções): vem escolhida nas facturas e nos recibos */
   retencao?: string | null;
+  /** vendedor habitual (funcionário): entra nas vendas que não indicam outro */
+  vendedor_id?: number | null;
   /** dados pessoais e de contacto */
   pessoa_contacto?: string | null;
   telefone2?: string | null;
