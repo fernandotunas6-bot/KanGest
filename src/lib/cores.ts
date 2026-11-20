@@ -82,6 +82,7 @@ export function variaveis(c: Cores, escuro: boolean): Record<string, string> {
       "--color-accent": destaque,
       "--color-accent-50": mistura(destaque, "#ffffff", 0.88),
       "--color-accent-ink": ate(mistura(destaque, "#000000", 0.45), "#ffffff", 4.5, "#000000"),
+      ...logo(marca, destaque),
     };
   }
   return {
@@ -97,18 +98,31 @@ export function variaveis(c: Cores, escuro: boolean): Record<string, string> {
     "--color-accent-ink": ate(mistura(destaque, "#ffffff", 0.25), ESCURO_FUNDO, 4.5, "#ffffff"),
     "--cor-texto-marca": ate(mistura(marca, "#ffffff", 0.45), ESCURO_FUNDO, 4.5, "#ffffff"),
     "--cor-texto-marca-700": ate(mistura(marca, "#ffffff", 0.6), ESCURO_FUNDO, 6, "#ffffff"),
+    ...logo(marca, destaque),
+  };
+}
+
+/** O «K» do logótipo nas cores do jogo: o fundo em degradé da cor principal e a perna de baixo no destaque. */
+function logo(marca: string, destaque: string): Record<string, string> {
+  return {
+    "--cor-logo-a": mistura(marca, "#ffffff", 0.14),
+    "--cor-logo-b": mistura(marca, "#000000", 0.42),
+    "--cor-logo-k": destaque,
   };
 }
 
 const TODAS = [
   "--color-brand", "--color-brand-600", "--color-brand-700", "--color-brand-50", "--color-brand-100", "--color-chart", "--color-nav",
   "--color-accent", "--color-accent-50", "--color-accent-ink", "--cor-texto-marca", "--cor-texto-marca-700",
+  "--cor-logo-a", "--cor-logo-b", "--cor-logo-k",
 ];
 
 /** Põe o jogo de cores no documento (sem jogo, ou o do KanGest: as cores do index.css). */
 export function aplicarCores(c: Cores | null | undefined, escuro: boolean) {
   const r = document.documentElement.style;
   for (const v of TODAS) r.removeProperty(v);
+  // para o CSS saber se é o jogo do KanGest (ex.: as capturas do ecrã de entrada, tiradas no verde, ficam a cinzento nos outros)
+  document.documentElement.dataset.paleta = c?.paleta ?? "petroleo";
   if (!c || c.paleta === "petroleo") return;
   for (const [k, v] of Object.entries(variaveis(c, escuro))) r.setProperty(k, v);
 }

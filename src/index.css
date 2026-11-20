@@ -191,3 +191,9 @@ input, textarea, select, [data-selectable] { user-select: text; -webkit-user-sel
   .print-ticket { width: 72mm !important; }
   .print-ticket.talao-58 { width: 48mm !important; }
 }
+
+/* Capturas do KanGest tiradas no jogo verde-petróleo (cartões do ecrã de entrada): nos outros jogos ficam a cinzento e
+   o véu do cartão dá-lhes a cor do jogo, para não misturar o verde com o azul, o vinho… */
+:root[data-paleta]:not([data-paleta="petroleo"]) .kg-captura-verde {
+  filter: grayscale(1) contrast(1.05);
+}
