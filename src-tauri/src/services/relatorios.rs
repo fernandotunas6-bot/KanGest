@@ -684,3 +684,85 @@ pub async fn irt_c_guardar(st: &AppState, t: TaxaIn) -> AppResult<Value> {
         .await?;
     Ok(Value::Null)
 }
+
+#[derive(Deserialize)]
+pub struct TopIn {
+    /// artigos | clientes | familias | vendedores | operadores
+    #[serde(default)]
+    tipo: Option<String>,
+    /// hoje | semana | mes | 30dias | ano
+    #[serde(default)]
+    periodo: Option<String>,
+    /// valor | quantidade (nos artigos e nas famílias, unidades; nos outros, documentos)
+    #[serde(default)]
+    ordem: Option<String>,
+    #[serde(default)]
+    n: Option<i64>,
+}
+
+/// Os «tops» do painel, à escolha de cada um: o que mais vendeu (artigos, clientes, famílias, vendedores ou quem
+/// emitiu), num período, por valor ou por quantidade. Vendas líquidas de notas de crédito; só a loja do utilizador.
+pub async fn top(st: &AppState, t: TopIn) -> AppResult<Value> {
+    st.sessao()?;
+    let loja = st.loja().map(|a| format!(" AND d.armazem_id = {a}")).unwrap_or_default();
+    let hoje = db::hoje();
+    let periodo = t.periodo.as_deref().unwrap_or("mes");
+    let desde = match periodo {
+        "hoje" => hoje.clone(),
+        "semana" => (chrono::NaiveDate::parse_from_str(&hoje, "%Y-%m-%d").unwrap_or_default() - chrono::Days::new(6)).to_string(),
+        "30dias" => (chrono::NaiveDate::parse_from_str(&hoje, "%Y-%m-%d").unwrap_or_default() - chrono::Days::new(29)).to_string(),
+        "ano" => format!("{}-01-01", &hoje[..4]),
+        "mes" => format!("{}-01", &hoje[..7]),
+        _ => return Err(AppError::msg("Período inválido: hoje, semana, mes, 30dias ou ano.")),
+    };
+    let por_qtd = t.ordem.as_deref() == Some("quantidade");
+    let n = t.n.unwrap_or(6).clamp(3, 20);
+    // (chave e nome do grupo, junções, quantidade)
+    let (grupo, juntar, quantidade) = match t.tipo.as_deref().unwrap_or("artigos") {
+        "artigos" => ("l.referencia AS chave, MAX(l.descricao) AS nome", "", format!("SUM({SINAL} * l.quantidade)")),
+        "familias" => (
+            "COALESCE(f.id, 0) AS chave, COALESCE(MAX(f.descricao), '(sem família)') AS nome",
+            " LEFT JOIN artigos a ON a.id = l.artigo_id LEFT JOIN familias f ON f.id = a.familia_id",
+            format!("SUM({SINAL} * l.quantidade)"),
+        ),
+        // o nome da ficha de hoje (os documentos guardam o nome da altura, que pode ter mudado)
+        "clientes" => (
+            "COALESCE(d.entidade_id, 1) AS chave, COALESCE(MAX(e.nome), MAX(d.entidade_nome), 'Consumidor Final') AS nome",
+            " LEFT JOIN entidades e ON e.id = d.entidade_id",
+            "COUNT(DISTINCT d.id)".to_string(),
+        ),
+        "vendedores" => (
+            "COALESCE(v.id, 0) AS chave, COALESCE(MAX(v.nome), '(sem vendedor)') AS nome",
+            " LEFT JOIN funcionarios v ON v.id = d.vendedor_id",
+            "COUNT(DISTINCT d.id)".to_string(),
+        ),
+        "operadores" => ("COALESCE(u.id, 0) AS chave, COALESCE(MAX(u.nome), '—') AS nome", " LEFT JOIN utilizadores u ON u.id = d.utilizador_id", "COUNT(DISTINCT d.id)".to_string()),
+        _ => return Err(AppError::msg("Tipo inválido: artigos, clientes, familias, vendedores ou operadores.")),
+    };
+    // nos documentos (clientes, vendedores, operadores) o valor vem do total do documento; nos artigos e famílias, das linhas
+    let por_documento = matches!(t.tipo.as_deref(), Some("clientes" | "vendedores" | "operadores"));
+    let sql = if por_documento {
+        format!(
+            "SELECT {grupo}, {quantidade} AS quantidade, SUM({SINAL} * d.total) AS total
+             FROM documentos d{juntar}
+             WHERE {VENDAS} AND d.data_emissao >= ?1 AND d.data_emissao <= ?2{loja}
+             GROUP BY chave ORDER BY {} DESC LIMIT {n}",
+            if por_qtd { "quantidade" } else { "total" }
+        )
+    } else {
+        format!(
+            "SELECT {grupo}, {quantidade} AS quantidade, SUM({SINAL} * l.total) AS total
+             FROM documento_linhas l JOIN documentos d ON d.id = l.documento_id{juntar}
+             WHERE {VENDAS} AND d.data_emissao >= ?1 AND d.data_emissao <= ?2{loja}
+             GROUP BY chave ORDER BY {} DESC LIMIT {n}",
+            if por_qtd { "quantidade" } else { "total" }
+        )
+    };
+    let rows = sqlx::query(&sql).bind(&desde).bind(&hoje).fetch_all(&st.pool).await?;
+    let total: i64 = sqlx::query_scalar(&format!("SELECT COALESCE(SUM({SINAL} * d.total), 0) FROM documentos d WHERE {VENDAS} AND d.data_emissao >= ? AND d.data_emissao <= ?{loja}"))
+        .bind(&desde)
+        .bind(&hoje)
+        .fetch_one(&st.pool)
+        .await?;
+    Ok(json!({ "desde": desde, "ate": hoje, "total_periodo": total, "linhas": db::rows_json(&rows) }))
+}
