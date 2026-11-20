@@ -194,34 +194,119 @@ pub async fn abrir(st: &AppState, i: AbrirIn) -> AppResult<Value> {
 }
 
 #[derive(Deserialize)]
+pub struct MovLinhaIn {
+    descricao: String,
+    #[serde(default)]
+    rubrica: Option<String>,
+    /// cêntimos
+    valor: i64,
+}
+
+#[derive(Deserialize)]
 pub struct MovIn {
     tipo: String,
+    /// total (cêntimos); com linhas, é a soma delas
+    #[serde(default)]
     valor: i64,
+    #[serde(default)]
     descricao: String,
     rubrica: Option<String>,
     modo: Option<String>,
+    /// a quem se entregou o dinheiro (saída) ou de quem se recebeu (entrada)
+    #[serde(default)]
+    beneficiario: Option<String>,
+    /// vale com várias linhas (ex.: combustível, água, transporte)
+    #[serde(default)]
+    linhas: Vec<MovLinhaIn>,
+}
+
+const MAX_LINHAS_VALE: usize = 30;
+
+fn limpo(s: &Option<String>) -> Option<&str> {
+    s.as_deref().map(str::trim).filter(|x| !x.is_empty())
 }
 
 pub async fn movimento(st: &AppState, m: MovIn) -> AppResult<Value> {
-    st.exigir_perm("caixa.movimentos")?;
+    let s = st.exigir_perm("caixa.movimentos")?;
     let sid = sessao_aberta(st).await?.ok_or_else(|| AppError::msg("Não há caixa aberto."))?;
     if m.tipo != "ENTRADA" && m.tipo != "SAIDA" {
         return Err(AppError::msg("Tipo de movimento inválido."));
     }
-    if m.valor <= 0 || m.descricao.trim().is_empty() {
+    if m.linhas.len() > MAX_LINHAS_VALE {
+        return Err(AppError::msg(format!("No máximo {MAX_LINHAS_VALE} linhas por vale.")));
+    }
+    for l in &m.linhas {
+        if l.descricao.trim().is_empty() || l.valor <= 0 {
+            return Err(AppError::msg("Cada linha precisa de uma descrição e de um valor."));
+        }
+    }
+    // com linhas: o total é a soma; a descrição, a dada ou a da primeira linha; a rubrica, a comum a todas
+    let (valor, descricao, rubrica) = if m.linhas.is_empty() {
+        (m.valor, m.descricao.trim().to_string(), limpo(&m.rubrica).map(str::to_string))
+    } else {
+        let total: i64 = m.linhas.iter().map(|l| l.valor).sum();
+        let descricao = match m.descricao.trim() {
+            "" if m.linhas.len() == 1 => m.linhas[0].descricao.trim().to_string(),
+            "" => format!("{} e mais {}", m.linhas[0].descricao.trim(), m.linhas.len() - 1),
+            d => d.to_string(),
+        };
+        // rubrica comum: a mesma em todas as linhas (uma linha sem rubrica já não é comum)
+        let primeira = limpo(&m.linhas[0].rubrica);
+        let comum = primeira.filter(|r| m.linhas.iter().all(|l| limpo(&l.rubrica) == Some(*r)));
+        let rubrica = limpo(&m.rubrica).or(comum).map(str::to_string);
+        (total, descricao, rubrica)
+    };
+    if valor <= 0 || descricao.is_empty() {
         return Err(AppError::msg("Indique o valor e a descrição."));
     }
-    sqlx::query("INSERT INTO caixa_movimentos (sessao_id, data_hora, tipo, valor, descricao, rubrica, modo_codigo) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .bind(sid)
-        .bind(db::agora())
-        .bind(&m.tipo)
-        .bind(m.valor)
-        .bind(m.descricao.trim())
-        .bind(m.rubrica.as_deref().map(str::trim).filter(|s| !s.is_empty()))
-        .bind(m.modo.as_deref().unwrap_or("NU"))
-        .execute(&st.pool)
-        .await?;
-    resumo(st, sid).await
+    let mut tx = db::transacao(&st.pool).await?;
+    let id = sqlx::query(
+        "INSERT INTO caixa_movimentos (sessao_id, data_hora, tipo, valor, descricao, rubrica, modo_codigo, beneficiario, utilizador_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(sid)
+    .bind(db::agora())
+    .bind(&m.tipo)
+    .bind(valor)
+    .bind(&descricao)
+    .bind(&rubrica)
+    .bind(m.modo.as_deref().unwrap_or("NU"))
+    .bind(limpo(&m.beneficiario))
+    .bind(s.id)
+    .execute(&mut *tx)
+    .await?
+    .last_insert_rowid();
+    for l in &m.linhas {
+        sqlx::query("INSERT INTO caixa_movimento_linhas (movimento_id, descricao, rubrica, valor) VALUES (?, ?, ?, ?)")
+            .bind(id)
+            .bind(l.descricao.trim())
+            .bind(limpo(&l.rubrica))
+            .bind(l.valor)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    let mut r = resumo(st, sid).await?;
+    r["movimento_id"] = json!(id);
+    Ok(r)
+}
+
+/// Um movimento de caixa com as linhas e quem o registou, para o talão (vale de caixa) e a reimpressão.
+pub async fn movimento_obter(st: &AppState, i: IdIn) -> AppResult<Value> {
+    st.sessao()?;
+    let r = sqlx::query(
+        "SELECT m.*, COALESCE(u.nome, us.nome) AS utilizador, ps.descricao AS posto, mp.descricao AS modo
+         FROM caixa_movimentos m JOIN caixa_sessoes c ON c.id = m.sessao_id
+         LEFT JOIN utilizadores u ON u.id = m.utilizador_id LEFT JOIN utilizadores us ON us.id = c.utilizador_id
+         LEFT JOIN postos ps ON ps.id = c.posto_id LEFT JOIN modos_pagamento mp ON mp.codigo = COALESCE(m.modo_codigo, 'NU')
+         WHERE m.id = ?",
+    )
+    .bind(i.id)
+    .fetch_optional(&st.pool)
+    .await?
+    .ok_or(AppError::NaoEncontrado)?;
+    let mut v = db::row_json(&r);
+    v["linhas"] = db::query_json_bind(&st.pool, "SELECT descricao, rubrica, valor FROM caixa_movimento_linhas WHERE movimento_id = ? ORDER BY id", i.id).await?;
+    Ok(v)
 }
 
 #[derive(Deserialize)]

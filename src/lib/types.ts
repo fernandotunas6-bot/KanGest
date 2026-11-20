@@ -421,7 +421,7 @@ export interface CaixaResumo {
   total_vendido: number | null;
   entradas: number;
   saidas: number;
-  movimentos: { id: number; data_hora: string; tipo: string; valor: number; descricao: string; rubrica: string | null; modo_codigo: string | null }[];
+  movimentos: { id: number; data_hora: string; tipo: string; valor: number; descricao: string; rubrica: string | null; modo_codigo: string | null; beneficiario?: string | null }[];
   artigos: { referencia: string; descricao: string; quantidade: number; total: number }[];
   numerario_esperado: number | null;
   /** numerário recebido noutras moedas (fica na gaveta nessas moedas): valor em cêntimos da moeda, kz = equivalente */
