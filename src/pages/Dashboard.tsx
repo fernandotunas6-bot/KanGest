@@ -4,7 +4,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { CalendarClock, CalendarX2, CheckCircle2, ChevronRight, CircleDollarSign, Eye, EyeOff, FileClock, FilePlus2, HandCoins, Hourglass, PackageMinus, Receipt, Repeat, Send, ShieldAlert, ShoppingCart, Table2, TrendingUp, Truck, type LucideIcon } from "lucide-react";
+import { CalendarClock, CalendarX2, CheckCircle2, ChevronRight, CircleDollarSign, Eye, EyeOff, FileClock, FilePlus2, GraduationCap, HandCoins, Hourglass, PackageMinus, Receipt, Repeat, Send, ShieldAlert, ShoppingCart, Table2, TrendingUp, Truck, type LucideIcon } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, dataHora, hojeISO, qtd } from "@/lib/format";
 import { useKz, useOcultarValores } from "@/lib/privacidade";
@@ -30,6 +30,8 @@ interface Alertas {
   compras_vencidas: number;
   valor_compras_vencidas: number;
   avencas_por_facturar?: number;
+  /** alunos com propinas por facturar (modo escola) */
+  propinas_por_facturar?: number;
 }
 
 interface Dash {
@@ -89,6 +91,7 @@ export default function Dashboard() {
           { n: al?.fe_rejeitadas ?? 0, texto: ["factura rejeitada pela AGT", "facturas rejeitadas pela AGT"], to: "/facturacao-electronica", tom: "danger", icon: ShieldAlert },
           { n: al?.lotes_expirados ?? 0, texto: ["lote expirado ainda com stock", "lotes expirados ainda com stock"], to: "/relatorios/stock?situacao=validade", tom: "danger", icon: CalendarX2 },
           { n: al?.fe_pendentes ?? 0, texto: ["factura por validar na AGT", "facturas por validar na AGT"], to: "/facturacao-electronica", tom: "accent", icon: Send },
+          { n: al?.propinas_por_facturar ?? 0, texto: ["aluno com propinas por facturar", "alunos com propinas por facturar"], to: "/escola", tom: "accent", icon: GraduationCap },
           { n: al?.avencas_por_facturar ?? 0, texto: ["avença por facturar", "avenças por facturar"], to: "/avencas", tom: "accent", icon: Repeat },
           { n: d.stock_baixo, texto: ["artigo no mínimo ou abaixo", "artigos no mínimo ou abaixo"], to: "/stock", tom: "accent", icon: PackageMinus },
           { n: al?.lotes_a_expirar ?? 0, texto: ["lote perto da validade", "lotes perto da validade"], to: "/relatorios/stock?situacao=validade", tom: "accent", icon: Hourglass },

@@ -5737,3 +5737,117 @@ async fn modo_de_gestao_na_instalacao() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Escola (só a parte financeira): ano lectivo, turmas com a propina, matrículas (o aluno é o cliente),
+/// propinas facturadas uma vez por mês, pagamento, devedores por turma, mudança de turma e anulação.
+#[tokio::test]
+async fn escola_propinas_e_devedores() {
+    use chrono::Datelike;
+    let pasta = std::env::temp_dir().join(format!("kigest-escola-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let mut st = AppState::new(db::abrir(&pasta.join("kigest.db")).await.unwrap());
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Colégio Kianda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" },
+        "modo": "escola", "ramo": "servicos",
+        "base": { "familias": ["Propinas e emolumentos"], "artigos": [{ "referencia": "PROP", "descricao": "Propina mensal", "familia": "Propinas e emolumentos", "preco": 2500000, "unidade": "MES", "motivo_isencao": "M21" }] } })).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+
+    // ano lectivo: começou há dois meses e tem 10 meses de propinas
+    let hoje = chrono::Local::now().date_naive();
+    let m1 = |n: i32| {
+        let d = hoje.with_day(1).unwrap();
+        let d = if n >= 0 { d.checked_add_months(chrono::Months::new(n as u32)) } else { d.checked_sub_months(chrono::Months::new((-n) as u32)) };
+        d.unwrap().format("%Y-%m").to_string()
+    };
+    assert!(rpc_err(&st, "escola.anoGuardar", json!({ "designacao": "X", "inicio": m1(0), "fim": m1(-1) })).await.contains("anterior"));
+    let ano = rpc(&st, "escola.anoGuardar", json!({ "designacao": "2026/2027", "inicio": m1(-2), "fim": m1(7) })).await["id"].as_i64().unwrap();
+    assert!(rpc_err(&st, "escola.anoGuardar", json!({ "designacao": "2026/2027", "inicio": m1(0), "fim": m1(1) })).await.contains("já existe"));
+    assert_eq!(rpc(&st, "escola.anos", Value::Null).await[0]["corrente"], 1, "o primeiro ano fica o corrente");
+
+    let t7 = rpc(&st, "escola.turmaGuardar", json!({ "ano_lectivo_id": ano, "classe": "7.ª classe", "turma": "A", "propina": 3000000 })).await["id"].as_i64().unwrap();
+    let t8 = rpc(&st, "escola.turmaGuardar", json!({ "ano_lectivo_id": ano, "classe": "8.ª classe" })).await["id"].as_i64().unwrap();
+    assert!(rpc_err(&st, "escola.turmaGuardar", json!({ "ano_lectivo_id": ano, "classe": "7.ª classe", "turma": "A" })).await.contains("já existe"));
+
+    // matrículas: aluno novo (fica cliente); com bolsa de 50% na turma sem propina própria (vale a do artigo)
+    let ana = rpc(&st, "escola.matricular", json!({ "aluno": { "nome": "Ana Silva", "telefone": "923000111" }, "turma_id": t7, "primeiro_mes": m1(-2) })).await;
+    let ana_cli = ana["entidade_id"].as_i64().unwrap();
+    let bruno = rpc(&st, "escola.matricular", json!({ "aluno": { "nome": "Bruno Costa" }, "turma_id": t8, "desconto": 50, "primeiro_mes": m1(-2) })).await;
+    let carla = rpc(&st, "escola.matricular", json!({ "aluno": { "nome": "Carla Mendes" }, "turma_id": t8, "desconto": 100 })).await;
+    assert!(carla["avenca_id"].is_null(), "bolsa integral: sem propina");
+    assert!(rpc_err(&st, "escola.matricular", json!({ "entidade_id": ana_cli, "turma_id": t8 })).await.contains("já está matriculado"));
+    assert!(rpc_err(&st, "escola.matricular", json!({ "entidade_id": 1, "turma_id": t7 })).await.contains("consumidor final"));
+    assert!(rpc_err(&st, "escola.matricular", json!({ "aluno": { "nome": "Fora" }, "turma_id": t7, "primeiro_mes": m1(9) })).await.contains("ano lectivo"));
+
+    // mapa: três meses por facturar para cada aluno com propina
+    let p = rpc(&st, "escola.propinas", json!({})).await;
+    assert_eq!(p["meses"].as_array().unwrap().len(), 10);
+    assert_eq!(p["totais"]["meses_por_facturar"], 6);
+    let ids = p["avencas_por_facturar"].clone();
+    assert_eq!(ids.as_array().unwrap().len(), 2);
+    let linha = |p: &Value, nome: &str| p["linhas"].as_array().unwrap().iter().find(|l| l["nome"] == nome).unwrap().clone();
+    assert_eq!(linha(&p, "Carla Mendes")["celulas"][0]["estado"], "BOLSA");
+    assert_eq!(linha(&p, "Ana Silva")["celulas"][3]["estado"], "FUTURO");
+
+    // as propinas gerem-se no ecrã Escola: fora da lista de avenças, que não as altera, apaga nem factura sem ids
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["alertas"]["propinas_por_facturar"], 2);
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["alertas"]["avencas_por_facturar"], 0);
+    assert_eq!(rpc(&st, "avencas.listar", Value::Null).await.as_array().unwrap().len(), 0);
+    let av = ana["avenca_id"].as_i64().unwrap();
+    assert!(rpc_err(&st, "avencas.apagar", json!({ "id": av })).await.contains("ecrã Escola"));
+    assert!(rpc_err(&st, "avencas.guardar", json!({ "id": av, "entidade_id": ana_cli, "descricao": "x", "periodicidade": "MENSAL", "proxima": format!("{}-01", m1(0)), "linhas": [{ "artigo_id": 1, "quantidade": 1 }] })).await.contains("ecrã Escola"));
+    assert_eq!(rpc(&st, "avencas.emitir", json!({})).await["emitidos"].as_array().unwrap().len(), 0);
+
+    // facturar: uma factura por mês e por aluno, isenta; repetir não duplica
+    let e = rpc(&st, "avencas.emitir", json!({ "ids": ids })).await;
+    assert_eq!(e["emitidos"].as_array().unwrap().len(), 6, "{e}");
+    assert_eq!(rpc(&st, "avencas.emitir", json!({ "ids": ids })).await["emitidos"].as_array().unwrap().len(), 0);
+    assert_eq!(rpc(&st, "dashboard", Value::Null).await["alertas"]["propinas_por_facturar"], 0);
+    let p = rpc(&st, "escola.propinas", json!({ "ano_lectivo_id": ano })).await;
+    let a = linha(&p, "Ana Silva");
+    assert_eq!((a["em_divida"].as_i64(), a["meses_em_divida"].as_i64()), (Some(9000000), Some(3)));
+    assert_eq!(linha(&p, "Bruno Costa")["em_divida"], 3750000, "25 000 Kz com 50% de bolsa, 3 meses");
+    let doc = a["celulas"][0]["documento_id"].as_i64().unwrap();
+    let iva: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(total_iva), 0) FROM documentos WHERE entidade_id = ?").bind(ana_cli).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(iva, 0, "propina isenta");
+
+    // pagamento do primeiro mês da Ana com recibo: o mapa mostra-o pago
+    rpc(&st, "documentos.emitir", json!({ "tipo": "RC", "entidade_id": ana_cli, "liquidar": [{ "documento_id": doc, "valor": 3000000 }], "pagamentos": [{ "modo": "NU", "valor": 3000000 }] })).await;
+    let p = rpc(&st, "escola.propinas", json!({})).await;
+    let a = linha(&p, "Ana Silva");
+    assert_eq!(a["celulas"][0]["estado"], "PAGA");
+    assert_eq!((a["em_divida"].as_i64(), a["pago"].as_i64()), (Some(6000000), Some(3000000)));
+
+    // devedores por turma, do atraso mais antigo
+    let d = rpc(&st, "escola.devedores", json!({})).await;
+    assert_eq!(d["total"], 6000000 + 3750000);
+    assert_eq!(d["turmas"].as_array().unwrap().len(), 2);
+    assert_eq!(d["turmas"][0]["turma"], "7.ª classe A");
+    assert_eq!(d["turmas"][0]["alunos"][0]["meses"], 2);
+
+    // propina nova da turma: vale para os próximos meses; mudar de turma leva a propina da turma nova
+    assert_eq!(rpc(&st, "escola.turmaGuardar", json!({ "id": t7, "ano_lectivo_id": ano, "classe": "7.ª classe", "turma": "A", "propina": 3200000 })).await["matriculas_actualizadas"], 1);
+    rpc(&st, "escola.mudarTurma", json!({ "id": bruno["id"], "turma_id": t7 })).await;
+    let preco: i64 = sqlx::query_scalar("SELECT preco FROM avenca_linhas WHERE avenca_id = ?").bind(bruno["avenca_id"].as_i64().unwrap()).fetch_one(&st.pool).await.unwrap();
+    assert_eq!(preco, 3200000);
+
+    // anular: a propina deixa de se facturar; a dívida que já existe continua no mapa
+    rpc(&st, "escola.matriculaAnular", json!({ "id": ana["id"] })).await;
+    assert!(rpc_err(&st, "escola.matriculaAnular", json!({ "id": ana["id"] })).await.contains("anulada"));
+    let p = rpc(&st, "escola.propinas", json!({})).await;
+    let a = linha(&p, "Ana Silva");
+    assert_eq!(a["em_divida"], 6000000);
+    assert_eq!(a["celulas"][3]["estado"], "FORA");
+    assert_eq!(rpc(&st, "escola.matricular", json!({ "entidade_id": ana_cli, "turma_id": t8 })).await["entidade_id"], ana_cli, "anulada, pode matricular-se de novo");
+
+    // apagar turma: só sem matrículas
+    assert!(rpc_err(&st, "escola.turmaApagar", json!({ "id": t7 })).await.contains("matrículas"));
+    let t9 = rpc(&st, "escola.turmaGuardar", json!({ "ano_lectivo_id": ano, "classe": "9.ª classe", "propina": 100 })).await["id"].as_i64().unwrap();
+    rpc(&st, "escola.turmaApagar", json!({ "id": t9 })).await;
+    let audit: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auditoria WHERE acao = 'ESCOLA'").fetch_one(&st.pool).await.unwrap();
+    assert!(audit >= 8);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

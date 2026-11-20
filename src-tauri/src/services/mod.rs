@@ -14,6 +14,7 @@ pub(crate) mod catalogo;
 mod contas;
 mod documentos;
 mod entidades;
+mod escola;
 pub mod fe;
 pub(crate) mod impressao;
 pub mod importar;
@@ -115,6 +116,9 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
     }
     if let Some(resto) = metodo.strip_prefix("modo.") {
         return Box::pin(modos::despachar(st, resto, params)).await;
+    }
+    if let Some(resto) = metodo.strip_prefix("escola.") {
+        return Box::pin(escola::despachar(st, resto, params)).await;
     }
     if let Some(resto) = metodo.strip_prefix("fotos.") {
         return Box::pin(async move {

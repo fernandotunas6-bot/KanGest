@@ -61,6 +61,7 @@ export const GRUPOS_PERMISSOES: { grupo: string; itens: { id: string; label: str
       { id: "rh.processamento", label: "Processamento salarial e mapas" },
       { id: "rh.configuracao", label: "Configuração salarial (IRT, INSS, rubricas)" },
       { id: "oficina", label: "Oficina (viaturas e ordens de serviço)" },
+      { id: "escola", label: "Escola (turmas, matrículas, propinas e devedores)" },
     ],
   },
   {

@@ -19,6 +19,16 @@ use crate::state::AppState;
 
 const PERMISSAO: &str = "vendas.fatura";
 
+/// Avenças que são a propina de uma matrícula: geridas no ecrã Escola (escola.rs), não aqui.
+const DE_MATRICULA: &str = "SELECT avenca_id FROM matriculas WHERE avenca_id IS NOT NULL";
+
+async fn e_propina<'e, E: sqlx::SqliteExecutor<'e>>(e: E, id: i64) -> AppResult<bool> {
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM matriculas WHERE avenca_id = ?").bind(id).fetch_one(e).await?;
+    Ok(n > 0)
+}
+
+const E_PROPINA: &str = "Esta avença é a propina de uma matrícula: altere-a ou anule-a no ecrã Escola.";
+
 /// `avencas.*` (ver o despachante em services/mod.rs).
 pub async fn despachar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value> {
     use super::p;
@@ -91,6 +101,7 @@ pub async fn listar(st: &AppState) -> AppResult<Value> {
                 (SELECT d.numero_doc FROM avenca_emissoes x JOIN documentos d ON d.id = x.documento_id
                  WHERE x.avenca_id = v.id ORDER BY x.id DESC LIMIT 1) AS ultimo_documento
          FROM avencas v JOIN entidades e ON e.id = v.entidade_id
+         WHERE v.id NOT IN (SELECT avenca_id FROM matriculas WHERE avenca_id IS NOT NULL)
          ORDER BY v.ativo DESC, v.proxima, e.nome",
     )
     .fetch_all(&st.pool)
@@ -187,6 +198,11 @@ pub async fn guardar(st: &AppState, a: AvencaIn) -> AppResult<Value> {
         }
     }
     let mut tx = db::transacao(&st.pool).await?;
+    if let Some(id) = a.id {
+        if e_propina(&mut *tx, id).await? {
+            return Err(AppError::msg(E_PROPINA));
+        }
+    }
     let cliente: Option<i64> = sqlx::query_scalar("SELECT id FROM entidades WHERE id = ? AND tipo IN ('C', 'A')").bind(a.entidade_id).fetch_optional(&mut *tx).await?;
     if cliente.is_none() {
         return Err(AppError::msg("Cliente inválido."));
@@ -266,6 +282,9 @@ pub struct IdIn {
 /// Apaga a avença (se nunca foi facturada) ou desactiva-a (guarda o histórico das facturas).
 pub async fn apagar(st: &AppState, i: IdIn) -> AppResult<Value> {
     st.exigir_perm(PERMISSAO)?;
+    if e_propina(&st.pool, i.id).await? {
+        return Err(AppError::msg(E_PROPINA));
+    }
     let emitidas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM avenca_emissoes WHERE avenca_id = ?").bind(i.id).fetch_one(&st.pool).await?;
     if emitidas > 0 {
         sqlx::query("UPDATE avencas SET ativo = 0, alterado_em = datetime('now','localtime') WHERE id = ?").bind(i.id).execute(&st.pool).await?;
@@ -291,7 +310,12 @@ pub async fn emitir(st: &AppState, e: EmitirIn) -> AppResult<Value> {
         Some(x) => data(x)?,
         None => hoje(),
     };
-    let rows = sqlx::query("SELECT * FROM avencas WHERE ativo = 1 AND proxima <= ? ORDER BY proxima, id").bind(ate.format("%Y-%m-%d").to_string()).fetch_all(&st.pool).await?;
+    // sem lista, só as avenças deste ecrã: as propinas factura-as o ecrã Escola (pelos ids)
+    let rows = sqlx::query(&format!("SELECT * FROM avencas WHERE ativo = 1 AND proxima <= ?1 AND (?2 = 1 OR id NOT IN ({DE_MATRICULA})) ORDER BY proxima, id"))
+        .bind(ate.format("%Y-%m-%d").to_string())
+        .bind(!e.ids.is_empty())
+        .fetch_all(&st.pool)
+        .await?;
     let mut emitidos = Vec::new();
     let mut erros = Vec::new();
     for r in rows {
@@ -371,7 +395,7 @@ pub async fn emitir(st: &AppState, e: EmitirIn) -> AppResult<Value> {
 /// Quantas avenças estão por facturar hoje (para o aviso no painel).
 pub async fn por_facturar(p: &sqlx::SqlitePool) -> AppResult<i64> {
     let hoje = hoje().format("%Y-%m-%d").to_string();
-    Ok(sqlx::query_scalar("SELECT COUNT(*) FROM avencas WHERE ativo = 1 AND proxima <= ?1 AND (fim IS NULL OR fim = '' OR proxima <= fim)")
+    Ok(sqlx::query_scalar(&format!("SELECT COUNT(*) FROM avencas WHERE ativo = 1 AND proxima <= ?1 AND (fim IS NULL OR fim = '' OR proxima <= fim) AND id NOT IN ({DE_MATRICULA})"))
         .bind(hoje)
         .fetch_one(p)
         .await?)

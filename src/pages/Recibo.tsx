@@ -2,7 +2,7 @@
 // © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
@@ -63,6 +63,16 @@ export default function Recibo({ tipo = "RC" }: { tipo?: "RC" | "VRC" }) {
     setEntidade(null);
     setPendentes([]);
   }, [tipo]);
+
+  // aberto com o cliente já escolhido (ex.: «Receber» na ficha do aluno: o encarregado de educação)
+  const [sp] = useSearchParams();
+  const entidadeUrl = Number(sp.get("entidade")) || null;
+  useEffect(() => {
+    if (!entidadeUrl) return;
+    call<Entidade>("entidades.obter", { id: entidadeUrl })
+      .then(setEntidade)
+      .catch(() => toast.error("O cliente indicado já não existe."));
+  }, [entidadeUrl]);
 
   useEffect(() => {
     if (!entidade) return;
