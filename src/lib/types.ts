@@ -189,6 +189,15 @@ export interface Entidade {
   ativo?: number;
   /** retenção na fonte habitual (código da tabela de retenções): vem escolhida nas facturas e nos recibos */
   retencao?: string | null;
+  /** dados pessoais e de contacto */
+  pessoa_contacto?: string | null;
+  telefone2?: string | null;
+  data_nascimento?: string | null;
+  sexo?: string | null;
+  documento_identificacao?: string | null;
+  nacionalidade?: string | null;
+  profissao?: string | null;
+  observacoes?: string | null;
 }
 
 export interface Tabelas {

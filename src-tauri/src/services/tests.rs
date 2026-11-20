@@ -5554,3 +5554,39 @@ async fn retencao_no_recibo_e_habitual_do_cliente() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Dados pessoais e de contacto na ficha do cliente: gravar, validar, manter quando não vêm, apagar com «».
+#[tokio::test]
+async fn dados_pessoais_do_cliente() {
+    let (st, pasta) = base_com_admin("dados-pessoais").await;
+    let base = json!({ "nome": "Ana Domingos", "nif": "001234567LA041", "telefone": "923000111" });
+    let mut ficha = base.clone();
+    for (k, v) in [("pessoa_contacto", "Ana"), ("telefone2", "912000222"), ("data_nascimento", "1990-05-17"), ("sexo", "f"), ("documento_identificacao", "001234567LA041"), ("nacionalidade", "Angolana"), ("profissao", "Enfermeira")] {
+        ficha[k] = json!(v);
+    }
+    let id = rpc(&st, "entidades.guardar", ficha).await["id"].as_i64().unwrap();
+    let e = rpc(&st, "entidades.obter", json!({ "id": id })).await;
+    assert_eq!(e["sexo"], "F");
+    assert_eq!(e["data_nascimento"], "1990-05-17");
+    assert_eq!(e["profissao"], "Enfermeira");
+    assert_eq!(e["telefone2"], "912000222");
+    // validações
+    for (k, v, msg) in [("data_nascimento", "2999-01-01", "entre 1900"), ("data_nascimento", "17/05/1990", "inválida"), ("sexo", "X", "M ou F")] {
+        let mut f = base.clone();
+        f["id"] = json!(id);
+        f[k] = json!(v);
+        assert!(rpc_err(&st, "entidades.guardar", f).await.contains(msg), "{k}={v}");
+    }
+    // sem os campos: mantêm-se; com «»: apagam-se
+    let mut f = base.clone();
+    f["id"] = json!(id);
+    rpc(&st, "entidades.guardar", f.clone()).await;
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": id })).await["profissao"], "Enfermeira");
+    f["profissao"] = json!("");
+    rpc(&st, "entidades.guardar", f).await;
+    assert!(rpc(&st, "entidades.obter", json!({ "id": id })).await["profissao"].is_null());
+    let h = rpc(&st, "auditoria.historico", json!({ "entidade": "entidades", "registo_id": id })).await;
+    assert_eq!(h[0]["antes"]["profissao"], "Enfermeira", "{}", h[0]);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}

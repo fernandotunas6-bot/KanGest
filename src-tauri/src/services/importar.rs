@@ -1286,6 +1286,23 @@ pub async fn importar_dados<F: Fonte>(st: &AppState, fonte: &mut F, op: &Opcoes,
                     }
                 }
             };
+            // dados pessoais e de contacto, quando o KIGEST os tem
+            sqlx::query(
+                "UPDATE entidades SET pessoa_contacto = COALESCE(?, pessoa_contacto), telefone2 = COALESCE(?, telefone2),
+                    data_nascimento = COALESCE(?, data_nascimento), sexo = COALESCE(?, sexo),
+                    documento_identificacao = COALESCE(?, documento_identificacao), nacionalidade = COALESCE(?, nacionalidade),
+                    profissao = COALESCE(?, profissao) WHERE id = ?",
+            )
+            .bind(t(r, &["PessoaContacto", "Contacto", "Responsavel"]))
+            .bind(t(r, &["Telemovel", "Telefone2", "Movel"]).filter(|x| Some(x) != t(r, &["Telefone"]).as_ref()))
+            .bind(data(r, &["DataNascimento", "DataNasc"]))
+            .bind(t(r, &["Sexo", "Genero"]).map(|s| s.to_uppercase().chars().take(1).collect::<String>()).filter(|s| s == "M" || s == "F"))
+            .bind(t(r, &["N_BI", "BI", "NumeroBI", "Passaporte", "DocIdentificacao"]))
+            .bind(t(r, &["Nacionalidade"]))
+            .bind(t(r, &["Profissao"]))
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
             if let Some(k) = id_k {
                 if tipo == "C" {
                     mapas.clientes.insert(k, id);
