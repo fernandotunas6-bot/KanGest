@@ -78,6 +78,21 @@ pub struct EntidadeIn {
     /// retenção na fonte habitual (código da tabela de retenções; "" tira; `None` mantém)
     #[serde(default)]
     retencao: Option<String>,
+    /// dados pessoais e de contacto (`None` mantém; «» apaga)
+    #[serde(default)]
+    pessoa_contacto: Option<String>,
+    #[serde(default)]
+    telefone2: Option<String>,
+    #[serde(default)]
+    data_nascimento: Option<String>,
+    #[serde(default)]
+    sexo: Option<String>,
+    #[serde(default)]
+    documento_identificacao: Option<String>,
+    #[serde(default)]
+    nacionalidade: Option<String>,
+    #[serde(default)]
+    profissao: Option<String>,
 }
 
 /// Formato do NIF angolano: 10 algarismos (empresas e NIF atribuído pela AGT), o n.º do BI das pessoas
@@ -93,6 +108,8 @@ pub fn nif_angolano_valido(nif: &str) -> bool {
 
 pub async fn guardar(st: &AppState, e: EntidadeIn) -> AppResult<Value> {
     st.exigir_perm(if e.tipo.as_deref() == Some("F") { "fornecedores" } else { "clientes" })?;
+    // dados pessoais: validados antes de gravar
+    let pessoais = dados_pessoais(&e)?;
     if e.nome.trim().is_empty() {
         return Err(AppError::msg("O nome é obrigatório."));
     }
@@ -169,6 +186,9 @@ pub async fn guardar(st: &AppState, e: EntidadeIn) -> AppResult<Value> {
     let id = e.id.unwrap_or_else(|| res.last_insert_rowid());
     if let Some(r) = retencao {
         sqlx::query("UPDATE entidades SET retencao = ? WHERE id = ?").bind(r).bind(id).execute(&st.pool).await?;
+    }
+    for (coluna, valor) in pessoais {
+        sqlx::query(&format!("UPDATE entidades SET {coluna} = ? WHERE id = ?")).bind(valor).bind(id).execute(&st.pool).await?;
     }
     Ok(json!({ "id": id }))
 }
@@ -334,4 +354,41 @@ pub async fn nif_usado(st: &AppState, n: NifIn) -> AppResult<Value> {
         .fetch_optional(&st.pool)
         .await?;
     Ok(r.map(|(id, nome)| json!({ "id": id, "nome": nome })).unwrap_or(Value::Null))
+}
+
+/// Os dados pessoais que vieram no pedido, validados: (coluna, valor; `None` apaga). Os que não vieram não mudam.
+fn dados_pessoais(e: &EntidadeIn) -> AppResult<Vec<(&'static str, Option<String>)>> {
+    let limpo = |v: &Option<String>| v.as_deref().map(|x| x.trim().to_string());
+    let mut r = Vec::new();
+    for (coluna, valor, maximo) in [
+        ("pessoa_contacto", &e.pessoa_contacto, 120),
+        ("telefone2", &e.telefone2, 40),
+        ("documento_identificacao", &e.documento_identificacao, 40),
+        ("nacionalidade", &e.nacionalidade, 60),
+        ("profissao", &e.profissao, 80),
+    ] {
+        if let Some(v) = limpo(valor) {
+            if v.chars().count() > maximo {
+                return Err(AppError::msg(format!("Texto demasiado longo em {} (até {maximo} caracteres).", coluna.replace('_', " "))));
+            }
+            r.push((coluna, Some(v).filter(|x| !x.is_empty())));
+        }
+    }
+    if let Some(d) = limpo(&e.data_nascimento) {
+        if !d.is_empty() {
+            let data = chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").map_err(|_| AppError::msg("Data de nascimento inválida."))?;
+            if data > chrono::Local::now().date_naive() || data < chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap() {
+                return Err(AppError::msg("A data de nascimento tem de estar entre 1900 e hoje."));
+            }
+        }
+        r.push(("data_nascimento", Some(d).filter(|x| !x.is_empty())));
+    }
+    if let Some(sx) = limpo(&e.sexo) {
+        let sx = sx.to_uppercase();
+        if !matches!(sx.as_str(), "" | "M" | "F") {
+            return Err(AppError::msg("Sexo: M ou F."));
+        }
+        r.push(("sexo", Some(sx).filter(|x| !x.is_empty())));
+    }
+    Ok(r)
 }

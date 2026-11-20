@@ -12,6 +12,7 @@ import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import type { Entidade } from "@/lib/types";
 import { AbasFicha } from "@/components/Auditoria";
+import { InputData } from "@/components/InputData";
 import { Atalho, Badge, BotaoCancelar, Button, Card, Confirmar, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
 import { useJaUsado, useSujo } from "@/lib/ficha";
 
@@ -175,6 +176,7 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
         )}
       </Card>
       {editar && <EntidadeForm key={`${editar.id ?? "nova"}-${vez}`} inicial={editar} onClose={() => setEditar(null)} onNovo={nova} />}
+      {!editar && (
       <PrintPortal>
         <div className="p-2 text-[11px] text-black">
           <CabecalhoEmpresa empresa={empresa} titulo={`Lista de ${nome}`} />
@@ -206,6 +208,7 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
           </div>
         </div>
       </PrintPortal>
+      )}
     </>
   );
 }
@@ -216,6 +219,8 @@ function EntidadeForm({ inicial, onClose, onNovo }: { inicial: Partial<Entidade>
   const [busy, setBusy] = useState(false);
   const [erroNome, setErroNome] = useState<string | null>(null);
   const [eliminar, setEliminar] = useState(false);
+  // cada carregar em «Imprimir ficha» imprime outra vez (a ficha impressa espera pelos documentos em dívida)
+  const [imprimirFicha, setImprimirFicha] = useState(0);
   const qc = useQueryClient();
   const set = (k: keyof Entidade, v: unknown) => setE((x) => ({ ...x, [k]: v }));
   const sujo = useSujo({ e, limite });
@@ -261,9 +266,17 @@ function EntidadeForm({ inicial, onClose, onNovo }: { inicial: Partial<Entidade>
       footer={
         <>
           {e.id ? (
-            <Button variant="ghost" className="mr-auto text-danger hover:bg-danger-50 hover:text-danger" onClick={() => setEliminar(true)}>
-              <Trash2 className="size-4" /> Eliminar
-            </Button>
+            <span className="mr-auto flex gap-1">
+              <Button variant="ghost" className="text-danger hover:bg-danger-50 hover:text-danger" onClick={() => setEliminar(true)}>
+                <Trash2 className="size-4" /> Eliminar
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setImprimirFicha((v) => v + 1)}
+              >
+                <Printer className="size-4" /> Imprimir ficha
+              </Button>
+            </span>
           ) : null}
           <BotaoCancelar />
           {!e.id && onNovo && (
@@ -393,8 +406,145 @@ function EntidadeForm({ inicial, onClose, onNovo }: { inicial: Partial<Entidade>
               ))}
             </Select>
           </Field>
+          <div className="col-span-2 mt-2 border-t border-line pt-4 text-[12px] font-medium uppercase tracking-wide text-ink-2">Contactos e dados pessoais</div>
+          <Field label={e.nif && /^\d{10}$/.test(e.nif) ? "Pessoa de contacto" : "Pessoa de contacto (se for empresa)"}>
+            <Input value={e.pessoa_contacto ?? ""} maxLength={120} onChange={(x) => set("pessoa_contacto", x.target.value)} />
+          </Field>
+          <Field label="Telefone alternativo">
+            <Input value={e.telefone2 ?? ""} maxLength={40} inputMode="tel" onChange={(x) => set("telefone2", x.target.value)} />
+          </Field>
+          <Field label="Data de nascimento" hint="Para particulares (aniversários e ficha)">
+            <InputData value={e.data_nascimento ?? ""} onChange={(x) => set("data_nascimento", x.target.value)} />
+          </Field>
+          <Field label="Sexo">
+            <Select value={e.sexo ?? ""} onChange={(x) => set("sexo", x.target.value)}>
+              <option value="">—</option>
+              <option value="F">Feminino</option>
+              <option value="M">Masculino</option>
+            </Select>
+          </Field>
+          <Field label="N.º do BI, passaporte ou cartão de residente">
+            <Input value={e.documento_identificacao ?? ""} maxLength={40} onChange={(x) => set("documento_identificacao", x.target.value)} />
+          </Field>
+          <Field label="Nacionalidade">
+            <Input value={e.nacionalidade ?? ""} maxLength={60} placeholder="Angolana" onChange={(x) => set("nacionalidade", x.target.value)} />
+          </Field>
+          <Field label="Profissão" className="col-span-2">
+            <Input value={e.profissao ?? ""} maxLength={80} onChange={(x) => set("profissao", x.target.value)} />
+          </Field>
         </div>
       </AbasFicha>
+      {imprimirFicha > 0 && <FichaImpressa e={e} retencoes={retencoes} vez={imprimirFicha} />}
     </Modal>
+  );
+}
+
+/** Ficha do cliente ou do fornecedor em A4: identificação, contactos, dados pessoais, condições, dívida e assinaturas. */
+function FichaImpressa({ e, retencoes, vez }: { e: Partial<Entidade>; retencoes: { codigo: string; descricao: string; percentagem: number }[]; vez: number }) {
+  const empresa = useEmpresa();
+  const consulta = useQuery({
+    queryKey: ["ficha-pendentes", e.id],
+    queryFn: () => call<{ documentos: { id: number; numero_doc: string; data_emissao: string; data_vencimento: string | null; total: number; valor_pendente: number }[] }>("contas.pendentes", { tipo: e.tipo === "F" ? "F" : "C", entidade_id: e.id }),
+    enabled: !!e.id,
+  });
+  const pendentes = consulta.data?.documentos ?? [];
+  // imprime quando já tem os documentos em dívida (e outra vez a cada pedido)
+  const pronto = !e.id || consulta.isSuccess || consulta.isError;
+  useEffect(() => {
+    if (pronto) imprimir();
+  }, [pronto, vez]);
+  const ret = retencoes.find((r) => r.codigo === e.retencao);
+  const linhas: [string, string | null | undefined][][] = [
+    [
+      ["Nome / Razão social", e.nome],
+      ["NIF", e.nif],
+      ["Tipo", e.tipo === "F" ? "Fornecedor" : e.tipo === "A" ? "Cliente e fornecedor" : "Cliente"],
+      ["Endereço", e.endereco],
+      ["Localidade", [e.localidade, e.provincia, e.pais].filter(Boolean).join(" · ")],
+    ],
+    [
+      ["Telefone", [e.telefone, e.telefone2].filter(Boolean).join(" · ")],
+      ["Email", e.email],
+      ["Pessoa de contacto", e.pessoa_contacto],
+    ],
+    [
+      ["Data de nascimento", e.data_nascimento ? e.data_nascimento.split("-").reverse().join("/") : null],
+      ["Sexo", e.sexo === "F" ? "Feminino" : e.sexo === "M" ? "Masculino" : null],
+      ["BI / passaporte", e.documento_identificacao],
+      ["Nacionalidade", e.nacionalidade],
+      ["Profissão", e.profissao],
+    ],
+    [
+      ["Nível de preço", e.nivel_preco ? `PVP ${e.nivel_preco}` : null],
+      ["Desconto habitual", e.desconto ? `${e.desconto}%` : null],
+      ["Limite de crédito", e.limite_credito ? kz(e.limite_credito) : null],
+      ["Retenção na fonte habitual", ret ? `${ret.descricao} (${ret.percentagem}%)` : null],
+    ],
+  ];
+  const titulos = ["Identificação", "Contactos", "Dados pessoais", "Condições comerciais"];
+  const divida = pendentes.reduce((s, p) => s + p.valor_pendente, 0);
+  return (
+    <PrintPortal>
+      <div className="p-2 text-[11.5px] text-black">
+        <CabecalhoEmpresa empresa={empresa} titulo={e.tipo === "F" ? "Ficha de fornecedor" : "Ficha de cliente"} numero={e.id ? `N.º ${e.id}` : undefined} />
+        <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+          {linhas.map((bloco, n) => {
+            const cheias = bloco.filter(([, v]) => v);
+            if (!cheias.length) return null;
+            return (
+              <div key={titulos[n]}>
+                <div className="mb-1 border-b border-black pb-0.5 text-[10.5px] font-bold uppercase tracking-wide">{titulos[n]}</div>
+                {cheias.map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-3 border-b border-dotted border-gray-300 py-0.5">
+                    <span className="text-gray-600">{k}</span>
+                    <span className="text-right font-medium">{v}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+        {e.observacoes && (
+          <div className="mt-4">
+            <div className="mb-1 border-b border-black pb-0.5 text-[10.5px] font-bold uppercase tracking-wide">Observações</div>
+            <p className="whitespace-pre-wrap">{e.observacoes}</p>
+          </div>
+        )}
+        <div className="mt-5">
+          <div className="mb-1 border-b border-black pb-0.5 text-[10.5px] font-bold uppercase tracking-wide">Situação a {new Date().toLocaleDateString("pt-PT")}</div>
+          {pendentes.length ? (
+            <table className="w-full border-collapse text-left">
+              <thead>
+                <tr className="border-b border-black">
+                  <th className="py-1">Documento</th>
+                  <th className="py-1">Emissão</th>
+                  <th className="py-1">Vencimento</th>
+                  <th className="py-1 text-right">Total</th>
+                  <th className="py-1 text-right">Em dívida</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendentes.map((p) => (
+                  <tr key={p.id} className="border-b border-dotted border-gray-300">
+                    <td className="py-0.5">{p.numero_doc}</td>
+                    <td className="py-0.5">{p.data_emissao.split("-").reverse().join("/")}</td>
+                    <td className="py-0.5">{p.data_vencimento ? p.data_vencimento.split("-").reverse().join("/") : ""}</td>
+                    <td className="py-0.5 text-right">{kz(p.total)}</td>
+                    <td className="py-0.5 text-right">{kz(p.valor_pendente)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p>Sem documentos em dívida.</p>
+          )}
+          <div className="mt-2 text-right font-bold">Total em dívida: {kz(divida)}</div>
+        </div>
+        <div className="mt-14 grid grid-cols-2 gap-16 text-center">
+          <div className="border-t border-black pt-1">{e.tipo === "F" ? "O fornecedor" : "O cliente"}</div>
+          <div className="border-t border-black pt-1">Pela empresa</div>
+        </div>
+      </div>
+    </PrintPortal>
   );
 }
