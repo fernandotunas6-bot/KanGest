@@ -74,7 +74,9 @@ Depois da migração, recomenda-se mudar essa senha no SQL Server e, se a base a
 
 - Vendas suspensas no POS (`tbDocsCabessalhoSuspenso`) — são temporárias: feche-as no KIGEST antes da migração.
 - Permissões dos utilizadores (`tbUsuarioPrivilegio`) — os códigos do KIGEST não correspondem às permissões novas; reveja-as em Sistema → Utilizadores e Permissões.
-- Categorias e tipos de inventário dos artigos (`tbArtigosCategoria`, `tbArtigosTipoInventario`) — o KanGest usa família e subfamília.
+- Categorias dos artigos (`tbArtigosCategoria`) — o KanGest usa família e subfamília. Os **tipos de inventário**
+  (`tbArtigosTipoInventario`: mercadorias, matérias-primas, produtos acabados, subprodutos, trabalhos em curso)
+  passam para a ficha de cada artigo e para o SAF-T de inventários.
 - Histórico de prestações sociais pagas (`tbRhFuncSubsidioSociasDetalhes`) — as prestações em curso registam-se em Recursos Humanos → Prestações Sociais.
 - Séries antigas, locais de entrega e configurações internas do KIGEST.
 

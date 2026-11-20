@@ -27,7 +27,7 @@ export default function Artigos() {
   const [vez, setVez] = useState(0);
   const [estado, setEstado] = useState<"activos" | "inactivos" | "todos">("activos");
   const [sel, setSel] = useState<Set<number>>(new Set());
-  const [lote, setLote] = useState<"familia" | "preco" | null>(null);
+  const [lote, setLote] = useState<"familia" | "preco" | "tipo_inventario" | null>(null);
   const qc = useQueryClient();
   const dq = useDebounce(q);
   const tabelas = useTabelas();
@@ -217,6 +217,9 @@ export default function Artigos() {
             <Button size="sm" variant="secondary" onClick={() => setLote("preco")}>
               Ajustar preços
             </Button>
+            <Button size="sm" variant="secondary" onClick={() => setLote("tipo_inventario")}>
+              Tipo de inventário
+            </Button>
             <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setSel(new Set())}>
               Limpar a selecção
             </Button>
@@ -329,9 +332,57 @@ export default function Artigos() {
           }
         />
       )}
+      {lote === "tipo_inventario" && <LoteTipoInventario n={seleccionados.length} onAplicar={(tipo_inventario) => emLote("tipo_inventario", { tipo_inventario })} onClose={() => setLote(null)} />}
       {lote === "familia" && <LoteFamilia n={seleccionados.length} onAplicar={(familia_id) => emLote("familia", { familia_id })} onClose={() => setLote(null)} />}
       {lote === "preco" && <LotePreco artigos={seleccionados} onAplicar={(percentagem, arredondar) => emLote("preco", { percentagem, arredondar })} onClose={() => setLote(null)} />}
     </>
+  );
+}
+
+/** Tipos de inventário do SAF-T (iguais aos do servidor, services/inventario.rs). */
+const TIPOS_INVENTARIO: [string, string][] = [
+  ["M", "Mercadorias"],
+  ["P", "Matérias-primas, subsidiárias e de consumo"],
+  ["A", "Produtos acabados e intermédios"],
+  ["S", "Subprodutos, desperdícios e refugos"],
+  ["T", "Produtos e trabalhos em curso"],
+];
+
+function LoteTipoInventario({ n, onAplicar, onClose }: { n: number; onAplicar: (tipo: string) => Promise<void>; onClose: () => void }) {
+  const [t, setT] = useState("M");
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Tipo de inventário de ${n} artigo(s)`}
+      width="max-w-md"
+      footer={
+        <>
+          <BotaoCancelar />
+          <Button
+            loading={busy}
+            onClick={async () => {
+              setBusy(true);
+              await onAplicar(t);
+              setBusy(false);
+            }}
+          >
+            Aplicar
+          </Button>
+        </>
+      }
+    >
+      <Field label="Tipo no SAF-T de inventários" hint="Quem só revende tem tudo em «Mercadorias»; quem fabrica separa as matérias-primas, os produtos acabados…">
+        <Select autoFocus value={t} onChange={(e) => setT(e.target.value)}>
+          {TIPOS_INVENTARIO.map(([c, nome]) => (
+            <option key={c} value={c}>
+              {c} · {nome}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    </Modal>
   );
 }
 
@@ -997,6 +1048,16 @@ function ArtigoForm({
 
         {a.tipo === "P" && !a.composto && (
           <div className="mt-4 grid grid-cols-4 items-end gap-4">
+            <Field label="Tipo de inventário (SAF-T)" className="col-span-4 sm:col-span-2" hint="Como o artigo entra no SAF-T de inventários da AGT">
+              <Select value={a.tipo_inventario ?? "M"} onChange={(e) => set("tipo_inventario", e.target.value)}>
+                {TIPOS_INVENTARIO.map(([c, nome]) => (
+                  <option key={c} value={c}>
+                    {c} · {nome}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <div className="hidden sm:col-span-2 sm:block" />
             <Field label="Stock mínimo">
               <Input className="num text-right" type="number" value={a.qtd_minima ?? 0} onChange={(e) => set("qtd_minima", Number(e.target.value))} />
             </Field>

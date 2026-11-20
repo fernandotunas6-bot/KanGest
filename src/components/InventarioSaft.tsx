@@ -11,6 +11,8 @@ interface LinhaInventario {
   descricao: string;
   codigo_barras: string | null;
   tipo: string;
+  /** M, P, A, S ou T (ficha do artigo) */
+  tipo_codigo?: string;
   unidade: string;
   unidade_desc: string | null;
   familia: string | null;
@@ -31,6 +33,8 @@ interface Inventario {
   total_artigos: number;
   total_valor: number;
   linhas: LinhaInventario[];
+  /** artigos e valor por tipo de inventário (só os tipos que têm artigos) */
+  por_tipo?: { codigo: string; tipo: string; artigos: number; valor: number }[];
   negativos: { referencia: string; descricao: string; quantidade: number }[];
 }
 
@@ -125,6 +129,16 @@ export function InventarioSaft({ onClose }: { onClose: () => void }) {
         <Stat label="Valor do inventário" value={inv ? kz(inv.total_valor) : "…"} />
         <Stat label="Método de custeio" value={<span className="text-[17px]">{inv?.metodo_custeio ?? "…"}</span>} />
       </div>
+      {!!inv?.por_tipo?.length && (
+        <div className="mt-3 flex flex-wrap gap-2 text-[12.5px]">
+          {inv.por_tipo.map((t) => (
+            <span key={t.codigo} className="rounded-lg border border-line bg-sunken px-2.5 py-1">
+              <span className="font-medium">{t.tipo}</span> · {t.artigos} artigo(s) · {kz(t.valor)}
+            </span>
+          ))}
+          <span className="self-center text-ink-3">O tipo de cada artigo muda-se na ficha do artigo ou em lote na lista de artigos.</span>
+        </div>
+      )}
 
       <div className="mt-4 overflow-hidden rounded-xl border border-line">
         {inv?.sem_operacoes ? (
