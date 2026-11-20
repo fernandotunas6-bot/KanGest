@@ -28,6 +28,22 @@ use crate::state::AppState;
 
 pub const MANIFESTO: &str = "kangest-atualizacao.json";
 
+/// Origem oficial das actualizações: o próprio site, onde a GitHub Actions publica o manifesto e os instaladores
+/// de cada versão (site.yml). Funciona também com o repositório privado.
+pub const ORIGEM_OFICIAL: &str = "https://kangest.pages.dev/actualizacoes";
+/// Origem antiga (as releases do GitHub): as instalações que a têm gravada passam a usar a oficial, para continuarem
+/// a actualizar-se quando o repositório deixar de ser público.
+const ORIGEM_GITHUB: &str = "https://github.com/fernandotunas6-bot/KanGest/releases";
+
+/// A origem a usar de facto: a gravada, com a antiga do GitHub trocada pela oficial.
+pub fn fonte_efectiva(fonte: &str) -> String {
+    let f = fonte.trim().trim_end_matches(['/', '\\']);
+    if f.to_ascii_lowercase().starts_with(&ORIGEM_GITHUB.to_ascii_lowercase()) {
+        return ORIGEM_OFICIAL.to_string();
+    }
+    f.to_string()
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
@@ -116,7 +132,7 @@ fn obter_manifesto(fonte: &str) -> AppResult<(Manifesto, String)> {
     if fonte.trim().is_empty() {
         return Err(AppError::msg("Indique primeiro a origem das actualizações (endereço ou pasta partilhada)."));
     }
-    let (url, base) = localizar(fonte);
+    let (url, base) = localizar(&fonte_efectiva(fonte));
     let m: Manifesto = serde_json::from_slice(&ler_origem(&url)?).map_err(|e| AppError::msg(format!("O ficheiro {MANIFESTO} é inválido: {e}")))?;
     Ok((m, base))
 }
@@ -184,6 +200,9 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
         "versao_atual": env!("CARGO_PKG_VERSION"),
         "plataforma": plataforma(),
         "fonte": c.fonte,
+        // a que se usa de facto (a antiga do GitHub passa à oficial) e a oficial, para o botão «Usar a origem oficial»
+        "fonte_efectiva": (!c.fonte.trim().is_empty()).then(|| fonte_efectiva(&c.fonte)),
+        "origem_oficial": ORIGEM_OFICIAL,
         "chave_publica": chave_efectiva(&c).is_some(),
         "chave_embutida": crate::produtor::chave_actualizacoes().is_some(),
         "ultima_verificacao": c.ultima_verificacao,
@@ -345,6 +364,12 @@ mod testes {
         assert_eq!(localizar("https://x.ao/kigest/").0, "https://x.ao/kigest/kangest-atualizacao.json");
         assert_eq!(localizar("https://x.ao/k/m.json"), ("https://x.ao/k/m.json".into(), "https://x.ao/k".into()));
         assert_eq!(juntar("https://x.ao/k", "a.exe"), "https://x.ao/k/a.exe");
+        // a origem antiga do GitHub passa a ser a do site; as outras ficam como estão
+        assert_eq!(fonte_efectiva("https://github.com/fernandotunas6-bot/KanGest/releases/latest/download/"), ORIGEM_OFICIAL);
+        assert_eq!(fonte_efectiva("https://github.com/fernandotunas6-bot/KanGest/releases/latest/download/kangest-atualizacao.json"), ORIGEM_OFICIAL);
+        assert_eq!(fonte_efectiva(r"\\SERVIDOR\KanGest\"), r"\\SERVIDOR\KanGest");
+        assert_eq!(fonte_efectiva("https://x.ao/k"), "https://x.ao/k");
+        assert_eq!(localizar(&fonte_efectiva(ORIGEM_OFICIAL)).0, "https://kangest.pages.dev/actualizacoes/kangest-atualizacao.json");
         assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     }
 

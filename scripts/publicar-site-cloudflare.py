@@ -18,6 +18,9 @@ from pathlib import Path
 API = "https://api.cloudflare.com/client/v4"
 RAIZ = Path(__file__).resolve().parent.parent / "site"
 EXCLUIR = {"LEIA-ME.md"}
+# o Cloudflare Pages aceita até 25 MiB por ficheiro; os envios vão em lotes (base64) para não passar o limite de cada pedido
+MAX_FICHEIRO = 25 * 1024 * 1024
+MAX_LOTE = 40 * 1024 * 1024
 # Ficheiros de configuração do Pages: vão no pedido de publicação, não como ficheiros do site.
 CONFIG_PAGES = ("_headers", "_redirects")
 
@@ -167,6 +170,8 @@ def main():
         rel = f.relative_to(RAIZ).as_posix()
         if f.is_file() and f.name not in EXCLUIR and rel not in CONFIG_PAGES and not any(p.startswith(".") for p in rel.split("/")):
             dados = f.read_bytes()
+            if len(dados) > MAX_FICHEIRO:
+                sys.exit(f"{rel} tem {len(dados) / 1048576:.1f} MiB: o Cloudflare Pages aceita até 25 MiB por ficheiro.")
             b64 = base64.b64encode(dados).decode()
             chave = blake3((b64 + f.suffix[1:]).encode())[:32]
             tipo = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
@@ -208,13 +213,22 @@ def main():
     if st != 200:
         sys.exit(f"Falhou a verificação dos ficheiros ({st}): {erro(r)}")
     em_falta = set(r["result"])
-    lote = [{"key": c, "value": b64, "metadata": {"contentType": tipo}, "base64": True} for c, b64, tipo in ficheiros.values() if c in em_falta]
+    pendentes = [{"key": c, "value": b64, "metadata": {"contentType": tipo}, "base64": True} for c, b64, tipo in ficheiros.values() if c in em_falta]
+    lotes, lote, tamanho = [], [], 0
+    for item in pendentes:
+        if lote and tamanho + len(item["value"]) > MAX_LOTE:
+            lotes.append(lote)
+            lote, tamanho = [], 0
+        lote.append(item)
+        tamanho += len(item["value"])
     if lote:
+        lotes.append(lote)
+    for n, lote in enumerate(lotes, 1):
         st, r = pedido("POST", "/pages/assets/upload", jwt, lote)
         if st != 200:
-            sys.exit(f"Falhou o envio dos ficheiros ({st}): {erro(r)}")
+            sys.exit(f"Falhou o envio dos ficheiros (lote {n} de {len(lotes)}, {st}): {erro(r)}")
     pedido("POST", "/pages/assets/upsert-hashes", jwt, {"hashes": chaves})
-    print(f"Enviados {len(lote)} ficheiros novos ({len(ficheiros) - len(lote)} já estavam no Cloudflare).")
+    print(f"Enviados {len(pendentes)} ficheiros novos em {len(lotes)} lotes ({len(ficheiros) - len(pendentes)} já estavam no Cloudflare).")
 
     manifesto = {caminho: chave for caminho, (chave, _, _) in ficheiros.items()}
     st, r = pedido("POST", f"/accounts/{conta}/pages/projects/{projecto}/deployments", token,

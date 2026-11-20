@@ -14,8 +14,6 @@ use crate::state::AppState;
 
 /// Site público do KanGest (para saber se há Internet, sem depender de nenhum serviço do programa).
 const SITE: &str = "https://kangest.pages.dev/";
-/// Origem das actualizações publicadas pela GitHub Actions.
-pub const ORIGEM_GITHUB: &str = "https://github.com/fernandotunas6-bot/KanGest/releases/latest/download";
 
 fn descrever(p: &Option<internet::Proxy>) -> Value {
     match p {
@@ -31,7 +29,7 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
         "proxy": c.proxy, "utilizador": c.utilizador, "tem_senha": !c.senha.is_empty(), "excepcoes": c.excepcoes, "do_sistema": c.do_sistema,
         // o que vale agora para a Internet (pode vir das variáveis ou do Windows)
         "efectivo": descrever(&internet::proxy_para("kangest.pages.dev", true)),
-        "origem_actualizacoes": ORIGEM_GITHUB,
+        "origem_actualizacoes": super::atualizacao::ORIGEM_OFICIAL,
     }))
 }
 
@@ -116,7 +114,7 @@ pub async fn diagnostico(st: &AppState) -> AppResult<Value> {
         ("Servidor de licenças".into(), format!("{}/", super::licenca::servidor()), false),
     ];
     let fonte = super::atualizacao::ler_cfg(&st.pasta_dados).fonte;
-    let fonte = if fonte.trim().is_empty() { ORIGEM_GITHUB.to_string() } else { fonte.trim().trim_end_matches('/').to_string() };
+    let fonte = if fonte.trim().is_empty() { super::atualizacao::ORIGEM_OFICIAL.to_string() } else { super::atualizacao::fonte_efectiva(&fonte) };
     let pasta_actualizacoes = (!fonte.starts_with("http")).then(|| fonte.clone());
     if pasta_actualizacoes.is_none() {
         let manifesto = if fonte.ends_with(".json") { fonte.clone() } else { format!("{fonte}/{}", super::atualizacao::MANIFESTO) };

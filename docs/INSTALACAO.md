@@ -100,9 +100,8 @@ precisam. Em **Configurações → Rede → Ligação à Internet**:
 
 ## 8. Actualizações
 
-Em Sistema → Sobre o KanGest → **Actualizações**, indique a origem
-`https://github.com/fernandotunas6-bot/KanGest/releases/latest/download` (ou a pasta partilhada onde a empresa guarda os
-instaladores). O KanGest lê o manifesto `kangest-atualizacao.json`, descarrega o instalador do seu sistema, confere o
+Em Sistema → Sobre o KanGest → **Actualizações**, indique a origem `https://kangest.pages.dev/actualizacoes` (botão
+«Usar a origem oficial»), ou a pasta partilhada onde a empresa guarda os instaladores. O KanGest lê o manifesto `kangest-atualizacao.json`, descarrega o instalador do seu sistema, confere o
 SHA-256 e a assinatura, faz uma cópia de segurança da base e abre o instalador.
 
 ## 9. Problemas comuns
