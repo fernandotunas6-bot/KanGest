@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { bip, useLeitor } from "@/lib/leitor";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ClipboardCheck, Printer, Search } from "lucide-react";
@@ -33,6 +34,27 @@ export default function Inventario() {
   const num = (s: string) => Number(s.replace(",", "."));
   const diferencas = contados.filter((a) => Math.abs(num(contado[a.id]) - a.stock) > 1e-9);
   const valorDif = diferencas.reduce((s, a) => s + Math.round((num(contado[a.id]) - a.stock) * a.custo_medio), 0);
+
+  // contar com o leitor: cada leitura soma 1 (ou as unidades da embalagem lida) à contagem do artigo
+  const [ultimo, setUltimo] = useState<number | null>(null);
+  useLeitor(async (l) => {
+    try {
+      const a = await call<Artigo | null>("artigos.codigo", { codigo: l.codigo });
+      const daLista = a ? lista.find((x) => x.id === a.id) : undefined;
+      if (!a || !daLista) {
+        bip(false);
+        toast.warning(a ? `${a.descricao} não está na lista (outra família, pesquisa ou sem controlo de stock).` : `Nenhum artigo com o código ${l.codigo}.`);
+        return;
+      }
+      bip(true);
+      const soma = a.quantidade_lida ?? 1;
+      setContado((c) => ({ ...c, [a.id]: String(+((num(c[a.id] ?? "") || 0) + soma).toFixed(3)).replace(".", ",") }));
+      setUltimo(a.id);
+      window.setTimeout(() => document.getElementById(`inv-${a.id}`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 60);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  });
 
   async function gravar() {
     if (!contados.length) return toast.error("Indique pelo menos uma quantidade contada.");
@@ -97,7 +119,7 @@ export default function Inventario() {
         <div className="relative min-w-64 flex-1">
           <Search className="absolute left-3 top-[34px] size-4 text-ink-3" />
           <Field label="Pesquisar">
-            <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Descrição, referência ou código de barras" />
+            <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Descrição, referência ou código — com o leitor, cada leitura conta 1" />
           </Field>
         </div>
       </div>
@@ -124,7 +146,7 @@ export default function Inventario() {
               const v = contado[a.id] ?? "";
               const dif = v.trim() === "" ? null : num(v) - a.stock;
               return (
-                <tr key={a.id} className={cn(dif !== null && Math.abs(dif) > 1e-9 && "bg-accent-50/40")}>
+                <tr key={a.id} id={`inv-${a.id}`} className={cn(dif !== null && Math.abs(dif) > 1e-9 && "bg-accent-50/40", ultimo === a.id && "bg-brand-50 ring-1 ring-inset ring-brand/30")}>
                   <Td>
                     <div className="font-medium">{a.descricao}</div>
                     <div className="font-mono text-[11.5px] text-ink-3">{a.referencia}</div>

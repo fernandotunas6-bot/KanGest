@@ -11,6 +11,7 @@ import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td
 import { InputData } from "@/components/InputData";
 import DocumentoModal from "@/components/DocumentoModal";
 import { ArtigoPicker, EntidadePicker } from "@/components/Pickers";
+import { bip, useLeitor } from "@/lib/leitor";
 import { useSession } from "@/store/session";
 import type { Serie } from "@/pages/Series";
 
@@ -313,7 +314,11 @@ export default function NovoDocumento() {
   const seriesManuais = series.filter((x) => x.ativa && x.manual);
   const entradaStock = tipo?.stock === 1 || tipo?.stock === 3;
 
-  function adicionar(a: Artigo) {
+  /** `quantidade`: a que o código lido vale (embalagem, balança). Um código GS1 (DataMatrix) traz o lote e a validade. */
+  function adicionar(a: Artigo, quantidade = 1) {
+    const comLote = !!a.controla_lote && !a.composto;
+    const loteLido = (comLote && a.gs1?.lote) || "";
+    const validadeLida = loteLido && a.gs1?.validade ? fimDoMes(a.gs1.validade) : "";
     const nivel = [a.preco1, a.preco2, a.preco3, a.preco4][(entidade?.nivel_preco ?? 1) - 1] ? (entidade?.nivel_preco ?? 1) : 1;
     const base = eCompra ? a.custo : eStock ? a.custo_medio : [a.preco1, a.preco2, a.preco3, a.preco4][nivel - 1];
     const preco = estrangeira && fator > 0 ? Math.round(base / fator) : base;
@@ -321,9 +326,9 @@ export default function NovoDocumento() {
     const pvp = !eCompra && !eStock && pvpGuardado != null && Math.round((pvpGuardado * 100) / (100 + a.taxa_pct)) === base ? pvpGuardado : null;
     // «Duplicar Linha» desligado no tipo: o mesmo artigo soma à linha existente.
     if (tipo && !tipo.repetir_linhas && !inventario) {
-      const existente = linhas.find((l) => l.artigo_id === a.id && !l.lote);
+      const existente = linhas.find((l) => l.artigo_id === a.id && (l.lote ?? "") === loteLido);
       if (existente) {
-        upd(existente.key, { quantidade: +(Number(existente.quantidade) + 1).toFixed(3) });
+        upd(existente.key, { quantidade: +(Number(existente.quantidade) + quantidade).toFixed(3) });
         return;
       }
     }
@@ -334,7 +339,7 @@ export default function NovoDocumento() {
         artigo_id: a.id,
         referencia: a.referencia,
         descricao: a.descricao,
-        quantidade: inventario ? a.stock : 1,
+        quantidade: inventario ? a.stock : quantidade,
         preco: toInputKz(preco),
         pvp,
         desconto: eCompra || eStock ? 0 : Math.max(entidade?.desconto ?? 0, a.promo_atual ?? 0),
@@ -342,12 +347,28 @@ export default function NovoDocumento() {
         custo: a.custo_medio,
         unidade: a.unidade,
         existencia: a.stock,
-        controla_lote: !!a.controla_lote && !a.composto,
-        lote: "",
-        validade: "",
+        controla_lote: comLote,
+        lote: loteLido,
+        validade: validadeLida,
       },
     ]);
   }
+  // leitor de códigos com o cursor fora da pesquisa de artigos (numa quantidade, num preço…): junta a linha
+  useLeitor(async (l) => {
+    if (emitido) return;
+    try {
+      const a = await call<Artigo | null>("artigos.codigo", { codigo: l.codigo });
+      if (!a) {
+        bip(false);
+        toast.warning(`Nenhum artigo com o código ${l.codigo}.`);
+        return;
+      }
+      bip(true);
+      adicionar(a, a.quantidade_lida ?? 1);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  });
   const upd = (k: string, patch: Partial<L>) => setLinhas((ls) => ls.map((l) => (l.key === k ? { ...l, ...patch } : l)));
 
   async function emitir(autorizacao?: string) {
@@ -1056,4 +1077,11 @@ function LoteCampos({ linha, entrada, armazem, onChange }: { linha: L; entrada: 
       </select>
     </div>
   );
+}
+
+/** Validade GS1 só com o mês («2027-12»): o último dia desse mês. */
+function fimDoMes(v: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const [a, m] = v.split("-").map(Number);
+  return `${v}-${String(new Date(a, m, 0).getDate()).padStart(2, "0")}`;
 }

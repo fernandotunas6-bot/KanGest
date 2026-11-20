@@ -252,6 +252,7 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "artigos.eliminar" => catalogo::artigos_eliminar(st, p(params)?).await,
         "artigos.lote" => catalogo::artigos_lote(st, p(params)?).await,
         "artigos.codigoUsado" => catalogo::codigo_usado(st, p(params)?).await,
+        "artigos.associarCodigo" => catalogo::associar_codigo(st, p(params)?).await,
         "stock.listar" => catalogo::stock_listar(st, p(params)?).await,
         "stock.movimentos" => catalogo::stock_movimentos(st, p(params)?).await,
         "stock.recalcular" => catalogo::stock_recalcular(st, p(params)?).await,

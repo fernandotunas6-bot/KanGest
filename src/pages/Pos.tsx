@@ -38,7 +38,9 @@ import {
 } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce, useTabelas } from "@/lib/hooks";
-import { data, kz, kzNum, nifValido, numero, parseKz, qtd } from "@/lib/format";
+import { data, hojeISO, kz, kzNum, nifValido, numero, parseKz, qtd } from "@/lib/format";
+import { bip, camaraDisponivel, useLeitor } from "@/lib/leitor";
+import { BotaoCamara, CodigoDesconhecido } from "@/components/Leitor";
 import type { Artigo, CaixaResumo, DocCompleto, DocResumo, Entidade, Lote, PostoOpcoes } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { Badge, Button, Field, Input, Modal, cn } from "@/components/ui";
@@ -246,6 +248,8 @@ export default function Pos() {
   const [pedirSerie, setPedirSerie] = useState<{ artigo: Artigo; quantidade: number } | null>(null);
   const [nomeVenda, setNomeVenda] = useState<string | null>(null);
   const [renomear, setRenomear] = useState(false);
+  // leitor: código que nenhum artigo tem (juntá-lo a um artigo ou criar o artigo)
+  const [desconhecido, setDesconhecido] = useState<string | null>(null);
 
   const caixa = useQuery({ queryKey: ["caixa"], queryFn: () => call<CaixaResumo | null>("caixa.estado") });
   const artigos = useQuery({
@@ -266,7 +270,7 @@ export default function Pos() {
   const totais = useMemo(() => calcular(linhas, descGlobal, comIva), [linhas, descGlobal, comIva]);
   const idx = sel ?? (linhas.length ? linhas.length - 1 : null); // linha activa (seleccionada ou a última)
   const linhaAtiva = idx !== null ? linhas[idx] : null;
-  const algumModal = !!pedirSerie || renomear || pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido || pedirCupao;
+  const algumModal = !!desconhecido || !!pedirSerie || renomear || pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido || pedirCupao;
 
   /** Executa a acção se o operador tiver permissão (e limite de desconto); caso contrário pede o PIN de um supervisor. */
   function comPermissao(permissao: string, descricao: string, acao: () => void, desconto?: number) {
@@ -312,26 +316,54 @@ export default function Pos() {
   async function onEnter() {
     const txt = busca.trim();
     if (!txt) return;
+    if (await lerCodigo(txt, true)) setBusca("");
+  }
+
+  /** Um código lido (leitor, câmara ou Enter na pesquisa); «3*código» vende 3. Devolve se o tratou. */
+  async function lerCodigo(txt: string, daPesquisa = false): Promise<boolean> {
     const m = txt.match(/^(\d+(?:[.,]\d+)?)\*(.+)$/);
     const quantidade = m ? Number(m[1].replace(",", ".")) : 1;
-    const codigo = m ? m[2] : txt;
+    const codigo = (m ? m[2] : txt).trim();
     try {
       const a = await call<Artigo | null>("artigos.codigo", { codigo });
       if (a) {
+        // GS1 (DataMatrix dos medicamentos): com a validade passada não entra na venda
+        const validade = a.gs1?.validade;
+        const dataPt = (v: string) => v.split("-").reverse().join("/");
+        if (validade && validade < hojeISO().slice(0, validade.length)) {
+          bip(false);
+          toast.error(`${a.descricao}: a validade passou (${dataPt(validade)}). Não foi juntado à venda.`, {
+            description: `${a.gs1?.lote ? `Lote ${a.gs1.lote}. ` : ""}Para o vender mesmo assim, escolha-o na lista de artigos.`,
+            duration: 12000,
+          });
+          return true;
+        }
         // embalagem (ex.: pack de 12) ou etiqueta de balança: a quantidade vem no código
         vender(a, a.quantidade_lida ? +(quantidade * a.quantidade_lida).toFixed(6) : quantidade);
+        bip(true);
         if (a.etiqueta) toast.info(`${a.descricao}: ${a.etiqueta.tipo === "PESO" ? `${qtd(a.etiqueta.valor)} kg` : kz(a.etiqueta.valor)} (etiqueta da balança)`);
-        setBusca("");
-      } else if (artigos.data?.length === 1) {
-        vender(artigos.data[0], quantidade);
-        setBusca("");
-      } else {
-        toast.warning(`Artigo "${codigo}" não encontrado.`);
+        if (a.gs1?.lote || validade) toast.info(`${a.descricao}: ${[a.gs1?.lote && `lote ${a.gs1.lote}`, validade && `validade ${dataPt(validade)}`].filter(Boolean).join(", ")}`);
+        return true;
       }
+      // texto escrito à mão com um só resultado na lista (só se a lista já for deste texto: com o leitor, o Enter
+      // chega antes de a pesquisa responder e a lista ainda seria a da pesquisa anterior)
+      if (daPesquisa && q.trim() === txt && !artigos.isFetching && artigos.data?.length === 1) {
+        vender(artigos.data[0], quantidade);
+        return true;
+      }
+      bip(false);
+      if (/^\S{4,}$/.test(codigo) && /\d/.test(codigo)) {
+        setDesconhecido(codigo);
+        return true;
+      }
+      toast.warning(`Artigo "${codigo}" não encontrado.`);
     } catch (e) {
       toast.error((e as Error).message);
     }
+    return false;
   }
+  // leitura com o cursor noutro campo (quantidade, desconto…): vai para a venda e não fica nesse campo
+  useLeitor((l) => void lerCodigo(l.codigo), !algumModal);
 
   function mudarCliente(c: Entidade) {
     setCliente(c);
@@ -958,6 +990,7 @@ export default function Pos() {
             <ScanBarcode className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-ink-3" />
             <input
               ref={buscaRef}
+              data-leitor
               autoFocus
               // no ecrã táctil o teclado do sistema só abre quando se toca no campo
               inputMode={tactil && !tecladoSistema ? "none" : "search"}
@@ -974,7 +1007,7 @@ export default function Pos() {
                 }
               }}
               placeholder="Ler código de barras ou pesquisar artigo…"
-              className="h-12 w-full rounded-xl border border-line-strong bg-surface pl-12 pr-14 text-[16px] shadow-card outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 sm:h-14"
+              className={cn(camaraDisponivel() ? "pr-24" : "pr-14", "h-12 w-full rounded-xl border border-line-strong bg-surface pl-12 text-[16px] shadow-card outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 sm:h-14")}
             />
             <button
               type="button"
@@ -991,6 +1024,15 @@ export default function Pos() {
             >
               <Keyboard className="size-5" />
             </button>
+            {camaraDisponivel() && (
+              <BotaoCamara
+                onLer={(c) => {
+                  void lerCodigo(c);
+                  focar();
+                }}
+                className="absolute right-12 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-lg text-ink-3 transition hover:bg-sunken hover:text-ink"
+              />
+            )}
           </div>
           {tecladoEcra && (
             <TecladoEcra
@@ -1530,6 +1572,16 @@ export default function Pos() {
       />
 
       {verSuspensos && <SuspensosModal onClose={() => { setVerSuspensos(false); focar(); }} onAbrir={abrirSuspenso} />}
+      {desconhecido && (
+        <CodigoDesconhecido
+          codigo={desconhecido}
+          onAssociado={(a) => vender(a, a.quantidade_lida ?? 1)}
+          onClose={() => {
+            setDesconhecido(null);
+            focar();
+          }}
+        />
+      )}
       {verProformas && <ProformasModal onClose={() => { setVerProformas(false); focar(); }} onAbrir={abrirProforma} />}
 
       <PinModal
