@@ -59,6 +59,12 @@ pub struct InicializarIn {
     /// Moedas aceites em numerário no POS, com o câmbio do dia (sem nenhuma, o POS só recebe kwanzas).
     #[serde(default)]
     moedas_pos: Vec<MoedaPosIn>,
+    /// Tipo de gestão: loja (por omissão) ou escola (ver modos.rs).
+    #[serde(default)]
+    modo: Option<String>,
+    /// Famílias e artigos revistos no último passo da instalação (ex.: propinas e emolumentos).
+    #[serde(default)]
+    base: Option<super::modos::BaseIn>,
 }
 
 #[derive(Deserialize)]
@@ -111,6 +117,12 @@ pub async fn inicializar(st: &AppState, i: InicializarIn) -> AppResult<Value> {
     if let Some(c) = i.cores.as_ref() {
         super::aparencia::validar_cores(c)?;
     }
+    let modo = i.modo.as_deref().map(str::trim).filter(|m| !m.is_empty()).unwrap_or("loja");
+    super::modos::validar_modo(modo)?;
+    if let Some(b) = &i.base {
+        let mut c = st.pool.acquire().await?;
+        super::modos::validar_base(&mut c, b).await?;
+    }
     for m in &i.moedas_pos {
         let existe: Option<String> = sqlx::query_scalar("SELECT descricao FROM moedas WHERE codigo = ? AND codigo <> 'AOA'").bind(m.codigo.trim().to_uppercase()).fetch_optional(&st.pool).await?;
         let nome = existe.ok_or_else(|| AppError::msg(format!("Moeda desconhecida: {}.", m.codigo)))?;
@@ -128,6 +140,13 @@ pub async fn inicializar(st: &AppState, i: InicializarIn) -> AppResult<Value> {
     if let Some(c) = i.cores.as_ref() {
         super::aparencia::gravar_cores(&st.pool, c).await?;
     }
+    // tipo de gestão e o que se reviu para começar (famílias, artigos base): tudo ou nada
+    let mut tx = db::transacao(&st.pool).await?;
+    super::modos::gravar_modo(&mut *tx, modo).await?;
+    if let Some(b) = &i.base {
+        super::modos::criar_base(&mut tx, b).await?;
+    }
+    tx.commit().await?;
     sqlx::query("INSERT INTO utilizadores (nome, login, senha_hash, perfil) VALUES (?, ?, ?, 'ADMIN')")
         .bind(i.admin.nome.trim())
         .bind(i.admin.login.trim())

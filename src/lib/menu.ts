@@ -13,6 +13,7 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
+import type { ModoId } from "./modos";
 import type { Perfil } from "./types";
 
 export interface ItemMenu {
@@ -28,6 +29,8 @@ export interface GrupoMenu {
   titulo: string;
   icon: LucideIcon;
   itens: ItemMenu[];
+  /** só aparece nestes tipos de gestão (sem isto, em todos) */
+  modos?: ModoId[];
 }
 
 /** Menu igual à barra de navegação do KIGEST GC (grupos e itens pela mesma ordem). */
@@ -145,6 +148,7 @@ export const MENU: GrupoMenu[] = [
     id: "oficina",
     titulo: "Oficina",
     icon: Wrench,
+    modos: ["loja"],
     itens: [
       { label: "Ordens de Serviço", to: "/oficina/ordens", perm: "oficina" },
       { label: "Viaturas", to: "/oficina/viaturas", perm: "oficina" },

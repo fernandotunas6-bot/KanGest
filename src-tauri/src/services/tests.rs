@@ -2154,6 +2154,26 @@ async fn servidor_demo() {
     tokio::time::sleep(std::time::Duration::from_secs(3 * 3600)).await;
 }
 
+/// Servidor com a base vazia, para ver a instalação no browser (corre com
+/// `cargo test servidor_instalacao -- --ignored --nocapture`): porta 7798, chave `auditoria123`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn servidor_instalacao() {
+    let pasta = std::env::temp_dir().join("kigest-instalacao");
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let mut st = AppState::new(db::abrir(&pasta.join("kigest.db")).await.expect("abrir base"));
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    let arc = std::sync::Arc::new(st);
+    crate::rede::registar_estado(arc.clone());
+    let cfg = crate::rede::Config { modo: "servidor".into(), porta: 7798, servidor: String::new(), chave: "auditoria123".into(), sal: String::new(), web: true };
+    crate::rede::iniciar_servidor(arc.clone(), &cfg).expect("servidor");
+    eprintln!("SERVIDOR-INSTALACAO-PRONTO porta 7798");
+    tokio::time::sleep(std::time::Duration::from_secs(3 * 3600)).await;
+}
+
 // =====================================================================================
 // Importação a partir do ficheiro do ExportarKIGEST (.kigest = JSON por linhas em gzip)
 // =====================================================================================
@@ -5619,6 +5639,101 @@ async fn tops_do_painel() {
     assert_eq!(top("operadores", "quantidade").await["linhas"][0]["quantidade"], 2);
     assert!(rpc_err(&st, "relatorios.top", json!({ "tipo": "x" })).await.contains("Tipo inválido"));
     assert!(rpc_err(&st, "relatorios.top", json!({ "periodo": "seculo" })).await.contains("Período inválido"));
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// referência, tipo, motivo de isenção, % IVA, preço, PVP, controla stock, unidade
+type ArtigoBaseLido = (String, String, Option<String>, f64, i64, i64, i64, String);
+
+/// Tipo de gestão na instalação: escola com propinas e emolumentos isentos (M21); hospital ainda não;
+/// a base revista é validada antes de gravar e a mudança posterior não duplica o que já existe.
+#[tokio::test]
+async fn modo_de_gestao_na_instalacao() {
+    let pasta = std::env::temp_dir().join(format!("kigest-modo-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let st = AppState::new(db::abrir(&pasta.join("kigest.db")).await.unwrap());
+    let base = json!({ "empresa": { "nome": "Colégio Kianda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } });
+    let ensino = json!({
+        "familias": ["Propinas e emolumentos"],
+        "artigos": [
+            { "referencia": "PROP", "descricao": "Propina mensal", "familia": "Propinas e emolumentos", "preco": 2500000, "unidade": "MES", "motivo_isencao": "M21" },
+            { "referencia": "matr", "descricao": "Matrícula", "familia": "Propinas e emolumentos", "preco": 1500000, "motivo_isencao": "M21" },
+            { "referencia": "FARDA", "descricao": "Fardamento", "tipo": "P", "preco": 800000 }
+        ]
+    });
+
+    // hospital: ainda não; modo desconhecido: recusado
+    let mut h = base.clone();
+    h["modo"] = json!("hospital");
+    assert!(rpc_err(&st, "setup.inicializar", h).await.contains("próxima versão"));
+    let mut x = base.clone();
+    x["modo"] = json!("nave");
+    assert!(rpc_err(&st, "setup.inicializar", x).await.contains("desconhecido"));
+
+    // base com erro: nada fica gravado (nem a empresa)
+    for (campo, valor, erro) in [
+        ("referencia", json!("PRO PINA"), "referência"),
+        ("motivo_isencao", json!("M77"), "M77"),
+        ("unidade", json!("XYZ"), "XYZ"),
+        ("familia", json!("Inexistente"), "Inexistente"),
+        ("preco", json!(-1), "preço"),
+    ] {
+        let mut e = base.clone();
+        e["modo"] = json!("escola");
+        e["base"] = ensino.clone();
+        e["base"]["artigos"][0][campo] = valor;
+        assert!(rpc_err(&st, "setup.inicializar", e).await.contains(erro), "{campo}");
+    }
+    let mut dup = base.clone();
+    dup["base"] = ensino.clone();
+    dup["base"]["artigos"][1]["referencia"] = json!("prop");
+    assert!(rpc_err(&st, "setup.inicializar", dup).await.contains("duas vezes"));
+    let empresas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM empresa").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(empresas, 0, "a instalação recusada não deixa nada a meio");
+
+    // escola: modo, família e artigos (ensino isento M21 sem stock; o fardamento com IVA normal e stock)
+    let mut e = base.clone();
+    e["modo"] = json!("escola");
+    e["ramo"] = json!("servicos");
+    e["base"] = ensino.clone();
+    rpc(&st, "setup.inicializar", e).await;
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    assert_eq!(rpc(&st, "tabelas", Value::Null).await["modo"], "escola");
+    assert_eq!(rpc(&st, "modo.obter", Value::Null).await["modo"], "escola");
+    let arts: Vec<ArtigoBaseLido> = sqlx::query_as(
+        "SELECT a.referencia, a.tipo, a.motivo_isencao, t.percentagem, a.preco1, a.pvp1, a.controla_stock, COALESCE(u.abreviatura, '')
+         FROM artigos a JOIN taxas_iva t ON t.id = a.taxa_iva_id LEFT JOIN unidades u ON u.id = a.unidade_id ORDER BY a.referencia",
+    )
+    .fetch_all(&st.pool)
+    .await
+    .unwrap();
+    assert_eq!(arts.len(), 3);
+    assert_eq!(arts[0], ("FARDA".into(), "P".into(), None, 14.0, 800000, 912000, 1, "UN".into()));
+    assert_eq!(arts[1], ("MATR".into(), "S".into(), Some("M21".into()), 0.0, 1500000, 1500000, 0, "SV".into()), "referência em maiúsculas");
+    assert_eq!(arts[2], ("PROP".into(), "S".into(), Some("M21".into()), 0.0, 2500000, 2500000, 0, "MES".into()));
+    let familia: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM artigos a JOIN familias f ON f.id = a.familia_id WHERE f.descricao = 'Propinas e emolumentos'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(familia, 2);
+    let motivo: String = sqlx::query_scalar("SELECT descricao FROM motivos_isencao WHERE codigo = 'M21'").fetch_one(&st.pool).await.unwrap();
+    assert!(motivo.contains("alínea l)") && motivo.contains("artigo 12.º"));
+
+    // mudar depois: loja e de novo escola com a mesma base — nada se duplica; fica na auditoria
+    assert_eq!(rpc(&st, "modo.definir", json!({ "modo": "loja" })).await["modo"], "loja");
+    assert_eq!(rpc(&st, "tabelas", Value::Null).await["modo"], "loja");
+    let r = rpc(&st, "modo.definir", json!({ "modo": "escola", "base": ensino })).await;
+    assert_eq!((r["familias"].as_i64(), r["artigos"].as_i64()), (Some(0), Some(0)));
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM artigos").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(total, 3);
+    assert!(rpc_err(&st, "modo.definir", json!({ "modo": "hospital" })).await.contains("próxima versão"));
+    let audit: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auditoria WHERE detalhe LIKE 'Tipo de gestão:%'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(audit, 2);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+
+    // base sem escolha (instalações anteriores): loja
+    let (st, pasta) = base_com_admin("modo-omissao").await;
+    assert_eq!(rpc(&st, "tabelas", Value::Null).await["modo"], "loja");
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }

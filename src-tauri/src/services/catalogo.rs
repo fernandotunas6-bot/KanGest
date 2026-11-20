@@ -31,6 +31,8 @@ pub async fn tabelas(st: &AppState) -> AppResult<Value> {
         "fidelizacao": super::fidelizacao::cfg(p).await?,
         // ramo de actividade: decide os dados de ramo dos artigos e alguns comportamentos do POS
         "ramo": super::ramos::ramo(p).await?,
+        // tipo de gestão (loja ou escola): decide os menus
+        "modo": super::modos::modo(p).await?,
     }))
 }
 

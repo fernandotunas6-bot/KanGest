@@ -222,6 +222,8 @@ export interface Tabelas {
   fidelizacao?: FidelizacaoCfg;
   /** ramo de actividade da empresa (src/lib/ramos.ts) */
   ramo?: string;
+  /** tipo de gestão: loja ou escola (src/lib/modos.ts) */
+  modo?: string;
 }
 
 export interface FidelizacaoCfg {

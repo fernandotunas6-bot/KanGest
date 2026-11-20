@@ -17,12 +17,13 @@ import { call, descricaoDispositivo, esquecerLigacao, levarFicheiro, ligacaoWeb,
 import { instalarPwa, usePwa } from "@/lib/pwa";
 import { qrcode, qrSvgPath } from "@/lib/qrcode";
 import { ramoPorId } from "@/lib/ramos";
+import { FAMILIA_ENSINO, MODOS as MODOS_GESTAO, artigosEscola, modoPorId, type ModoId } from "@/lib/modos";
 import { EscolherRamo } from "@/components/EscolherRamo";
 import { useTabelas } from "@/lib/hooks";
 import { anfitriaoUrl, dataHora, parseKz, toInputKz } from "@/lib/format";
 import type { Empresa, EscPos, Posto, PostoOpcoes, VisorOpcoes } from "@/lib/types";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Confirmar, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 
 const ABAS = ["Empresa", "Aparência", "Postos e impressão", "Rede", "Email", "Tabelas", "Sistema", "Certificação AGT"] as const;
 
@@ -71,6 +72,7 @@ export default function Configuracoes() {
       {aba === "Empresa" && (
         <div className="space-y-5">
           <EmpresaForm />
+          <TipoGestao />
           <RamoActividade />
         </div>
       )}
@@ -1211,6 +1213,82 @@ function gerarChaveRede() {
   const b = crypto.getRandomValues(new Uint8Array(20));
   const c = Array.from(b, (x) => alfabeto[x % alfabeto.length]).join("");
   return c.match(/.{5}/g)!.join("-");
+}
+
+/** Tipo de gestão (lojas ou escola): muda os menus; os documentos, artigos e clientes ficam como estão. */
+function TipoGestao() {
+  const qc = useQueryClient();
+  const tabelas = useTabelas();
+  const pode = useSession((s) => s.tem)("sistema.configuracoes");
+  const atual = modoPorId(tabelas.data?.modo);
+  const [novo, setNovo] = useState<ModoId | null>(null);
+  const temEnsino = !!tabelas.data?.familias.some((f) => f.descricao.toLowerCase() === FAMILIA_ENSINO.toLowerCase());
+  const [criarBase, setCriarBase] = useState(true);
+
+  async function mudar() {
+    if (!novo) return;
+    try {
+      const base = novo === "escola" && !temEnsino && criarBase ? { familias: [FAMILIA_ENSINO], artigos: artigosEscola() } : undefined;
+      const r = await call<{ artigos: number }>("modo.definir", { modo: novo, base });
+      await qc.invalidateQueries({ queryKey: ["tabelas"] });
+      toast.success(`Tipo de gestão: ${modoPorId(novo).nome}.${r.artigos ? " Propina mensal e matrícula criadas: ponha os preços em Artigos." : ""}`);
+      setNovo(null);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+
+  return (
+    <Card className="max-w-3xl p-6">
+      <div className="mb-1 flex items-center gap-2 font-medium">
+        <atual.icone className="size-4 text-brand" /> Tipo de gestão
+      </div>
+      <p className="mb-4 text-[13px] text-ink-3">Decide os menus do KanGest. Mudar não apaga nada: os documentos, artigos e clientes ficam como estão.</p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {MODOS_GESTAO.map((m) => {
+          const sel = atual.id === m.id;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              disabled={!pode || m.emBreve}
+              aria-pressed={sel}
+              onClick={() => !sel && setNovo(m.id)}
+              className={cn(
+                "flex items-start gap-3 rounded-xl border p-3 text-left transition disabled:cursor-not-allowed",
+                sel ? "border-brand bg-brand-50/60 ring-2 ring-brand/20" : "border-line hover:border-brand/40 hover:bg-sunken/60",
+                m.emBreve && "opacity-60",
+              )}
+            >
+              <span className={cn("grid size-9 shrink-0 place-items-center rounded-lg", sel ? "bg-brand text-white" : "bg-sunken text-ink-2")}>
+                <m.icone className="size-[18px]" />
+              </span>
+              <span className="min-w-0">
+                <span className="flex items-center gap-1.5 text-[13.5px] font-medium leading-snug">
+                  {m.nome}
+                  {m.emBreve && <Badge tone="accent">Em breve</Badge>}
+                </span>
+                <span className="block text-[12px] leading-snug text-ink-3">{m.descricao}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {novo && (
+        <Confirmar titulo={`Mudar para ${modoPorId(novo).nome}?`} confirmar="Mudar" perigo={false} onConfirmar={mudar} onClose={() => setNovo(null)}>
+          <p>Os menus passam a ser os de {novo === "escola" ? "uma escola" : "uma loja"}. Nada se apaga: os documentos, artigos e clientes ficam como estão.</p>
+          {novo === "escola" && !temEnsino && (
+            <label className="mt-3 flex items-start gap-2 text-[13.5px]">
+              <input type="checkbox" className="mt-1" checked={criarBase} onChange={(e) => setCriarBase(e.target.checked)} />
+              <span>
+                Criar também a propina mensal e a matrícula (família «{FAMILIA_ENSINO}», isentas de IVA — M21). Os preços põem-se depois em Artigos.
+              </span>
+            </label>
+          )}
+        </Confirmar>
+      )}
+    </Card>
+  );
 }
 
 /** Ramo de actividade: muda os dados pedidos nos artigos e alguns comportamentos do POS. */

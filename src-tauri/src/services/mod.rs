@@ -38,6 +38,7 @@ mod ficheiros;
 pub mod fotos;
 mod inventario;
 mod ligacao;
+mod modos;
 mod quadro;
 mod ramos;
 #[cfg(test)]
@@ -111,6 +112,9 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
     // novo aumenta a pilha que ele usa (nas compilações de desenvolvimento chegava ao limite da pilha).
     if let Some(resto) = metodo.strip_prefix("avencas.") {
         return Box::pin(avencas::despachar(st, resto, params)).await;
+    }
+    if let Some(resto) = metodo.strip_prefix("modo.") {
+        return Box::pin(modos::despachar(st, resto, params)).await;
     }
     if let Some(resto) = metodo.strip_prefix("fotos.") {
         return Box::pin(async move {
