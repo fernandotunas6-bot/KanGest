@@ -20,6 +20,8 @@ import DocumentoModal from "@/components/DocumentoModal";
 import DoisPassos from "@/components/DoisPassos";
 import MeuPerfil, { Avatar } from "@/components/MeuPerfil";
 import { useMeuPerfil } from "@/lib/perfil";
+import { useTabelas } from "@/lib/hooks";
+import { modoPorId } from "@/lib/modos";
 import type { Sessao } from "@/lib/types";
 
 const CHAVE_ABERTO = "kangest.menu.aberto";
@@ -61,8 +63,11 @@ export default function AppShell() {
   const [gaveta, setGaveta] = useState(false);
   const { favoritos, iniciar, alternarFavorito, registarVisita } = useNavegacao();
 
+  // tipo de gestão (loja ou escola): há grupos do menu que só existem num deles
+  const modo = modoPorId(useTabelas().data?.modo);
+  const doModo = (g?: GrupoMenu) => !g?.modos || g.modos.includes(modo.id);
   const visivelItem = (i: ItemMenu) => (!i.perm || tem(i.perm)) && (!i.minPerfil || pode(i.minPerfil));
-  const visivel = (d: Destino) => (d.to === "/" ? pode("GESTOR") : !d.item || visivelItem(d.item));
+  const visivel = (d: Destino) => (d.to === "/" ? pode("GESTOR") : doModo(d.grupo) && (!d.item || visivelItem(d.item)));
   const destino = destinoActual(loc.pathname, loc.search);
   const ativo = (to?: string) => !!to && destino?.to === to;
 
@@ -98,7 +103,9 @@ export default function AppShell() {
     setSessao(null);
   }
 
-  const grupos = MENU.map((g) => ({ ...g, itens: g.itens.filter((i) => i.to && !i.emBreve && visivelItem(i)) })).filter((g) => g.itens.length);
+  const grupos = MENU.filter(doModo)
+    .map((g) => ({ ...g, itens: g.itens.filter((i) => i.to && !i.emBreve && visivelItem(i)) }))
+    .filter((g) => g.itens.length);
   const favs = favoritos.map(destinoPorEndereco).filter((d): d is Destino => !!d && visivel(d));
 
   /** Menu lateral completo (no ecrã largo ao lado; nos estreitos, numa gaveta por cima). */
@@ -108,7 +115,7 @@ export default function AppShell() {
         <Logo className="size-8 rounded-[22%] ring-1 ring-white/15" />
         <div className="min-w-0 flex-1 leading-tight">
           <div className="font-semibold text-white">KanGest</div>
-          <div className="text-[11px] text-white/55">Gestão Comercial</div>
+          <div className="text-[11px] text-white/55">{modo.subtitulo}</div>
         </div>
         {naGaveta ? (
           <button onClick={() => setGaveta(false)} title="Fechar o menu" aria-label="Fechar o menu" className="rounded-md p-2 text-white/70 hover:bg-white/10 hover:text-white">

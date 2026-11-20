@@ -82,6 +82,7 @@ const CONFIGURACOES: &[&str] = &[
     "relatorios.irtCGuardar",
     "contabilidade.contasGuardar",
     "ramo.definir",
+    "modo.definir",
     "api.guardar",
     "web.activar",
     "web.activarProprio",
