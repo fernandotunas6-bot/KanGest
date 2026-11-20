@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 import { CheckCircle2 } from "lucide-react";
 import { RAMOS, ramoPorId, type RamoId } from "@/lib/ramos";
 import { cn } from "@/components/ui";

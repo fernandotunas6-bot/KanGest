@@ -1,3 +1,6 @@
+# KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+# © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 """Base com o volume de ~3 anos de uma loja, para medir as consultas (docs/BASE-DE-DADOS.md).
 
     python3 scripts/base-volume.py <base de origem> <base nova> [documentos=150000]

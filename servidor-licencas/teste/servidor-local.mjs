@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 // O Worker a correr no Node, com D1 em memória, para testar o KanGest sem Cloudflare:
 //   KANGEST_CHAVE_SERVIDOR=~/.kangest-licencas/servidor/privada.pem ADMIN_TOKEN=… node teste/servidor-local.mjs 8787
 import { createServer } from "node:http";

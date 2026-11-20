@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 // Gera src-tauri/icons/app-icon.png (1024 × 1024, fundo transparente) a partir de src/assets/kigest-icone.svg,
 // desenhando o SVG num Chrome sem janela já aberto com --remote-debugging-port=9333.
 // Depois: npx tauri icon src-tauri/icons/app-icon.png

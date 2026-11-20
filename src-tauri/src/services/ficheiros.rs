@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Ficheiros exportados que não são texto (livros Excel .xlsx gerados no ecrã): chegam em base64 e gravam-se
 //! na pasta de exportação deste computador (num posto cliente, no próprio posto, como os CSV).
 

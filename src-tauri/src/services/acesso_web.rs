@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Acesso pela Internet com endereço próprio do KanGest (ex.: `https://loja.kangest.ao`), como os programas na nuvem.
 //!
 //! O servidor de licenças cria, em nome do produtor, um túnel da Cloudflare até este computador e o registo DNS

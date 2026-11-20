@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Auditoria à prova de adulteração (docs/UTILIZADORES.md, «Auditoria»).
 //!
 //! Cada linha da tabela `auditoria` leva um **selo**: o SHA-256 do selo da linha anterior com o conteúdo desta. Os

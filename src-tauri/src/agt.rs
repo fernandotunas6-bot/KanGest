@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Assinatura de documentos (AGT — Decreto Presidencial 312/18, SAF-T AO).
 //!
 //! Cadeia de hash: RSA-SHA1 (PKCS#1 v1.5) em Base64 sobre

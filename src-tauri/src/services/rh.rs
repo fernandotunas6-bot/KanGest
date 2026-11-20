@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Recursos Humanos (KIGEST GC → Recursos Humanos): funcionários, alterações mensais,
 //! adiantamentos, processamento salarial com INSS e IRT (Grupo A), recibos, mapas e férias.
 //!

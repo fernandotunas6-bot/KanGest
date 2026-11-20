@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 /* KanGest — comportamento comum do site. A configuração (versão, downloads, contactos) vem de window.KANGEST,
  * gerada a partir de site-fonte/config.json. */
 (() => {

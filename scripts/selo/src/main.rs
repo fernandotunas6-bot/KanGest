@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Selo de integridade do executável do KanGest (ver `src-tauri/src/selo/mod.rs` e `docs/SEGURANCA.md`).
 //!
 //! ```text

@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Sugestão de encomendas a fornecedores e exportação de lançamentos para a contabilidade.
 //!
 //! - **Sugestão de encomendas** (como as regras de reposição do Odoo): artigos abaixo do mínimo, ou

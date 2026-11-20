@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 /**
  * QR Code (modelo 2) em modo byte UTF-8, sem dependências. Segue o algoritmo de referência
  * (ISO/IEC 18004): codificação, Reed-Solomon em GF(256), entrelaçamento por blocos, padrões

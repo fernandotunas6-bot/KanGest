@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 import { toast } from "sonner";
 import { call } from "./api";
 import { base64, livroXLSX, type CelulaXL, type FolhaXL } from "./xlsx";

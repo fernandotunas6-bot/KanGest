@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Fotografias dos artigos. O ecrã reduz a imagem antes de a enviar (miniatura ~160 px para a grelha do POS e imagem
 //! até 800 px para a ficha e a API); aqui só se confere o formato e o tamanho e se guarda.
 

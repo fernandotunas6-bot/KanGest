@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+# © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 """Manifesto das actualizações automáticas e somas SHA-256 de uma versão.
 
 Usado pela GitHub Actions ao publicar uma etiqueta (build.yml, passo «Manifesto das actualizações»), depois de os

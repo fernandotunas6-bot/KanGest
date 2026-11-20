@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 import { Fragment, forwardRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { ArrowLeft, Building2, Check, Eye, EyeOff } from "lucide-react";
 import { abrirExterno } from "@/lib/api";

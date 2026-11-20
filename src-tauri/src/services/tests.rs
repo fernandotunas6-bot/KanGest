@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Teste de integração do núcleo comercial: corre o fluxo completo numa base SQLite temporária.
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};

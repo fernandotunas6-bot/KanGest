@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Facturação Electrónica da AGT (Decreto Presidencial 71/25), serviços REST `sigt/fe/v1`
 //! documentados em quiosqueagt.minfin.gov.ao/doc-agt.
 //!

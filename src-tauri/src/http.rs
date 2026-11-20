@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Cliente HTTP/1.1 mínimo (HTTP e HTTPS com o TLS do sistema) para as actualizações e para a
 //! Facturação Electrónica da AGT. Síncrono: chamar dentro de `spawn_blocking`.
 //!

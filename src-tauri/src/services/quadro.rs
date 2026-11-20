@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Quadro de propostas e encomendas (como o kanban de cotações do Odoo): proformas, orçamentos e notas de
 //! encomenda de clientes, ou encomendas e orçamentos de fornecedores, com o documento em que se converteram.
 

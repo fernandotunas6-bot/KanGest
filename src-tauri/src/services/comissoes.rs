@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Comissões de vendedores.
 //!
 //! - Cada vendedor (funcionário escolhido no documento de venda) tem uma percentagem; 0 = sem comissão.

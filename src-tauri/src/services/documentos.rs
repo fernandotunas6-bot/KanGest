@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Emissão de documentos comerciais — o coração do sistema.
 //! Um único motor para todos os tipos do KIGEST (vendas, compras, stock, recibos e pagamentos):
 //! o comportamento vem dos atributos do tipo (`tipos_documento`). Numeração por série, assinatura

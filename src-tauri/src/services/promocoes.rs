@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Promoções por regras e cupões de desconto (como os motores de promoções dos POS de referência).
 //!
 //! - **Leve N pague M** (ex.: leve 3 pague 2) num artigo, numa família ou em todos: as unidades

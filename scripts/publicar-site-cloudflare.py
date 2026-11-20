@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+# © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 """Publica a pasta site/ no Cloudflare Pages (envio directo, sem o wrangler).
 
     CLOUDFLARE_API_TOKEN=… python3 scripts/publicar-site-cloudflare.py [--projecto kangest] [--ensaio]

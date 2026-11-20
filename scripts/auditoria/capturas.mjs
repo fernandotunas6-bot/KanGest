@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 // Auditoria visual: controla um Chrome sem janela (porta de depuração 9333) e tira capturas de ecrã.
 //
 //   node scripts/auditoria/capturas.mjs <pasta> "rota=nome[@accao:arg...]" ...

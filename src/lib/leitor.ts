@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 /**
  * Leitor de código de barras: os leitores USB e Bluetooth funcionam como um teclado. Escrevem muito mais depressa do
  * que uma pessoa (poucos milissegundos entre caracteres) e acabam a leitura com Enter, Tab ou nada. É pela

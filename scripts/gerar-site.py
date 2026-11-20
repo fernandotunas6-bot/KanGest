@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+# © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 """Gera o site estático (site/) a partir de site-fonte/.
 
     python3 scripts/gerar-site.py

@@ -1,3 +1,6 @@
+# KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+# © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 """Gera docs/openapi.json, a especificação da API de integração (servida em GET /api/v1/openapi.json).
 
     python3 scripts/gerar-openapi.py            # escreve docs/openapi.json

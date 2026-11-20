@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Tesouraria (Fr_FluxoCaixa, Fr_Contas, Fr_CentroCusto, Fr_PagamentoVista, Fr_Deposito do KIGEST GC):
 //! contas (caixa/banco), centros de custo, movimentos, transferências e fluxo de caixa.
 

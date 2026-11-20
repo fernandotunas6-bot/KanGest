@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Recibo digital: o documento por email (servidor SMTP da empresa) e por WhatsApp.
 //!
 //! - **Email**: mensagem em HTML (e texto simples) com o documento completo — linhas, totais,

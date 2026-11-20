@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Exportação SAF-T (AO) — estrutura 1.01_01.
 //! * Facturação (TaxAccountingBasis = F): Header, MasterFiles (Customer, Product, TaxTable) e
 //!   SourceDocuments (SalesInvoices, MovementOfGoods, WorkingDocuments, Payments).

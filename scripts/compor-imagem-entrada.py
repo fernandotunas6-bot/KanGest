@@ -1,3 +1,6 @@
+# KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+# © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 """Compõe a imagem do ecrã de entrada do KanGest a partir da fotografia 9363112 do Pexels (licença Pexels: uso
 gratuito, também comercial, com alterações): fato azul → cinzento claro, gravata bordô → laranja, a parede lisa →
 colunas brancas, e a pessoa a subir de baixo, à direita.

@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Defesas do próprio programa contra alterações e engenharia reversa.
 //!
 //! - **Selo de integridade do executável.** Na compilação oficial (GitHub Actions), depois de compilar e antes de

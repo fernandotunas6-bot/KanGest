@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Aparência da empresa: o jogo de cores do sistema (escolhido na instalação e em Configurações → Aparência). Fica na
 //! tabela `config` e vale para todos os postos e browsers; o ecrã de entrada lê-o antes de haver sessão
 //! (`setup.estado`). O tema claro ou escuro continua a ser de cada um. A imagem do ecrã de entrada é a do KanGest e não

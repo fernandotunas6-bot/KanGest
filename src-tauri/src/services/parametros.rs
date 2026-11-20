@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Parametrização de documentos (Fr_Parametrizacao), Opções de Venda (Fr_ConfigContas: forma de
 //! pagamento → conta) e Definição de Faturas e Recibos (opções do impresso).
 //!

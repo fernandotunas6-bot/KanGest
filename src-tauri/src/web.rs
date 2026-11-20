@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Modo web: o servidor de rede (rede.rs) também entrega a própria aplicação ao browser.
 //!
 //! Um telemóvel, um tablet (Android ou iOS), um terminal POS Android ou outro computador abre

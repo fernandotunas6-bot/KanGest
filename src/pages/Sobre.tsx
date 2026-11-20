@@ -1,8 +1,11 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Link, useSearchParams } from "react-router-dom";
-import { BookOpen, Database, Download, Info, Keyboard, RefreshCw } from "lucide-react";
+import { BookOpen, Database, Download, Info, Keyboard, Mail, Phone, RefreshCw, ShieldCheck } from "lucide-react";
 import { call, MODO_WEB } from "@/lib/api";
 import { numero } from "@/lib/format";
 import { MENU } from "@/lib/menu";
@@ -92,6 +95,7 @@ export default function Sobre() {
 
       {vista === "sobre" ? (
         <div className="grid grid-cols-2 gap-4">
+          <Autoria />
           <Card className="p-6">
             <div className="mb-4 flex items-center gap-2 font-medium">
               <Info className="size-4 text-brand" /> Aplicação
@@ -340,6 +344,33 @@ function Atualizacoes() {
           {v?.disponivel && !v.pacote && <p className="mt-2 text-danger">A versão {v.versao} não tem pacote para este sistema.</p>}
           <p className="mt-3 text-[12.5px] text-ink-3">Os dados e as cópias ficam na pasta de dados e não são apagados pela instalação. Cada posto actualiza-se a si próprio.</p>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+/** Autoria e direitos: quem desenvolveu o KanGest e o aviso de protecção (igual ao do ficheiro LICENSE). */
+function Autoria() {
+  return (
+    <Card className="col-span-2 flex flex-wrap items-center gap-x-8 gap-y-3 border-brand/25 bg-brand-50/40 p-5">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand text-white">
+          <ShieldCheck className="size-5" />
+        </span>
+        <div className="min-w-0">
+          <div className="font-semibold">Desenvolvido por Valentino Canguele</div>
+          <div className="text-[12.5px] text-ink-2">
+            © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar, descompilar ou redistribuir o KanGest sem autorização escrita do autor.
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-[13.5px]">
+        <a className="inline-flex items-center gap-1.5 text-brand-700 hover:underline" href="tel:+244926445277">
+          <Phone className="size-4" /> 926 445 277
+        </a>
+        <a className="inline-flex items-center gap-1.5 text-brand-700 hover:underline" href="mailto:valentinocanguele@gmail.com">
+          <Mail className="size-4" /> valentinocanguele@gmail.com
+        </a>
       </div>
     </Card>
   );

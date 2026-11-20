@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Cliente SMTP mínimo (documentos por email) com o TLS do sistema: SSL/TLS directo (porta 465),
 //! STARTTLS (587) ou sem cifra (só para servidores da rede local). Autenticação PLAIN ou LOGIN.
 //! Mensagem MIME em UTF-8 com texto simples e HTML. Síncrono: chamar dentro de `spawn_blocking`.

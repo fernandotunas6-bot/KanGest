@@ -1,3 +1,6 @@
+// KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
+// © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
+
 //! Avisos automáticos da API (webhooks): quando há documentos emitidos ou anulados, ou mudanças de stock ou de
 //! artigos, o KanGest avisa os sistemas ligados (loja online, ERP…) com um POST JSON assinado.
 //!
