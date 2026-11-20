@@ -1,5 +1,6 @@
 # Publica o site (kangest.pages.dev) no Cloudflare Pages sempre que muda no main, ou à mão em Actions → Site → Run workflow.
-# Gera o site a partir de site-fonte/ (scripts/gerar-site.py, com os cabeçalhos de segurança em _headers) e envia-o
+# Gera o site a partir de site-fonte/ (scripts/gerar-site.py, com os cabeçalhos de segurança em _headers), junta-lhe
+# os instaladores e o manifesto das actualizações da versão (site/actualizacoes, da release v<versão>) e envia-o
 # com scripts/publicar-site-cloudflare.py.
 #
 # Precisa do segredo CLOUDFLARE_API_TOKEN (Settings → Secrets and variables → Actions), com a permissão
@@ -42,6 +43,28 @@ jobs:
       - name: Gerar o site
         run: python3 scripts/gerar-site.py
 
+      # Os instaladores e o manifesto das actualizações da versão do site ficam também no próprio site
+      # (kangest.pages.dev/actualizacoes): descarregam-se e actualizam-se mesmo com o repositório privado.
+      - name: Juntar os instaladores da versão
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          versao="$(python3 -c "import json; print(json.load(open('site-fonte/config.json'))['versao'])")"
+          mkdir -p site/actualizacoes
+          gh release download "v$versao" --repo "$GITHUB_REPOSITORY" --dir site/actualizacoes --clobber \
+            --pattern 'kangest-atualizacao.json' --pattern '*.exe' --pattern '*.dmg' --pattern '*.sig' --pattern 'SHA256SUMS.txt'
+          python3 - "$versao" <<'EOF'
+          import json, pathlib, sys
+          pasta = pathlib.Path("site/actualizacoes")
+          m = json.loads((pasta / "kangest-atualizacao.json").read_text())
+          if m["versao"] != sys.argv[1]:
+              sys.exit(f"O manifesto é da versão {m['versao']}, o site é da {sys.argv[1]}.")
+          for p in m["pacotes"].values():
+              if not (pasta / p["ficheiro"]).is_file():
+                  sys.exit(f"Falta o pacote {p['ficheiro']} da versão {sys.argv[1]}.")
+          print("Instaladores da versão", m["versao"] + ":", ", ".join(sorted(f.name for f in pasta.iterdir())))
+          EOF
+
       - name: Publicar no Cloudflare Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -64,5 +87,9 @@ jobs:
             sleep 10
           done
           echo "$pagina" | grep -q "KanGest $versao" || { echo "::error::kangest.pages.dev não mostra a versão $versao."; exit 1; }
+          for f in kangest-atualizacao.json "KanGest_${versao}_x64-setup.exe" "KanGest_${versao}_aarch64.dmg" "KanGest_${versao}_x64.dmg"; do
+            curl -fsSIL "https://kangest.pages.dev/actualizacoes/$f" > /dev/null || { echo "::error::O site não tem /actualizacoes/$f."; exit 1; }
+          done
+          curl -fsSL https://kangest.pages.dev/actualizacoes/kangest-atualizacao.json | grep -q "\"versao\": *\"$versao\"" || { echo "::error::O manifesto do site não é da versão $versao."; exit 1; }
           curl -fsSIL https://kangest.pages.dev/ | grep -qi "^content-security-policy:" || { echo "::error::Sem os cabeçalhos de segurança (_headers)."; exit 1; }
-          echo "Site publicado com a versão $versao e os cabeçalhos de segurança."
+          echo "Site publicado com a versão $versao, os instaladores e as actualizações, e os cabeçalhos de segurança."

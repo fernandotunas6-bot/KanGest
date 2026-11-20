@@ -241,7 +241,8 @@ jobs:
 
   # Depois dos três instaladores: assina-os para as actualizações automáticas e anexa à release o manifesto
   # (kangest-atualizacao.json) e as somas SHA-256. O KanGest com a origem
-  # https://github.com/fernandotunas6-bot/KanGest/releases/latest/download passa a encontrar sozinho cada versão nova.
+  # https://kangest.pages.dev/actualizacoes (o site.yml copia para lá o manifesto e os instaladores da versão do site)
+  # passa a encontrar sozinho cada versão nova.
   manifesto:
     name: manifesto das actualizações
     needs: build

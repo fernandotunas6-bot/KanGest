@@ -218,6 +218,10 @@ interface EstadoAtualizacao {
   versao_atual: string;
   plataforma: string;
   fonte: string;
+  /** a origem usada de facto (a antiga do GitHub passa à do site) */
+  fonte_efectiva?: string | null;
+  /** origem oficial: o site do KanGest */
+  origem_oficial?: string;
   chave_publica: boolean;
   /** A chave das actualizações vem com o programa: assinatura obrigatória. */
   chave_embutida?: boolean;
@@ -287,9 +291,21 @@ function Atualizacoes() {
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <div className="space-y-3">
-          <Field label="Origem (endereço ou pasta partilhada na rede)" hint="Onde está o ficheiro kangest-atualizacao.json, ex.: https://… ou \\SERVIDOR\KanGest">
+          <Field
+            label="Origem (endereço ou pasta partilhada na rede)"
+            hint={
+              estado?.fonte_efectiva && estado.fonte_efectiva !== estado.fonte.trim().replace(/[/\\]+$/, "")
+                ? `Esta origem antiga lê-se agora em ${estado.fonte_efectiva}.`
+                : "Onde está o ficheiro kangest-atualizacao.json, ex.: https://… ou \\\\SERVIDOR\\KanGest"
+            }
+          >
             <Input disabled={!admin} value={fonte ?? estado?.fonte ?? ""} onChange={(e) => setFonte(e.target.value)} placeholder="https://… ou \\SERVIDOR\KanGest" />
           </Field>
+          {admin && estado?.origem_oficial && (fonte ?? estado.fonte).trim() !== estado.origem_oficial && (
+            <button type="button" className="text-[13px] font-medium text-brand-700 hover:underline" onClick={() => setFonte(estado.origem_oficial ?? "")}>
+              Usar a origem oficial ({estado.origem_oficial})
+            </button>
+          )}
           {estado?.chave_embutida ? (
             <p className="rounded-lg bg-ok-50 px-3 py-2 text-[13px] text-ok">
               Só se instalam pacotes assinados pelo produtor do KanGest: a chave pública vem com o programa e não se altera aqui.

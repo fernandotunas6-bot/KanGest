@@ -28,8 +28,11 @@ ficheiro trocado entretanto não se instala.
 ## 3. Manifesto `kangest-atualizacao.json`
 
 **Na publicação pelo GitHub Actions o manifesto é gerado sozinho** (trabalho «manifesto das actualizações»: assina os
-três instaladores e anexa `kangest-atualizacao.json`, `SHA256SUMS.txt` e os `.sig` à release). Nesse caso a origem a
-indicar nos postos é `https://github.com/fernandotunas6-bot/KanGest/releases/latest/download`.
+três instaladores e anexa `kangest-atualizacao.json`, `SHA256SUMS.txt` e os `.sig` à release). Ao publicar o site
+(`site.yml`), o manifesto e os instaladores da versão do site são copiados para `kangest.pages.dev/actualizacoes`.
+A origem a indicar nos postos é **`https://kangest.pages.dev/actualizacoes`** (botão «Usar a origem oficial»):
+funciona também com o repositório privado. As instalações que tinham gravada a origem antiga
+(`https://github.com/fernandotunas6-bot/KanGest/releases/latest/download`) passam a ler a do site sozinhas.
 
 Para uma pasta partilhada, copie para lá os instaladores com os `.sig` e gere o manifesto com
 `python3 scripts/manifesto-atualizacao.py <pasta> <versão> [docs/versoes/v<versão>.md]`, ou escreva-o à mão,

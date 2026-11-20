@@ -50,7 +50,10 @@ domínio dos endereços das empresas (vazio até haver domínio). Ver [docs/CLOU
 
 ## Nova versão do KanGest
 
-Em `config.json`, mude `versao`, os três links de `downloads` e os tamanhos; gere e publique.
+Em `config.json`, mude `versao` e os tamanhos; gere e publique. Os links de `downloads` levam `{versao}` e apontam
+para o próprio site (`/actualizacoes/…`): ao publicar, a GitHub Actions (`site.yml`) copia da release `v<versão>` os
+instaladores e o manifesto das actualizações para `site/actualizacoes` (não se guardam no repositório) e confirma no
+fim que o site os serve. Por isso a release tem de existir antes de se publicar o site com a versão nova.
 
 ## Imagens
 
