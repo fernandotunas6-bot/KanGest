@@ -3,7 +3,7 @@
   "private": true,
   "author": "Valentino Canguele <valentinocanguele@gmail.com>",
   "license": "UNLICENSED",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
