@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
 Disallow: /admin.html
+Disallow: /conta.html
 Sitemap: https://kangest.pages.dev/sitemap.xml

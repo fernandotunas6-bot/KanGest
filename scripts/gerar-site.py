@@ -48,6 +48,7 @@ ICONES = {
     "pessoas": f'<svg {_SVG}><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.6c1.9.7 3.1 2.6 3.5 5.4"/></svg>',
     "rede": f'<svg {_SVG}><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="8.5" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v2h11v-2M12 12v2"/></svg>',
     "cadeado": f'<svg {_SVG}><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
+    "conta": f'<svg {_SVG}><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
     "trocar": f'<svg {_SVG}><path d="M4 7h11l-3-3M20 17H9l3 3"/></svg>',
     "camiao": f'<svg {_SVG}><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>',
     "chave": f'<svg {_SVG}><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M15 8l2 2"/></svg>',
@@ -94,6 +95,11 @@ def cabecalhos(scripts_em_linha, site, licencas):
     hashes = " ".join(sorted(f"'sha256-{base64.b64encode(hashlib.sha256(s.encode()).digest()).decode()}'" for s in scripts_em_linha))
     # o endereço público do site também conta como «próprio»: a página 404 carrega por ele (<base href>)
     proprio = f"'self' {site.rstrip('/')}"
+    # só a origem do servidor de licenças: na CSP, um endereço com caminho (…/functions/v1/kangest) só deixaria esse
+    # caminho exacto, e a API está por baixo dele (…/kangest/v1/planos)
+    from urllib.parse import urlsplit
+    u = urlsplit(licencas)
+    licencas = f"{u.scheme}://{u.netloc}" if u.scheme and u.netloc else ""
     csp = "; ".join([
         "default-src 'self'",
         f"script-src {proprio} {hashes} https://static.cloudflareinsights.com",
@@ -189,7 +195,15 @@ def main():
     admin = painel.replace(marca, f"const API = {json.dumps(cfg['web']['licencas'].rstrip('/'))};")
     (SAIDA / "admin.html").write_text(admin)
     scripts_em_linha.update(re.findall(r"<script>(.*?)</script>", admin, flags=re.S))
-    (SAIDA / "robots.txt").write_text(f"User-agent: *\nAllow: /\nDisallow: /admin.html\nSitemap: {cfg['site']}/sitemap.xml\n")
+    # A conta de cada empresa (conta.html, como as definições da conta do Claude): licença, pagamentos, computadores e
+    # segurança, a falar com o servidor de licenças (/v1/conta/*). Também fora dos motores de busca.
+    conta = (FONTE / "conta.html").read_text()
+    if marca not in conta:
+        sys.exit("site-fonte/conta.html: falta a marca do endereço da API (const API = \"\" /* KG_API */;)")
+    conta = conta.replace(marca, f"const API = {json.dumps(cfg['web']['licencas'].rstrip('/'))};")
+    (SAIDA / "conta.html").write_text(conta)
+    scripts_em_linha.update(re.findall(r"<script>(.*?)</script>", conta, flags=re.S))
+    (SAIDA / "robots.txt").write_text(f"User-agent: *\nAllow: /\nDisallow: /admin.html\nDisallow: /conta.html\nSitemap: {cfg['site']}/sitemap.xml\n")
     (SAIDA / "_headers").write_text(cabecalhos(scripts_em_linha, cfg["site"], cfg["web"]["licencas"]))
     print(f"Site gerado em {SAIDA.relative_to(RAIZ)}/: {len(paginas)} páginas + 404, sitemap e robots ({versao_ficheiros}).")
 

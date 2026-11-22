@@ -1,0 +1,11 @@
+node_modules/
+# o núcleo (worker.js e painel.js) copia-se de servidor-licencas/src com «node preparar.mjs» antes de publicar
+supabase/functions/kangest/nucleo/
+# supabase link / branches / segredos locais
+supabase/.temp/
+supabase/.branches/
+.env
+*.env
+# cópias da D1 (copiar-d1.mjs): têm os dados dos clientes
+d1-*.json
+d1-*.sql
