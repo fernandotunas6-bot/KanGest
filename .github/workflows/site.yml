@@ -87,9 +87,15 @@ jobs:
             sleep 10
           done
           echo "$pagina" | grep -q "KanGest $versao" || { echo "::error::kangest.pages.dev não mostra a versão $versao."; exit 1; }
+          # a página já podia mostrar esta versão de uma publicação anterior: espera-se por cada ficheiro da nova (a
+          # Cloudflare demora uns segundos a espalhá-la), com ?v= para não receber um 404 guardado em cache
           for f in kangest-atualizacao.json "KanGest_${versao}_x64-setup.exe" "KanGest_${versao}_aarch64.dmg" "KanGest_${versao}_x64.dmg"; do
-            curl -fsSIL "https://kangest.pages.dev/actualizacoes/$f" > /dev/null || { echo "::error::O site não tem /actualizacoes/$f."; exit 1; }
+            for i in $(seq 1 12); do
+              if curl -fsSIL "https://kangest.pages.dev/actualizacoes/$f?v=$GITHUB_SHA" > /dev/null; then break; fi
+              sleep 10
+            done
+            curl -fsSIL "https://kangest.pages.dev/actualizacoes/$f?v=$GITHUB_SHA" > /dev/null || { echo "::error::O site não tem /actualizacoes/$f."; exit 1; }
           done
-          curl -fsSL https://kangest.pages.dev/actualizacoes/kangest-atualizacao.json | grep -q "\"versao\": *\"$versao\"" || { echo "::error::O manifesto do site não é da versão $versao."; exit 1; }
+          curl -fsSL "https://kangest.pages.dev/actualizacoes/kangest-atualizacao.json?v=$GITHUB_SHA" | grep -q "\"versao\": *\"$versao\"" || { echo "::error::O manifesto do site não é da versão $versao."; exit 1; }
           curl -fsSIL https://kangest.pages.dev/ | grep -qi "^content-security-policy:" || { echo "::error::Sem os cabeçalhos de segurança (_headers)."; exit 1; }
           echo "Site publicado com a versão $versao, os instaladores e as actualizações, e os cabeçalhos de segurança."
