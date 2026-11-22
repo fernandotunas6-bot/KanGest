@@ -16,12 +16,6 @@ Segredos (nunca no repositório):
   ~/.kangest-licencas/servidor/admin-token.txt  chave do painel /admin (criada aqui se não existir)
   ~/.kangest-licencas/servidor/admin-email.txt e admin-senha.txt  entrada no painel com email e senha (resumo PBKDF2)
 O token precisa de «Workers Scripts · Edit» e «D1 · Edit».
-
-Passagem para o Supabase (fase 4, docs/ARQUITETURA.md), depois de copiar os dados da D1:
-    python3 scripts/publicar-licencas.py --encaminhar https://<projecto>.supabase.co/functions/v1/kangest
-O Worker passa a só encaminhar os pedidos para a função (servidor-licencas/src/encaminhar.js), com o segredo
-~/.kangest-licencas/servidor/encaminhador-segredo.txt (criado aqui; o mesmo vai para a função). A partir daí, publicar
-sem --encaminhar recusa-se: voltava a pôr o worker.js a escrever na D1.
 """
 import json, os, secrets, ssl, subprocess, sys, urllib.error, urllib.request, uuid
 from pathlib import Path
@@ -79,44 +73,11 @@ def multipart(partes):
     return corpo, f"multipart/form-data; boundary={fronteira}"
 
 
-def encaminhar(token, conta, novo, marca):
-    """O Worker passa a encaminhar para a função kangest do Supabase (servidor-licencas/src/encaminhar.js)."""
-    if not novo.startswith("https://"):
-        sys.exit("--encaminhar precisa do endereço da função: https://<projecto>.supabase.co/functions/v1/kangest")
-    sf = PASTA / "encaminhador-segredo.txt"
-    if not sf.exists():
-        PASTA.mkdir(parents=True, exist_ok=True)
-        sf.write_text(secrets.token_urlsafe(32) + "\n")
-        sf.chmod(0o600)
-        print(f"Segredo do encaminhamento criado em {sf}.")
-    # o segredo primeiro: assim o código novo já arranca com ele
-    api("PUT", f"/accounts/{conta}/workers/scripts/{NOME}/secrets", token,
-        {"name": "ENCAMINHADOR_SEGREDO", "text": sf.read_text().strip(), "type": "secret_text"})
-    metadados = {"main_module": "encaminhar.js", "compatibility_date": DATA_COMPAT,
-                 "bindings": [{"type": "plain_text", "name": "NOVO_SERVIDOR", "text": novo}], "keep_bindings": ["secret_text"]}
-    corpo, tipo = multipart([
-        ("metadata", None, "application/json", json.dumps(metadados).encode()),
-        ("encaminhar.js", "encaminhar.js", "application/javascript+module", (RAIZ / "src/encaminhar.js").read_bytes()),
-    ])
-    api("PUT", f"/accounts/{conta}/workers/scripts/{NOME}", token, corpo, tipo)
-    marca.write_text(novo + "\n")
-    print(f"O Worker {NOME} passou a encaminhar para {novo}.\n"
-          f"Na função, o mesmo segredo: supabase secrets set ENCAMINHADOR_SEGREDO=\"$(cat {sf})\"")
-
-
 def main():
     a = sys.argv[1:]
     token = os.environ.get("CLOUDFLARE_API_TOKEN") or sys.exit("Falta CLOUDFLARE_API_TOKEN.")
     conta = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or api("GET", "/accounts", token)[0]["id"]
     opc = lambda n: a[a.index(n) + 1] if n in a else None
-
-    # 0. depois da passagem para o Supabase, o Worker só encaminha
-    marca = PASTA / "encaminhar.txt"
-    if "--encaminhar" in a:
-        return encaminhar(token, conta, (opc("--encaminhar") or "").strip().rstrip("/"), marca)
-    if marca.exists():
-        sys.exit(f"O servidor de licenças já passou para o Supabase: o Worker só encaminha para {marca.read_text().strip()}.\n"
-                 "Publicar aqui o worker.js voltava a pô-lo a escrever na D1. Para mudar o encaminhamento: --encaminhar <endereço>.")
 
     # 1. painel gerado a partir do HTML
     subprocess.run(["node", str(RAIZ / "construir.mjs")], check=True)

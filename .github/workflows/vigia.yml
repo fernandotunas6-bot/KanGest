@@ -1,6 +1,5 @@
-# Vigia do backend central e do site (docs/ARQUITETURA.md): de 6 em 6 horas confirma que respondem. Se algum falhar, a
-# execução falha e o GitHub avisa por email. Também mantém activo o projecto do Supabase, que no plano gratuito pára ao
-# fim de 7 dias sem actividade: cada verificação lê os planos da base de dados.
+# Vigia do servidor de licenças e do site (docs/ARQUITETURA.md): de 6 em 6 horas confirma que respondem. Se algum falhar,
+# a execução falha e o GitHub avisa por email.
 name: Vigia
 
 on:
@@ -21,14 +20,15 @@ jobs:
           sparse-checkout: site-fonte/config.json
           sparse-checkout-cone-mode: false
 
-      - name: Servidor de licenças (função kangest no Supabase)
+      - name: Servidor de licenças (Worker e D1 na Cloudflare)
         run: |
           U=$(jq -r .web.licencas site-fonte/config.json)
           curl -fsS --retry 3 --retry-delay 10 --max-time 30 "$U/" | grep -q '"servico"'
           curl -fsS --retry 3 --retry-delay 10 --max-time 30 "$U/v1/planos" | grep -q '"ok":true'
 
-      - name: Worker antigo (as versões até 1.3.4 falam com ele)
-        run: curl -fsS --retry 3 --retry-delay 10 --max-time 30 https://kangest-licencas.valentinocanguele.workers.dev/v1/planos | grep -q '"ok":true'
+      # temporário: os KanGest 1.4.0 falam com o encaminhamento no Supabase (servidor-licencas/encaminhamento-supabase)
+      - name: Encaminhamento no Supabase (KanGest 1.4.0)
+        run: curl -fsS --retry 3 --retry-delay 10 --max-time 30 https://fissktkxilseymadzppn.supabase.co/functions/v1/kangest/v1/planos | grep -q '"ok":true'
 
       - name: Site
         run: |
