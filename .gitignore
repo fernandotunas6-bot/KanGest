@@ -10,3 +10,5 @@ src-tauri/gen/
 *.kigest
 *.kigest.parcial
 scripts/selo/target/
+# instaladores juntados ao site pela GitHub Actions (site.yml): não se guardam no repositório
+site/actualizacoes/

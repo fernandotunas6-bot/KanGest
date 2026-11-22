@@ -125,6 +125,9 @@ def cabecalhos(scripts_em_linha, site, licencas):
 
 def main():
     cfg = json.loads((FONTE / "config.json").read_text())
+    # os instaladores ficam no próprio site (a GitHub Actions junta-os em site/actualizacoes ao publicar):
+    # «/actualizacoes/KanGest_{versao}_x64-setup.exe» leva a versão do site
+    cfg["downloads"] = {k: v.replace("{versao}", cfg["versao"]) if isinstance(v, str) else v for k, v in cfg["downloads"].items()}
     base = (FONTE / "base.html").read_text()
     css, js = (FONTE / "estilo.css").read_text(), (FONTE / "site.js").read_text()
     versao_ficheiros = hashlib.sha256((css + js).encode()).hexdigest()[:8]

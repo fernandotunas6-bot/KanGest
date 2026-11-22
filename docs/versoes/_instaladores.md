@@ -8,4 +8,4 @@
 
 - Guia de instalação, postos em rede e actualizações: [docs/INSTALACAO.md](https://github.com/fernandotunas6-bot/KanGest/blob/main/docs/INSTALACAO.md).
 - Para conferir um ficheiro descarregado, compare o SHA-256 com o de `SHA256SUMS.txt`: `certutil -hashfile <ficheiro> SHA256` (Windows) ou `shasum -a 256 <ficheiro>` (macOS).
-- Actualizações automáticas: em Sistema → Sobre o KanGest → Actualizações, origem `https://github.com/fernandotunas6-bot/KanGest/releases/latest/download` (manifesto `kangest-atualizacao.json`).
+- Actualizações automáticas: em Sistema → Sobre o KanGest → Actualizações, origem `https://kangest.pages.dev/actualizacoes` (manifesto `kangest-atualizacao.json`).
