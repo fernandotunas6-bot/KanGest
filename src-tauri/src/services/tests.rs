@@ -5734,6 +5734,29 @@ async fn aparelhos_com_sessao() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// «Conta diferente» (como no Claude): com a sessão de uma pessoa no aparelho, entrar com outra conta pede a troca
+/// explícita, antes do código de dois passos; confirmada, fica na auditoria. A mesma pessoa entra sem perguntas.
+#[tokio::test]
+async fn conta_diferente_pede_troca() {
+    let (st, pasta) = base_com_admin("conta-diferente").await;
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Maria Caixa", "login": "maria", "perfil": "CAIXA", "senha": "Maria-2026", "mudar_senha": false })).await;
+    // o admin está com sessão neste aparelho; a Maria tenta entrar
+    let erro = rpc_err(&st, "auth.login", json!({ "login": "maria", "senha": "Maria-2026" })).await;
+    assert!(erro.starts_with("Conta diferente: este aparelho tem a sessão de Admin"), "{erro}");
+    assert_eq!(st.sessao().unwrap().login, "admin", "sem confirmar, nada muda");
+    // senha errada não revela a sessão de ninguém
+    assert!(!rpc_err(&st, "auth.login", json!({ "login": "maria", "senha": "errada" })).await.contains("Conta diferente"));
+    // confirmada a troca
+    rpc(&st, "auth.login", json!({ "login": "maria", "senha": "Maria-2026", "trocar": true })).await;
+    assert_eq!(st.sessao().unwrap().login, "maria");
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM acessos WHERE evento = 'CONTA_TROCADA'").fetch_one(&st.pool).await.unwrap_or(1);
+    assert_eq!(n, 1, "a troca fica registada");
+    // a mesma pessoa volta a entrar sem perguntas
+    rpc(&st, "auth.login", json!({ "login": "maria", "senha": "Maria-2026" })).await;
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 /// referência, tipo, motivo de isenção, % IVA, preço, PVP, controla stock, unidade
 type ArtigoBaseLido = (String, String, Option<String>, f64, i64, i64, i64, String);
 
