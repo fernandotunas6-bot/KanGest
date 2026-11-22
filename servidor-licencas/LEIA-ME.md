@@ -7,6 +7,7 @@ experiência uma vez por NIF, guarda os pagamentos e entrega as licenças (`KG1.
 |---|---|
 | `src/worker.js` | API pública (`/v1/registo`, `/v1/confirmar`, `/v1/renovar`, `/v1/planos`) e do painel (`/admin/api/…`) |
 | `src/painel.html` | Painel do produtor (`/admin`). **Depois de o alterar:** `node construir.mjs` gera `src/painel.js` |
+| `src/encaminhar.js` | O Worker depois da passagem para o Supabase (fase 4): encaminha tudo para a função `kangest` (`publicar-licencas.py --encaminhar`) |
 | `schema.sql` | Tabelas (planos, clientes, maquinas, codigos, licencas, pagamentos). Só `CREATE … IF NOT EXISTS` |
 | `teste/testar.mjs` | Teste completo sem rede (D1 imitado com `node:sqlite`) |
 | `teste/contas.mjs` | Contas das empresas no site e equipa gerida |

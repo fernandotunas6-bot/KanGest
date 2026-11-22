@@ -6,3 +6,6 @@ supabase/.temp/
 supabase/.branches/
 .env
 *.env
+# cópias da D1 (copiar-d1.mjs): têm os dados dos clientes
+d1-*.json
+d1-*.sql

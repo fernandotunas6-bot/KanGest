@@ -4,7 +4,8 @@
   "description": "Backend central do KanGest no Supabase: migrações, função kangest e testes em Postgres (PGlite).",
   "scripts": {
     "preparar": "node preparar.mjs",
-    "testar": "node teste/consultas.mjs && node teste/funcao.mjs && KANGEST_BD=postgres node ../servidor-licencas/teste/contas.mjs"
+    "testar": "node teste/consultas.mjs && node teste/funcao.mjs && node teste/copia.mjs && KANGEST_BD=postgres node ../servidor-licencas/teste/contas.mjs",
+    "copiar-d1": "node copiar-d1.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.15",

@@ -113,6 +113,8 @@ Os mesmos nomes no Worker (`wrangler secret put`) e na função (`supabase secre
 | `WEB_DOMINIO`, `CF_API_TOKEN`, `CF_CONTA`, `CF_ZONA` | acesso pela Internet (túneis e DNS na Cloudflare) | não |
 | `ACCESS_EQUIPA`, `ACCESS_AUD` | Cloudflare Access à frente do painel (só no Worker) | não |
 | `SUPABASE_DB_URL` | ligação ao Postgres (o Supabase define-a sozinho) | — |
+| `ENCAMINHADOR_SEGREDO` | o mesmo na função e no Worker antigo depois da fase 4: a função só aceita o IP e o país que o Worker lhe diz quando o segredo está certo | na fase 4 |
+| `NOVO_SERVIDOR` | só no Worker antigo depois da fase 4: o endereço da função para onde encaminha | na fase 4 |
 
 ## 4. Convenções
 
@@ -163,10 +165,13 @@ Os mesmos nomes no Worker (`wrangler secret put`) e na função (`supabase secre
 | 1 | Este documento | feito |
 | 2 | Esquemas e tabelas (migração em `servidor-central/supabase/migrations`) | preparada e testada em Postgres local; aplica-se quando houver acesso ao projecto |
 | 3 | Função `kangest`: o mesmo `worker.js`, as mesmas rotas | preparada e testada em Postgres local; publica-se quando houver acesso ao projecto |
-| 4 | Copiar os dados da D1 e pôr o Worker antigo a encaminhar os pedidos para o endereço novo | por fazer |
+| 4 | Copiar os dados da D1 (`servidor-central/copiar-d1.mjs`) e pôr o Worker antigo a encaminhar os pedidos para o endereço novo (`servidor-licencas/src/encaminhar.js`, com `publicar-licencas.py --encaminhar`) | preparada e testada em Postgres local; faz-se depois da fase 3 |
 | 5 | O site e uma versão nova do KanGest com o endereço novo | por fazer |
 
+O roteiro das fases 3 a 5, comando a comando, está no [LEIA-ME do servidor-central](../servidor-central/LEIA-ME.md).
+
 O Worker antigo continua de pé até todos os KanGest instalados terem a versão com o endereço novo. Até lá, só
-encaminha os pedidos.
+encaminha os pedidos. Leva o IP e o país de quem pediu em cabeçalhos próprios, que a função só aceita com o
+`ENCAMINHADOR_SEGREDO`.
 
 A seguir: `seguranca.auditoria`, com o registo do que o produtor e os donos das empresas mudam.

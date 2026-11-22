@@ -90,10 +90,11 @@ jobs:
           node servidor-licencas/teste/testar.mjs
           node servidor-licencas/teste/contas.mjs
 
-      - name: Consultas nos dois motores e a função de ponta a ponta
+      - name: Consultas nos dois motores, a função de ponta a ponta e a cópia da D1
         run: |
           node servidor-central/teste/consultas.mjs
           node servidor-central/teste/funcao.mjs
+          node servidor-central/teste/copia.mjs
 
       - uses: denoland/setup-deno@v2
         with:

@@ -11,9 +11,11 @@ const { adaptarPedido, criarEnv, ipDe, tratar } = await import("../supabase/func
 
 const { privateKey, publicKey } = generateKeyPairSync("ed25519");
 const ADMIN = "c".repeat(40);
+const SEGREDO_ENCAMINHADOR = "e".repeat(43);
 const variaveis = {
   CHAVE_PRIVADA: privateKey.export({ type: "pkcs8", format: "pem" }),
   ADMIN_TOKEN: ADMIN,
+  ENCAMINHADOR_SEGREDO: SEGREDO_ENCAMINHADOR,
   ACCESS_EQUIPA: "equipa.cloudflareaccess.com", // definidas por engano no Supabase: não podem fechar a área do produtor
   ACCESS_AUD: "aud",
   RESEND_API_KEY: "", // vazia = sem envio de email: o código fica para o produtor dar
@@ -111,6 +113,57 @@ assert.equal((await pedir("POST", "/v1/registo", { nif: "x" }, null, { "content-
 // o limite por IP usou o IP do X-Forwarded-For
 const chaves = (await DB.prepare("SELECT chave FROM limites ORDER BY chave").all()).results.map((l) => l.chave);
 assert.ok(chaves.includes(`registo:${IP}`) && chaves.includes(`confirmar:${IP}`) && chaves.includes(`renovar:${IP}`), chaves.join(", "));
+
+// fase 4: o Worker antigo (encaminhar.js) passa os pedidos à função; o IP e o país de quem pediu seguem com o segredo
+{
+  const { default: encaminhar } = await import("../../servidor-licencas/src/encaminhar.js");
+  const fetchOriginal = globalThis.fetch;
+  const vistos = [];
+  globalThis.fetch = async (url, init) => {
+    const r = new Request(url, init);
+    vistos.push(r.clone());
+    return tratar(r, env);
+  };
+  const ENV_WORKER = { NOVO_SERVIDOR: "https://projecto.supabase.co/functions/v1/kangest/", ENCAMINHADOR_SEGREDO: SEGREDO_ENCAMINHADOR };
+  const peloAntigo = (caminho, corpo, { pais, token } = {}) => {
+    const r = new Request("https://kangest-licencas.exemplo.workers.dev" + caminho, {
+      method: corpo ? "POST" : "GET",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "KanGest/1.4.0",
+        "cf-connecting-ip": "203.0.113.77",
+        "x-kangest-ip": "6.6.6.6", // inventado por quem pede: o Worker substitui-o
+        ...(token ? { authorization: "Bearer " + token } : {}),
+      },
+      body: corpo ? JSON.stringify(corpo) : undefined,
+    });
+    if (pais) Object.defineProperty(r, "cf", { value: { country: pais } });
+    return encaminhar.fetch(r, ENV_WORKER);
+  };
+  const pl = await peloAntigo("/v1/planos?x=1");
+  assert.equal(pl.status, 200); assert.equal((await pl.json()).planos.length, 3);
+  assert.equal(new URL(vistos[0].url).pathname + new URL(vistos[0].url).search, "/functions/v1/kangest/v1/planos?x=1");
+  assert.equal(vistos[0].headers.get("x-kangest-ip"), "203.0.113.77", "o IP verdadeiro, não o que quem pede inventou");
+  await peloAntigo("/v1/registo", { nif: "5000000003", empresa: "Outra Loja", email: "outra@exemplo.test", maquina: "ABCD-1234-EF57" });
+  assert.equal((await DB.prepare("SELECT n FROM limites WHERE chave = ?").bind("registo:203.0.113.77").first())?.n, 1, "o limite conta no IP de quem pediu");
+  const tk = (await (await peloAntigo("/v1/conta/entrar", { email: "loja@exemplo.test", senha: "Senha-de-teste-2026" }, { pais: "PT" })).json()).token;
+  assert.equal((await (await peloAntigo("/v1/conta/sessoes", null, { token: tk })).json()).sessoes[0].local, "PT", "o país chega às sessões");
+  const adm = await peloAntigo("/admin");
+  assert.equal(adm.status, 302); assert.equal(adm.headers.get("location"), "https://kangest.pages.dev/admin.html");
+  // sem o segredo certo, a função ignora os cabeçalhos do encaminhador e usa o IP que o Supabase lhe dá
+  await tratar(new Request("https://projecto.supabase.co/kangest/v1/registo", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.99", "x-kangest-encaminhador": "errado", "x-kangest-ip": "6.6.6.6" },
+    body: JSON.stringify({ nif: "5000000004", empresa: "Mais Uma", email: "mais@exemplo.test", maquina: "ABCD-1234-EF58" }),
+  }), env);
+  const lim = (await DB.prepare("SELECT chave FROM limites").all()).results.map((l) => l.chave);
+  assert.ok(lim.includes("registo:198.51.100.99") && !lim.some((c) => c.includes("6.6.6.6")), lim.join(", "));
+  // a função em baixo: 502; sem endereço novo configurado: 503
+  globalThis.fetch = async () => { throw new Error("sem rede"); };
+  assert.equal((await peloAntigo("/v1/planos")).status, 502);
+  assert.equal((await encaminhar.fetch(new Request("https://x.workers.dev/v1/planos"), {})).status, 503);
+  globalThis.fetch = fetchOriginal;
+}
 
 await DB.fechar();
 console.log("Função kangest: todos os testes passaram (Postgres).");
