@@ -175,3 +175,13 @@ CREATE TABLE IF NOT EXISTS sessoes_conta (
     terminada_em TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessoes_conta_nif ON sessoes_conta (nif, terminada_em);
+
+-- A equipa, as lojas e os postos que o KanGest de cada computador comunicou (só login, nome, perfil, loja, activo, dois
+-- passos e último acesso; nunca senhas nem contactos), para a secção «Equipa» da conta da empresa.
+CREATE TABLE IF NOT EXISTS equipas (
+    nif TEXT NOT NULL,
+    maquina TEXT NOT NULL,
+    recebido_em TEXT NOT NULL,
+    dados TEXT NOT NULL,
+    PRIMARY KEY (nif, maquina)
+);

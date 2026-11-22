@@ -421,6 +421,22 @@ async function renovar(env, c) {
 
 const dataOuNull = (v) => (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$/.test(String(v ?? "")) ? String(v) : null);
 
+/** A equipa que o KanGest manda: só os campos conhecidos, com limites (o resto, se viesse, não se guarda). */
+export function limparEquipa(e) {
+  if (!e || typeof e !== "object" || Array.isArray(e)) return null;
+  const lista = (v, n) => (Array.isArray(v) ? v.slice(0, n).filter((x) => x && typeof x === "object") : []);
+  const data = (v) => dataOuNull(String(v ?? "").replace(" ", "T"));
+  return {
+    utilizadores: lista(e.utilizadores, 500).map((u) => ({
+      login: texto(u.login, 40), nome: texto(u.nome, 80), perfil: texto(u.perfil, 20), ativo: u.ativo === true,
+      loja: texto(u.loja, 60) || null, dois_passos: u.dois_passos === true, ultimo_acesso: data(u.ultimo_acesso),
+    })),
+    perfis: lista(e.perfis, 50).map((p) => ({ codigo: texto(p.codigo, 20), descricao: texto(p.descricao, 60) })),
+    lojas: lista(e.lojas, 200).map((l) => ({ nome: texto(l.nome, 60), ativo: l.ativo === true })),
+    postos: lista(e.postos, 200).map((p) => ({ descricao: texto(p.descricao, 60), loja: texto(p.loja, 60) || null })),
+  };
+}
+
 /** O estado que o KanGest manda na verificação (versões antigas não mandam nada: fica o que havia). */
 export async function guardarEstado(env, nif, maquina, c) {
   const e = c?.estado;
@@ -437,6 +453,13 @@ export async function guardarEstado(env, nif, maquina, c) {
     .bind(nif, maquina, agora(), texto(c.versao, 20) || null, texto(e.modo, 12) || null, texto(lic.estado, 20) || null,
       dataOuNull(lic.fim), dataOuNull(cop.ultima), dataOuNull(cop.ultima_externa), cop.erro_externa ? 1 : 0)
     .run();
+  const equipa = limparEquipa(e.equipa);
+  if (equipa) {
+    await env.DB.prepare(
+      `INSERT INTO equipas (nif, maquina, recebido_em, dados) VALUES (?, ?, ?, ?)
+       ON CONFLICT (nif, maquina) DO UPDATE SET recebido_em = excluded.recebido_em, dados = excluded.dados`,
+    ).bind(nif, maquina, agora(), JSON.stringify(equipa)).run();
+  }
 }
 
 async function planosPublicos(env) {
@@ -840,7 +863,7 @@ async function sessaoConta(env, req) {
 async function contaResumo(env, s) {
   const cli = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(s.nif).first();
   if (!cli) throw new Falha("Empresa não encontrada.", 404);
-  const [conta, maquinas, licencas, pagamentos, planos] = await env.DB.batch([
+  const [conta, maquinas, licencas, pagamentos, planos, equipas] = await env.DB.batch([
     env.DB.prepare("SELECT email, criada_em FROM contas WHERE nif = ?").bind(s.nif),
     env.DB.prepare(
       `SELECT m.maquina, m.versao, m.primeiro_contacto, m.ultimo_contacto, m.bloqueada, i.modo, i.licenca_estado, i.licenca_fim,
@@ -850,8 +873,10 @@ async function contaResumo(env, s) {
     env.DB.prepare("SELECT id, maquina, plano, postos, inicio, fim, emitida_em, origem, chave FROM licencas WHERE nif = ? ORDER BY emitida_em DESC LIMIT 20").bind(s.nif),
     env.DB.prepare("SELECT registado_em, plano, meses, valor, metodo, referencia, pago_ate FROM pagamentos WHERE nif = ? ORDER BY id DESC LIMIT 50").bind(s.nif),
     env.DB.prepare("SELECT codigo, nome, postos, preco_mes, preco_ano FROM planos WHERE activo = 1 ORDER BY ordem"),
+    env.DB.prepare("SELECT maquina, recebido_em, dados FROM equipas WHERE nif = ? ORDER BY recebido_em DESC LIMIT 1").bind(s.nif),
   ]);
   const c = conta.results[0] ?? {};
+  const eq = equipas.results[0];
   return {
     ok: true,
     hoje: hoje(),
@@ -860,6 +885,7 @@ async function contaResumo(env, s) {
       plano: cli.plano, pago_ate: cli.pago_ate, experiencia_ate: cli.experiencia_ate, maquinas_max: cli.maquinas_max, conta_desde: c.criada_em,
     },
     maquinas: maquinas.results, licencas: licencas.results, pagamentos: pagamentos.results, planos: planos.results,
+    equipa: eq ? { ...JSON.parse(eq.dados), maquina: eq.maquina, recebido_em: eq.recebido_em } : null,
   };
 }
 

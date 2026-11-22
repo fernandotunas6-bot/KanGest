@@ -123,6 +123,7 @@
         <button data-aba="conta" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Conta</button>
         <button data-aba="cobranca"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>Cobrança</button>
         <button data-aba="uso"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Uso</button>
+        <button data-aba="equipa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>Equipa</button>
         <button data-aba="seguranca"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Segurança</button>
       </nav>
       <div>
@@ -149,6 +150,14 @@
           <h2>Computadores</h2>
           <p class="fraco">O que o KanGest de cada computador comunicou na última verificação (de 12 em 12 horas, com internet).</p>
           <div class="tabela"><table><thead><tr><th>Computador</th><th>Versão</th><th>Licença</th><th>Cópia local</th><th>Cópia externa</th><th>Último contacto</th></tr></thead><tbody id="t-maquinas"></tbody></table></div>
+        </section>
+
+        <section data-painel="equipa" class="cartao" hidden>
+          <h2>Funcionários</h2>
+          <p class="fraco" id="e-origem">Como o KanGest os comunicou na última verificação. Para já, criar e alterar faz-se no programa (Sistema → Utilizadores).</p>
+          <div class="tabela"><table><thead><tr><th>Nome</th><th>Login</th><th>Perfil</th><th>Loja</th><th>Dois passos</th><th>Último acesso</th></tr></thead><tbody id="t-equipa"></tbody></table></div>
+          <div class="titulo-linha"><h2>Lojas e postos</h2></div>
+          <div class="tabela"><table><thead><tr><th>Loja</th><th>Postos</th></tr></thead><tbody id="t-lojas"></tbody></table></div>
         </section>
 
         <section data-painel="seguranca" class="cartao" hidden>
@@ -245,6 +254,16 @@ async function carregar() {
     <td>${esc(m.versao || "—")}</td><td>${m.licenca_estado ? `${selo(m.licenca_estado)}<div class="fraco">até ${dmy(m.licenca_fim)}</div>` : "—"}</td>
     <td>${copia(m.copia_ultima, m.recebido_em)}</td><td>${m.copia_externa_erro ? '<span class="selo s-mau">A falhar</span>' : m.copia_externa_ultima ? copia(m.copia_externa_ultima, m.recebido_em) : '<span class="fraco">não configurada</span>'}</td>
     <td>${quando(m.ultimo_contacto)}</td></tr>`).join("") || '<tr><td colspan="6" class="vazio">Ainda nenhum computador comunicou.</td></tr>';
+  const eq = dados.equipa;
+  const perfil = (c) => eq?.perfis.find((p) => p.codigo === c)?.descricao || c;
+  $("#e-origem").textContent = eq ? `Como o KanGest os comunicou a ${quando(eq.recebido_em)} (computador ${eq.maquina}). Para já, criar e alterar faz-se no programa (Sistema → Utilizadores).`
+    : "Aparecem aqui depois da próxima verificação do KanGest 1.4 ou mais recente (de 12 em 12 horas, com internet).";
+  $("#t-equipa").innerHTML = (eq?.utilizadores ?? []).map((u) => `<tr><td><b>${esc(u.nome)}</b>${u.ativo ? "" : ' <span class="selo s-mau">Inactivo</span>'}</td><td class="mono">${esc(u.login)}</td>
+    <td>${esc(perfil(u.perfil))}</td><td>${esc(u.loja || "Todas")}</td><td>${u.dois_passos ? '<span class="selo s-ok">Activos</span>' : '<span class="fraco">Não</span>'}</td><td>${quando(u.ultimo_acesso)}</td></tr>`).join("")
+    || '<tr><td colspan="6" class="vazio">Sem funcionários comunicados.</td></tr>';
+  $("#t-lojas").innerHTML = (eq?.lojas ?? []).map((l) => `<tr><td><b>${esc(l.nome)}</b>${l.ativo ? "" : ' <span class="selo s-mau">Inactiva</span>'}</td>
+    <td>${eq.postos.filter((p) => p.loja === l.nome).map((p) => esc(p.descricao)).join(", ") || '<span class="fraco">—</span>'}</td></tr>`).join("")
+    || '<tr><td colspan="2" class="vazio">Sem lojas comunicadas.</td></tr>';
 }
 
 async function desenharSessoes() {

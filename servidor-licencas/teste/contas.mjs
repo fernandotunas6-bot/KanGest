@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { d1Local } from "./d1-local.mjs";
-import worker from "../src/worker.js";
+import worker, { guardarEstado } from "../src/worker.js";
 
 const ADMIN = "b".repeat(40);
 const env = { DB: d1Local(readFileSync(new URL("../schema.sql", import.meta.url), "utf8")), ADMIN_TOKEN: ADMIN };
@@ -68,6 +68,23 @@ assert.equal((await get("resumo", ADMIN)).estado, 401, "a chave do produtor não
 const [v, dados, ass] = t1.split(".");
 const outra = `${v}.${Buffer.from(JSON.stringify({ n: "5000000002", exp: Date.now() + 9e9, s: "x" })).toString("base64url")}.${ass}`;
 assert.equal((await get("resumo", outra)).estado, 401, "não se troca de empresa mexendo no token");
+
+// a equipa que o KanGest comunicou: só os campos conhecidos (o que viesse a mais não se guarda)
+assert.equal(res.equipa, null, "antes de o KanGest comunicar, não há equipa");
+await guardarEstado(env, NIF, "AAAA-BBBB-CCCC", { versao: "1.4.0", estado: { equipa: {
+  utilizadores: [
+    { login: "admin", nome: "Administrador", perfil: "ADMIN", ativo: true, loja: null, dois_passos: true, ultimo_acesso: "2026-11-22 09:10:00", senha_hash: "$argon2id$segredo", pin: "1234" },
+    { login: "caixa1", nome: "Operador de Caixa", perfil: "CAIXA", ativo: false, loja: "Loja Centro", dois_passos: false, ultimo_acesso: null, email: "x@y.test" },
+  ],
+  perfis: [{ codigo: "ADMIN", descricao: "Administrador" }, { codigo: "CAIXA", descricao: "Caixa" }],
+  lojas: [{ nome: "Loja Centro", ativo: true }],
+  postos: [{ descricao: "Caixa 1", loja: "Loja Centro" }],
+} } });
+const eq = (await get("resumo", t1)).corpo.equipa;
+assert.equal(eq.utilizadores.length, 2); assert.equal(eq.utilizadores[0].ultimo_acesso, "2026-11-22T09:10:00");
+assert.equal(eq.utilizadores[1].ativo, false); assert.equal(eq.postos[0].loja, "Loja Centro"); assert.equal(eq.maquina, "AAAA-BBBB-CCCC");
+const textoEq = JSON.stringify(eq);
+assert.ok(!textoEq.includes("argon") && !textoEq.includes("1234") && !textoEq.includes("x@y.test"), "senhas, PIN e emails nunca se guardam");
 
 // perfil
 assert.equal((await post("perfil", { telefone: "923 111 222" }, t1)).estado, 200);
