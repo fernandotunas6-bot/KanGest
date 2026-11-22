@@ -14,7 +14,8 @@
 //
 // Variáveis: DB (D1), CHAVE_PRIVADA (secreto, PEM pkcs8 Ed25519), ADMIN_TOKEN (secreto),
 //            RESEND_API_KEY + EMAIL_REMETENTE (opcionais: sem eles, o código aparece no painel),
-//            ACCESS_EQUIPA + ACCESS_AUD (opcionais: o painel só responde a quem passou pelo Cloudflare Access).
+//            ACCESS_EQUIPA + ACCESS_AUD (opcionais: o painel só responde a quem passou pelo Cloudflare Access),
+//            ADMIN_ORIGENS (opcional: origens da área do produtor no site; por omissão https://kangest.pages.dev).
 // Protecção: limite de pedidos por IP e por hora (tabela «limites»), Cloudflare Access à frente do painel,
 //            cabeçalhos de segurança em todas as respostas.
 // As licenças têm o mesmo formato do scripts/licencas/kangest-licencas.mjs: «KG1.<json base64url>.<assinatura>».
@@ -411,8 +412,29 @@ async function renovar(env, c) {
   const { nif, maquina } = await autenticarMaquina(env, c, false);
   await env.DB.prepare("UPDATE maquinas SET ultimo_contacto = ?, versao = COALESCE(?, versao) WHERE nif = ? AND maquina = ?")
     .bind(agora(), texto(c.versao, 20) || null, nif, maquina).run();
+  await guardarEstado(env, nif, maquina, c);
   const cliente = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(nif).first();
   return { ok: true, ...(await licencaActual(env, cliente, maquina)) };
+}
+
+const dataOuNull = (v) => (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$/.test(String(v ?? "")) ? String(v) : null);
+
+/** O estado que o KanGest manda na verificação (versões antigas não mandam nada: fica o que havia). */
+export async function guardarEstado(env, nif, maquina, c) {
+  const e = c?.estado;
+  if (!e || typeof e !== "object" || Array.isArray(e)) return;
+  const lic = e.licenca && typeof e.licenca === "object" ? e.licenca : {};
+  const cop = e.copias && typeof e.copias === "object" ? e.copias : {};
+  await env.DB.prepare(
+    `INSERT INTO instalacoes (nif, maquina, recebido_em, versao, modo, licenca_estado, licenca_fim, copia_ultima, copia_externa_ultima, copia_externa_erro)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (nif, maquina) DO UPDATE SET recebido_em = excluded.recebido_em, versao = excluded.versao, modo = excluded.modo,
+       licenca_estado = excluded.licenca_estado, licenca_fim = excluded.licenca_fim, copia_ultima = excluded.copia_ultima,
+       copia_externa_ultima = excluded.copia_externa_ultima, copia_externa_erro = excluded.copia_externa_erro`,
+  )
+    .bind(nif, maquina, agora(), texto(c.versao, 20) || null, texto(e.modo, 12) || null, texto(lic.estado, 20) || null,
+      dataOuNull(lic.fim), dataOuNull(cop.ultima), dataOuNull(cop.ultima_externa), cop.erro_externa ? 1 : 0)
+    .run();
 }
 
 async function planosPublicos(env) {
@@ -603,7 +625,7 @@ const estadoCliente = (c, dia = hoje()) =>
     : c.experiencia_ate && c.experiencia_ate >= dia ? "EXPERIENCIA" : "EXPIRADA";
 
 async function resumo(env) {
-  const [planos, clientes, codigos, pagamentos] = await env.DB.batch([
+  const [planos, clientes, codigos, pagamentos, semCopia] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM planos ORDER BY ordem"),
     env.DB.prepare(
       `SELECT c.*, (SELECT COUNT(*) FROM maquinas m WHERE m.nif = c.nif AND m.bloqueada = 0) AS maquinas,
@@ -612,6 +634,11 @@ async function resumo(env) {
     ),
     env.DB.prepare("SELECT nif, maquina, empresa, email, telefone, codigo_aberto, expira_em, tentativas, criado_em FROM codigos ORDER BY criado_em DESC LIMIT 100"),
     env.DB.prepare("SELECT p.*, c.empresa FROM pagamentos p LEFT JOIN clientes c ON c.nif = p.nif ORDER BY p.id DESC LIMIT 50"),
+    // computadores activos (contacto nos últimos 30 dias) sem cópia local há mais de 7 dias, ou com a cópia externa a falhar
+    env.DB.prepare(
+      `SELECT i.nif FROM instalacoes i JOIN maquinas m ON m.nif = i.nif AND m.maquina = i.maquina
+       WHERE m.bloqueada = 0 AND m.ultimo_contacto >= ? AND (i.copia_ultima IS NULL OR i.copia_ultima < ? OR i.copia_externa_erro = 1)`,
+    ).bind(somarDias(hoje(), -30), somarDias(hoje(), -7)),
   ]);
   const dia = hoje();
   return {
@@ -619,7 +646,8 @@ async function resumo(env) {
     hoje: dia,
     email_configurado: !!(env.RESEND_API_KEY && env.EMAIL_REMETENTE),
     planos: planos.results,
-    clientes: clientes.results.map((c) => ({ ...c, estado: estadoCliente(c, dia) })),
+    clientes: clientes.results.map((c) => ({ ...c, estado: estadoCliente(c, dia), sem_copia: semCopia.results.some((x) => x.nif === c.nif) })),
+    sem_copia: semCopia.results.length,
     codigos: codigos.results.map((c) => ({ ...c, expirado: Date.parse(c.expira_em) < Date.now() })),
     pagamentos: pagamentos.results,
   };
@@ -630,7 +658,11 @@ async function fichaCliente(env, nif) {
   const cliente = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(nif).first();
   if (!cliente) throw new Falha("Cliente não encontrado.", 404);
   const [maquinas, licencas, pagamentos] = await env.DB.batch([
-    env.DB.prepare("SELECT * FROM maquinas WHERE nif = ? ORDER BY ultimo_contacto DESC").bind(nif),
+    env.DB.prepare(
+      `SELECT m.*, i.recebido_em, i.modo, i.licenca_estado, i.licenca_fim, i.copia_ultima, i.copia_externa_ultima, i.copia_externa_erro
+       FROM maquinas m LEFT JOIN instalacoes i ON i.nif = m.nif AND i.maquina = m.maquina
+       WHERE m.nif = ? ORDER BY m.ultimo_contacto DESC`,
+    ).bind(nif),
     env.DB.prepare("SELECT id, maquina, plano, postos, inicio, fim, tolerancia, emitida_em, origem, chave FROM licencas WHERE nif = ? ORDER BY emitida_em DESC LIMIT 50").bind(nif),
     env.DB.prepare("SELECT * FROM pagamentos WHERE nif = ? ORDER BY id DESC").bind(nif),
   ]);
@@ -748,6 +780,11 @@ async function tratar(req, env) {
   const caminho = url.pathname.replace(/\/+$/, "") || "/";
   const m = req.method;
 
+  // a área do produtor no site (kangest.pages.dev/admin.html) usa a mesma API: o pedido prévio do browser não leva o token
+  if (m === "OPTIONS" && caminho.startsWith("/admin/api/")) {
+    const corsAdmin = origemAdmin(env, req);
+    return corsAdmin ? new Response(null, { status: 204, headers: corsAdmin }) : erro("Origem não autorizada.", 403);
+  }
   if (m === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (caminho === "/" && m === "GET") return json({ servico: "Licenças do KanGest", versao: VERSAO });
   if (caminho === "/v1/planos" && m === "GET") return json(await planosPublicos(env), 200, { ...CORS, "cache-control": "public, max-age=300" });
@@ -818,6 +855,24 @@ async function tratar(req, env) {
   return erro("Não encontrado.", 404);
 }
 
+/**
+ * Cabeçalhos CORS para a área do produtor no site, se o pedido vier de uma origem autorizada (ADMIN_ORIGENS, por omissão
+ * o site do KanGest). O token continua a ser exigido em cada pedido; isto só deixa o browser fazê-lo a partir do site.
+ */
+export function origemAdmin(env, req) {
+  const origem = req.headers.get("origin");
+  if (!origem) return null;
+  const permitidas = String(env.ADMIN_ORIGENS || "https://kangest.pages.dev").split(",").map((o) => o.trim().replace(/\/$/, "")).filter(Boolean);
+  if (!permitidas.includes(origem)) return null;
+  return {
+    "access-control-allow-origin": origem,
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "authorization, content-type",
+    "access-control-max-age": "600",
+    vary: "origin",
+  };
+}
+
 async function responder(req, env) {
   try {
     return await tratar(req, env);
@@ -832,6 +887,8 @@ export default {
   async fetch(req, env) {
     const r = await responder(req, env);
     const h = new Headers(r.headers);
+    const cors = new URL(req.url).pathname.startsWith("/admin/api/") ? origemAdmin(env, req) : null;
+    if (cors) for (const [k, v] of Object.entries(cors)) h.set(k, v);
     for (const [k, v] of Object.entries(SEGURANCA)) if (!h.has(k)) h.set(k, v);
     return new Response(r.body, { status: r.status, statusText: r.statusText, headers: h });
   },

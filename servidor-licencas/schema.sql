@@ -117,3 +117,20 @@ CREATE TABLE IF NOT EXISTS subdominios (
     criado_em TEXT NOT NULL,
     actualizado_em TEXT NOT NULL
 );
+
+-- Estado de cada instalação, enviado pelo KanGest em cada verificação (/v1/renovar, no máximo de 12 em 12 horas):
+-- versão, modo de gestão, licença e cópias de segurança. Só datas e indicadores, nunca caminhos nem dados da empresa.
+-- Aparece na ficha do cliente (servidor e área do produtor no site).
+CREATE TABLE IF NOT EXISTS instalacoes (
+    nif TEXT NOT NULL,
+    maquina TEXT NOT NULL,
+    recebido_em TEXT NOT NULL,
+    versao TEXT,
+    modo TEXT,                        -- loja | escola
+    licenca_estado TEXT,              -- como o KanGest a vê (ACTIVA, EXPERIENCIA, TOLERANCIA, EXPIRADA…)
+    licenca_fim TEXT,                 -- AAAA-MM-DD
+    copia_ultima TEXT,                -- última cópia local (AAAA-MM-DDTHH:MM:SS, hora do computador)
+    copia_externa_ultima TEXT,        -- última cópia na pasta externa (pen, disco, pasta partilhada)
+    copia_externa_erro INTEGER NOT NULL DEFAULT 0,  -- 1 = a última cópia externa falhou
+    PRIMARY KEY (nif, maquina)
+);

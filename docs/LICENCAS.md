@@ -37,7 +37,16 @@ Envia o código do pedido, paga e recebe a licença (`KG1.…`) por email ou Wha
 
 - Servidor: `https://kangest-licencas.valentinocanguele.workers.dev` (Cloudflare Workers + D1, código em `servidor-licencas/`).
 - Painel: `https://kangest-licencas.valentinocanguele.workers.dev/admin`, com a chave de
-  `~/.kangest-licencas/servidor/admin-token.txt`.
+  `~/.kangest-licencas/servidor/admin-token.txt`. O mesmo painel está no site, na **área do produtor**
+  (`https://kangest.pages.dev/admin.html`, fora dos motores de busca): a página fala com o servidor pela internet e a
+  chave escreve-se nela e fica só na sessão do browser. O servidor só aceita o site nas origens de `ADMIN_ORIGENS`
+  (por omissão `https://kangest.pages.dev`; com o domínio próprio, por exemplo
+  `ADMIN_ORIGENS=https://kangest.ao,https://www.kangest.ao`). Com o Cloudflare Access à frente do servidor, a área do
+  produtor no site não passa: use o painel do servidor.
+  - **Estado de cada computador** (KanGest 1.4 ou mais recente): na ficha do cliente, a versão, o modo de gestão, a
+    licença como o computador a vê e a data da última cópia local e externa (a vermelho com mais de 7 dias; «A falhar»
+    quando a cópia externa falhou). Chega em cada verificação (no máximo de 12 em 12 horas, com internet). Só datas e
+    indicadores: nunca caminhos nem dados da empresa. O resumo conta os computadores activos sem cópia recente.
   - **Clientes**: estado de cada NIF, computadores, licenças emitidas; abrir um cliente para **registar um pagamento**
     (o valor vem da tabela de preços; a assinatura soma a partir do fim já pago), bloquear um computador, mudar os
     postos ou o número de computadores permitidos (2 por omissão).
