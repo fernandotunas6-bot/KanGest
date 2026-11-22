@@ -75,6 +75,15 @@
   .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .vazio { color: var(--ink-3); text-align: center; padding: 18px 10px; }
   .grelha { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: end; }
+  .barra { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .estado-sinc { padding: 10px 14px; border-radius: 10px; background: var(--sunken); font-size: 13px; color: var(--ink-2); margin: 10px 0 14px; }
+  .form-linha { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: end; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--sunken); margin: 10px 0; }
+  select { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); font: inherit; }
+  .senha-nova { font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: .04em; padding: 12px 16px; border-radius: 10px; background: var(--brand-50); color: var(--brand); display: inline-block; margin: 6px 0; }
+  .accoes-linha { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+  .accoes-linha button { padding: 5px 10px; font-size: 13px; white-space: nowrap; }
+  #t-equipa .accoes-linha, #t-lojas .accoes-linha { flex-wrap: nowrap; }
+  #t-equipa td:nth-child(4) { white-space: nowrap; }
   #mensagem { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 10px; max-width: 90vw; z-index: 20; }
   #mensagem.erro { background: var(--danger); color: #fff; }
   @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } nav { flex-direction: row; flex-wrap: wrap; position: static; } header .sub { display: none; } }
@@ -153,11 +162,34 @@
         </section>
 
         <section data-painel="equipa" class="cartao" hidden>
-          <h2>Funcionários</h2>
-          <p class="fraco" id="e-origem">Como o KanGest os comunicou na última verificação. Para já, criar e alterar faz-se no programa (Sistema → Utilizadores).</p>
-          <div class="tabela"><table><thead><tr><th>Nome</th><th>Login</th><th>Perfil</th><th>Loja</th><th>Dois passos</th><th>Último acesso</th></tr></thead><tbody id="t-equipa"></tbody></table></div>
-          <div class="titulo-linha"><h2>Lojas e postos</h2></div>
-          <div class="tabela"><table><thead><tr><th>Loja</th><th>Postos</th></tr></thead><tbody id="t-lojas"></tbody></table></div>
+          <div class="barra"><h2>Funcionários</h2><button class="primario" id="novo-func">Novo funcionário</button></div>
+          <div id="e-sinc" class="estado-sinc"></div>
+          <form id="form-func" class="form-linha" hidden>
+            <input type="hidden" id="f-id">
+            <label>Nome <input id="f-nome" required maxlength="80"></label>
+            <label>Login <input id="f-login" required maxlength="40" autocomplete="off" spellcheck="false"></label>
+            <label>Perfil <select id="f-perfil"></select></label>
+            <label>Loja <select id="f-loja"></select></label>
+            <label style="display:flex;align-items:center;gap:8px;padding-bottom:10px"><input type="checkbox" id="f-ativo" style="width:auto" checked> Activo</label>
+            <div class="accoes-linha"><button type="button" id="f-cancelar">Cancelar</button><button class="primario">Guardar</button></div>
+          </form>
+          <div id="senha-dada" class="cartao" style="margin:10px 0" hidden>
+            <b id="senha-quem"></b>
+            <div><span class="senha-nova" id="senha-valor"></span> <button id="senha-copiar">Copiar</button></div>
+            <p class="fraco" style="margin:4px 0 0">Só aparece agora. Vale depois da próxima verificação do KanGest e, no primeiro acesso, o funcionário tem de a mudar.</p>
+          </div>
+          <div class="tabela"><table><thead><tr><th>Nome</th><th>Login</th><th>Perfil</th><th>Loja</th><th>Dois passos</th><th>Último acesso</th><th></th></tr></thead><tbody id="t-equipa"></tbody></table></div>
+          <div class="titulo-linha"><h2>Lojas e postos</h2><div class="accoes-linha"><button id="nova-loja">Nova loja</button><button id="novo-posto">Novo posto</button></div></div>
+          <form id="form-loja" class="form-linha" hidden>
+            <label>Nome da loja <input id="l-nome" required maxlength="60"></label>
+            <div class="accoes-linha"><button type="button" data-fechar="form-loja">Cancelar</button><button class="primario">Criar loja</button></div>
+          </form>
+          <form id="form-posto" class="form-linha" hidden>
+            <label>Posto <input id="po-desc" required maxlength="60" placeholder="ex.: Caixa 2"></label>
+            <label>Loja <select id="po-loja"></select></label>
+            <div class="accoes-linha"><button type="button" data-fechar="form-posto">Cancelar</button><button class="primario">Criar posto</button></div>
+          </form>
+          <div class="tabela"><table><thead><tr><th>Loja</th><th>Postos</th><th></th></tr></thead><tbody id="t-lojas"></tbody></table></div>
         </section>
 
         <section data-painel="seguranca" class="cartao" hidden>
@@ -254,16 +286,7 @@ async function carregar() {
     <td>${esc(m.versao || "—")}</td><td>${m.licenca_estado ? `${selo(m.licenca_estado)}<div class="fraco">até ${dmy(m.licenca_fim)}</div>` : "—"}</td>
     <td>${copia(m.copia_ultima, m.recebido_em)}</td><td>${m.copia_externa_erro ? '<span class="selo s-mau">A falhar</span>' : m.copia_externa_ultima ? copia(m.copia_externa_ultima, m.recebido_em) : '<span class="fraco">não configurada</span>'}</td>
     <td>${quando(m.ultimo_contacto)}</td></tr>`).join("") || '<tr><td colspan="6" class="vazio">Ainda nenhum computador comunicou.</td></tr>';
-  const eq = dados.equipa;
-  const perfil = (c) => eq?.perfis.find((p) => p.codigo === c)?.descricao || c;
-  $("#e-origem").textContent = eq ? `Como o KanGest os comunicou a ${quando(eq.recebido_em)} (computador ${eq.maquina}). Para já, criar e alterar faz-se no programa (Sistema → Utilizadores).`
-    : "Aparecem aqui depois da próxima verificação do KanGest 1.4 ou mais recente (de 12 em 12 horas, com internet).";
-  $("#t-equipa").innerHTML = (eq?.utilizadores ?? []).map((u) => `<tr><td><b>${esc(u.nome)}</b>${u.ativo ? "" : ' <span class="selo s-mau">Inactivo</span>'}</td><td class="mono">${esc(u.login)}</td>
-    <td>${esc(perfil(u.perfil))}</td><td>${esc(u.loja || "Todas")}</td><td>${u.dois_passos ? '<span class="selo s-ok">Activos</span>' : '<span class="fraco">Não</span>'}</td><td>${quando(u.ultimo_acesso)}</td></tr>`).join("")
-    || '<tr><td colspan="6" class="vazio">Sem funcionários comunicados.</td></tr>';
-  $("#t-lojas").innerHTML = (eq?.lojas ?? []).map((l) => `<tr><td><b>${esc(l.nome)}</b>${l.ativo ? "" : ' <span class="selo s-mau">Inactiva</span>'}</td>
-    <td>${eq.postos.filter((p) => p.loja === l.nome).map((p) => esc(p.descricao)).join(", ") || '<span class="fraco">—</span>'}</td></tr>`).join("")
-    || '<tr><td colspan="2" class="vazio">Sem lojas comunicadas.</td></tr>';
+  if (!$("[data-painel=equipa]").hidden) tentar(desenharEquipa);
 }
 
 async function desenharSessoes() {
@@ -273,10 +296,82 @@ async function desenharSessoes() {
     <td>${quando(x.criada_em)}</td><td>${quando(x.ultima_em)}</td><td class="num">${x.actual ? "" : `<button class="perigo" data-terminar="${esc(x.id)}">Terminar</button>`}</td></tr>`).join("");
 }
 
+// ---------------------------------------------------------------- equipa: o que o KanGest comunicou + o que se gere aqui
+let gerida = null;
+async function desenharEquipa() {
+  gerida = await api("equipa");
+  const eq = dados.equipa;
+  const nomePerfil = (c) => eq?.perfis.find((p) => p.codigo === c)?.descricao || c;
+  const v = gerida.versao;
+  $("#e-sinc").innerHTML = !v.versao
+    ? (eq ? `Os funcionários abaixo são os que o KanGest comunicou a ${quando(eq.recebido_em)}. Use «Gerir aqui» para os passar a gerir no site.` : "Os funcionários aparecem aqui depois da próxima verificação do KanGest 1.4 ou mais recente.")
+    : v.aplicada >= v.versao ? `<span class="selo s-ok">Aplicado</span> As alterações chegaram ao KanGest (computador ${esc(v.aplicada_maquina)}) a ${quando(v.aplicada_em)}.`
+    : `<span class="selo s-TOLERANCIA">Por aplicar</span> Chega ao KanGest na próxima verificação (de 12 em 12 horas, ou em Sistema → Licença e Assinatura → Verificar agora).`;
+  const geridos = new Map(gerida.funcionarios.map((f) => [f.login, f]));
+  const doPrograma = (eq?.utilizadores ?? []).map((u) => ({ ...u, gerido: geridos.get(u.login.toLowerCase()) }));
+  const soAqui = gerida.funcionarios.filter((f) => !doPrograma.some((u) => u.login.toLowerCase() === f.login)).map((f) => ({ login: f.login, nome: f.nome, perfil: f.perfil, ativo: f.ativo, loja: f.loja, gerido: f, novo: true }));
+  const linhas = [...doPrograma, ...soAqui];
+  $("#t-equipa").innerHTML = linhas.map((u) => {
+    const g = u.gerido;
+    const ativo = g ? g.ativo : u.ativo;
+    const etiqueta = g ? (u.novo ? ' <span class="selo s-TOLERANCIA">Por aplicar</span>' : ' <span class="selo s-EXPERIENCIA">Gerido aqui</span>') : "";
+    const accoes = g
+      ? `<button data-editar="${esc(g.id)}">Editar</button><button data-repor="${esc(g.id)}">Repor senha</button>`
+      : `<button data-adoptar="${esc(u.login)}">Gerir aqui</button>`;
+    return `<tr><td><b>${esc(g?.nome ?? u.nome)}</b>${etiqueta}${ativo ? "" : ' <span class="selo s-mau">Inactivo</span>'}</td><td class="mono">${esc(u.login)}</td>
+      <td>${esc(nomePerfil(g?.perfil ?? u.perfil))}</td><td>${esc((g ? g.loja : u.loja) || "Todas")}</td>
+      <td>${u.novo ? "—" : u.dois_passos ? '<span class="selo s-ok">Activos</span>' : '<span class="fraco">Não</span>'}</td><td>${u.novo ? "—" : quando(u.ultimo_acesso)}</td>
+      <td><div class="accoes-linha">${accoes}</div></td></tr>`;
+  }).join("") || '<tr><td colspan="7" class="vazio">Ainda não há funcionários. Use «Novo funcionário».</td></tr>';
+  // lojas: as do programa e as criadas aqui
+  const lojasGeridas = new Map(gerida.lojas.map((l) => [l.nome, l]));
+  const nomesLojas = [...new Set([...(eq?.lojas ?? []).map((l) => l.nome), ...gerida.lojas.map((l) => l.nome)])];
+  const postosDe = (n) => [...new Set([...(eq?.postos ?? []).filter((p) => p.loja === n).map((p) => p.descricao), ...gerida.postos.filter((p) => p.loja === n).map((p) => p.descricao)])];
+  $("#t-lojas").innerHTML = nomesLojas.map((n) => {
+    const g = lojasGeridas.get(n);
+    const ativa = g ? g.ativo : (eq?.lojas.find((l) => l.nome === n)?.ativo ?? true);
+    return `<tr><td><b>${esc(n)}</b>${ativa ? "" : ' <span class="selo s-mau">Inactiva</span>'}${g ? ' <span class="selo s-EXPERIENCIA">Gerida aqui</span>' : ""}</td>
+      <td>${postosDe(n).map(esc).join(", ") || '<span class="fraco">—</span>'}</td>
+      <td><div class="accoes-linha"><button data-loja="${esc(n)}" data-loja-id="${esc(g?.id ?? "")}" data-loja-ativa="${ativa ? 1 : 0}">${ativa ? "Desactivar" : "Activar"}</button></div></td></tr>`;
+  }).join("") || '<tr><td colspan="3" class="vazio">Ainda não há lojas.</td></tr>';
+  const opcoes = (lista, vazia) => (vazia ? `<option value="">${vazia}</option>` : "") + lista.map((x) => `<option>${esc(x)}</option>`).join("");
+  $("#f-perfil").innerHTML = gerida.perfis.map((c) => `<option value="${esc(c)}">${esc(nomePerfil(c))}</option>`).join("");
+  $("#f-loja").innerHTML = opcoes(gerida.lojas_conhecidas, "Todas as lojas");
+  $("#po-loja").innerHTML = opcoes(gerida.lojas_conhecidas);
+}
+
+function abrirFormFuncionario(f) {
+  $("#form-func").hidden = false; $("#senha-dada").hidden = true;
+  $("#f-id").value = f?.id ?? ""; $("#f-nome").value = f?.nome ?? ""; $("#f-login").value = f?.login ?? "";
+  $("#f-login").readOnly = !!f?.adoptar; $("#f-perfil").value = f?.perfil ?? gerida.perfis.find((p) => p === "CAIXA") ?? gerida.perfis[0];
+  $("#f-loja").value = f?.loja ?? ""; $("#f-ativo").checked = f?.ativo !== false;
+  $("#f-nome").focus();
+}
+
+async function guardarFuncionario(e) {
+  e.preventDefault();
+  const r = await api("equipa/funcionario", {
+    id: $("#f-id").value || undefined, nome: $("#f-nome").value, login: $("#f-login").value,
+    perfil: $("#f-perfil").value, loja: $("#f-loja").value || null, ativo: $("#f-ativo").checked,
+  });
+  $("#form-func").hidden = true;
+  mostrarSenha($("#f-login").value, r.senha_provisoria);
+  avisar(r.mensagem);
+  await desenharEquipa();
+}
+
+function mostrarSenha(login, senha) {
+  $("#senha-dada").hidden = !senha;
+  if (!senha) return;
+  $("#senha-quem").textContent = `Senha provisória de «${login.trim().toLowerCase()}»`;
+  $("#senha-valor").textContent = senha;
+}
+
 function abrirAba(aba) {
   $$("#abas button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.aba === aba)));
   $$("[data-painel]").forEach((p) => (p.hidden = p.dataset.painel !== aba));
   if (aba === "seguranca") tentar(desenharSessoes);
+  if (aba === "equipa") tentar(desenharEquipa);
 }
 
 let emailCodigo = "";
@@ -318,6 +413,14 @@ $("#form-mudar").addEventListener("submit", (e) => {
     await desenharSessoes();
   });
 });
+$("#novo-func").addEventListener("click", () => abrirFormFuncionario(null));
+$("#f-cancelar").addEventListener("click", () => ($("#form-func").hidden = true));
+$("#form-func").addEventListener("submit", (e) => tentar(() => guardarFuncionario(e)));
+$("#senha-copiar").addEventListener("click", () => navigator.clipboard.writeText($("#senha-valor").textContent).then(() => avisar("Senha copiada."), () => avisar("Não foi possível copiar.", true)));
+$("#nova-loja").addEventListener("click", () => { $("#form-loja").hidden = false; $("#l-nome").focus(); });
+$("#novo-posto").addEventListener("click", () => { $("#form-posto").hidden = false; $("#po-desc").focus(); });
+$("#form-loja").addEventListener("submit", (e) => { e.preventDefault(); tentar(async () => { avisar((await api("equipa/loja", { nome: $("#l-nome").value })).mensagem); $("#form-loja").hidden = true; $("#l-nome").value = ""; await desenharEquipa(); }); });
+$("#form-posto").addEventListener("submit", (e) => { e.preventDefault(); tentar(async () => { avisar((await api("equipa/posto", { descricao: $("#po-desc").value, loja: $("#po-loja").value })).mensagem); $("#form-posto").hidden = true; $("#po-desc").value = ""; await desenharEquipa(); }); });
 $("#sair-todos").addEventListener("click", () => tentar(async () => { avisar((await api("sessoes/terminar-outras", {})).mensagem); await desenharSessoes(); }));
 $("#abas").addEventListener("click", (e) => { const b = e.target.closest("button[data-aba]"); if (b) abrirAba(b.dataset.aba); });
 $("#avatar").addEventListener("click", (e) => { e.stopPropagation(); const m = $("#menu-conta"); m.hidden = !m.hidden; $("#avatar").setAttribute("aria-expanded", String(!m.hidden)); });
@@ -328,6 +431,21 @@ document.addEventListener("click", (e) => {
   if (t.id === "sair") sair();
   if (t.dataset.copiar) navigator.clipboard.writeText(t.dataset.copiar).then(() => avisar("Licença copiada. Cole-a no KanGest em Sistema → Licença e Assinatura."), () => avisar("Não foi possível copiar.", true));
   if (t.dataset.terminar) tentar(async () => { avisar((await api("sessoes/terminar", { id: t.dataset.terminar })).mensagem); await desenharSessoes(); });
+  if (t.dataset.fechar) $("#" + t.dataset.fechar).hidden = true;
+  if (t.dataset.editar) abrirFormFuncionario(gerida.funcionarios.find((f) => f.id === t.dataset.editar));
+  if (t.dataset.adoptar) {
+    const u = dados.equipa.utilizadores.find((x) => x.login === t.dataset.adoptar);
+    abrirFormFuncionario({ login: u.login.toLowerCase(), nome: u.nome, perfil: u.perfil, loja: u.loja, ativo: u.ativo, adoptar: true });
+  }
+  if (t.dataset.repor) tentar(async () => {
+    const f = gerida.funcionarios.find((x) => x.id === t.dataset.repor);
+    const r = await api("equipa/repor-senha", { id: t.dataset.repor });
+    mostrarSenha(f.login, r.senha_provisoria); avisar(r.mensagem); await desenharEquipa();
+  });
+  if (t.dataset.loja !== undefined && t.dataset.lojaAtiva !== undefined) tentar(async () => {
+    avisar((await api("equipa/loja", { id: t.dataset.lojaId || undefined, nome: t.dataset.loja, ativo: t.dataset.lojaAtiva !== "1" })).mensagem);
+    await desenharEquipa();
+  });
 });
 
 if (sessao) tentar(carregar);
