@@ -17,7 +17,7 @@ async fn sessao_aberta(st: &AppState) -> AppResult<Option<i64>> {
         .await?)
 }
 
-async fn resumo(st: &AppState, sid: i64) -> AppResult<Value> {
+pub(crate) async fn resumo(st: &AppState, sid: i64) -> AppResult<Value> {
     let p = &st.pool;
     let s = sqlx::query(
         "SELECT c.*, u.nome AS utilizador, ps.descricao AS posto FROM caixa_sessoes c

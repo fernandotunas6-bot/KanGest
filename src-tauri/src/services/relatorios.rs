@@ -9,8 +9,8 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
 // Vendas líquidas: facturas (FR/FT/ND) somam, notas de crédito subtraem.
-const SINAL: &str = "CASE WHEN d.tipo_codigo = 'NC' THEN -1 ELSE 1 END";
-const VENDAS: &str = "d.tipo_codigo IN ('FR','FT','ND','NC') AND d.estado <> 'A'";
+pub(crate) const SINAL: &str = "CASE WHEN d.tipo_codigo = 'NC' THEN -1 ELSE 1 END";
+pub(crate) const VENDAS: &str = "d.tipo_codigo IN ('FR','FT','ND','NC') AND d.estado <> 'A'";
 // Filtros opcionais do relatório de vendas: ?3 entidade (cliente), ?4 posto, ?5 armazém (a loja, num servidor
 // central) e ?6 canal ('api' = documentos emitidos por uma chave da API, como a loja online; 'balcao' = os outros).
 const ENT: &str = "AND (?3 IS NULL OR d.entidade_id = ?3) AND (?4 IS NULL OR d.posto_id = ?4) AND (?5 IS NULL OR d.armazem_id = ?5)

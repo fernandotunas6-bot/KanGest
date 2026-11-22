@@ -26,6 +26,7 @@ pub mod licenca;
 mod oficina;
 mod fidelizacao;
 mod gestao;
+mod inteligencia;
 mod parametros;
 mod partilha;
 mod promocoes;
@@ -416,6 +417,8 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
 
         // ---- relatórios / sistema ----
         "dashboard" => relatorios::dashboard(st).await,
+        // KanGest inteligente (calculado aqui, nada sai para fora): resumo de ontem, previsões e alertas
+        "inteligencia.painel" => inteligencia::painel(st).await,
         "relatorios.vendas" => relatorios::vendas(st, p(params)?).await,
         "relatorios.sintese" => relatorios::sintese(st, p(params)?).await,
         "relatorios.top" => relatorios::top(st, p(params)?).await,

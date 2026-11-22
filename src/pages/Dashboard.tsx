@@ -11,6 +11,7 @@ import { useKz, useOcultarValores } from "@/lib/privacidade";
 import { Badge, Button, Card, Delta, PageHeader, Stat, Table, Td, Th, cn } from "@/components/ui";
 import { BarChart } from "@/components/BarChart";
 import DocumentoModal from "@/components/DocumentoModal";
+import Inteligencia from "@/components/Inteligencia";
 
 interface Antiguidade {
   por_vencer: number;
@@ -189,6 +190,9 @@ export default function Dashboard() {
           tone="brand"
         />
       </div>
+
+      {/* KanGest inteligente: resumo de ontem, previsões e alertas, calculados neste computador */}
+      <Inteligencia />
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <Card className="p-5">
