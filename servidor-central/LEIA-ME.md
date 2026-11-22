@@ -39,12 +39,17 @@ KANGEST_BD=postgres node ../servidor-licencas/teste/testar.mjs  # o teste comple
 - Com `KANGEST_BD=postgres`, os testes de `servidor-licencas/teste` (`contas.mjs`, `testar.mjs`) correm no Postgres.
   Sem a variável, correm no SQLite, como o D1.
 
-## Publicar a função (fase 3, quando houver acesso ao projecto)
+## Publicar a função (fase 3; feita em 22/11/2026)
+
+O projecto está na organização «Kangest» do Supabase. O acesso do CLI é por um token pessoal dessa conta, guardado fora
+do repositório em `~/.kangest-licencas/supabase-token.txt` (chmod 600). Assim, o login normal do CLI (Livraria, Sga)
+fica como está. Não é preciso a senha da base, nem Docker.
 
 ```bash
 cd servidor-central
+export SUPABASE_ACCESS_TOKEN="$(cat ~/.kangest-licencas/supabase-token.txt)"
 supabase link --project-ref fissktkxilseymadzppn
-supabase db push                                         # aplica as migrações
+supabase db push --linked                                # aplica as migrações novas
 node preparar.mjs                                        # copia o núcleo para a função
 # os segredos, dos mesmos ficheiros que o Worker usa (fora do repositório); o do encaminhamento cria-se uma vez
 S=~/.kangest-licencas/servidor
@@ -53,10 +58,12 @@ supabase secrets set CHAVE_PRIVADA="$(tr -d '\n' < $S/privada.pem)" ADMIN_TOKEN=
     ADMIN_EMAIL="$(cat $S/admin-email.txt)" ADMIN_SENHA="$(cat $S/admin-senha.txt)" \
     ENCAMINHADOR_SEGREDO="$(cat $S/encaminhador-segredo.txt)"
 # e os opcionais que estiverem em uso no Worker (RESEND_API_KEY, TURNSTILE_*, WEB_DOMINIO…: docs/ARQUITETURA.md)
-supabase functions deploy kangest --no-verify-jwt
+supabase functions deploy kangest --project-ref fissktkxilseymadzppn --no-verify-jwt --use-api
 ```
 
-Depois de publicar:
+Para actualizar a função depois de mudar o `worker.js`: `node preparar.mjs` e o mesmo `functions deploy`.
+
+Depois de publicar (confirmado na primeira publicação):
 
 1. `https://fissktkxilseymadzppn.supabase.co/functions/v1/kangest/v1/planos` responde com os planos.
 2. Depois de um pedido, `select chave from seguranca.limites` mostra o IP público de quem pediu, não um IP interno. É

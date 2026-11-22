@@ -163,8 +163,8 @@ Os mesmos nomes no Worker (`wrangler secret put`) e na função (`supabase secre
 | Fase | O quê | Estado |
 |---|---|---|
 | 1 | Este documento | feito |
-| 2 | Esquemas e tabelas (migração em `servidor-central/supabase/migrations`) | preparada e testada em Postgres local; aplica-se quando houver acesso ao projecto |
-| 3 | Função `kangest`: o mesmo `worker.js`, as mesmas rotas | preparada e testada em Postgres local; publica-se quando houver acesso ao projecto |
+| 2 | Esquemas e tabelas (migração em `servidor-central/supabase/migrations`) | aplicada no projecto em 22/11/2026 |
+| 3 | Função `kangest`: o mesmo `worker.js`, as mesmas rotas | publicada e testada no endereço real em 22/11/2026 |
 | 4 | Copiar os dados da D1 (`servidor-central/copiar-d1.mjs`) e pôr o Worker antigo a encaminhar os pedidos para o endereço novo (`servidor-licencas/src/encaminhar.js`, com `publicar-licencas.py --encaminhar`) | preparada e testada em Postgres local; faz-se depois da fase 3 |
 | 5 | O site e uma versão nova do KanGest com o endereço novo | por fazer |
 
