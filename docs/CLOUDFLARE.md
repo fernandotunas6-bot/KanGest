@@ -6,7 +6,7 @@ liga-se no painel da Cloudflare (dash.cloudflare.com e one.dash.cloudflare.com, 
 | Serviço | Recursos da Cloudflare | Já no código | Ligar no painel |
 |---|---|---|---|
 | Site (`kangest.pages.dev`) | Pages, HTTPS, Web Analytics | Cabeçalhos de segurança (`_headers`): CSP com o hash do único script em linha, HSTS, `nosniff`, sem `iframe` | Domínio próprio, Web Analytics |
-| Servidor de licenças (`kangest-licencas…workers.dev`) | Workers, D1, Access | Limite de pedidos por IP, Cloudflare Access à frente do painel, cabeçalhos de segurança | Domínio próprio, aplicação do Access para `/admin` |
+| Servidor de licenças antigo (`kangest-licencas…workers.dev`; com a passagem para o Supabase, só encaminha para a função `kangest`) | Workers, D1, Access | Limite de pedidos por IP, Cloudflare Access à frente do painel, cabeçalhos de segurança | Domínio próprio, aplicação do Access para `/admin` |
 | API do KanGest de cada cliente | Tunnel, Access (Zero Trust), WAF, Rate Limiting | Validação do JWT do Access, IP real do cliente, chaves de API | Túnel, aplicação do Access com tokens de serviço, regras WAF |
 | KanGest no browser fora da loja (PWA) | Tunnel, Access (email/IdP), WAF, Rate Limiting | Pedidos cifrados com a chave de rede, CSP, sessão por aparelho | Hostname para `localhost:7799`, aplicação do Access para a equipa ([WEB-PWA.md](WEB-PWA.md)) |
 

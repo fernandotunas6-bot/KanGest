@@ -28,8 +28,10 @@ use crate::state::AppState;
 /// Chaves públicas (base64url de 32 bytes). Uma lista para poder trocar de chave sem invalidar as antigas.
 /// A primeira é a do produtor (licenças emitidas à mão); a segunda, a do servidor de licenças.
 const CHAVES_PUBLICAS: &[&str] = &["2_760imzJ6c3wizg0oU01eSyp9vavAiFzZNIX-iBysI", "l1SGSr48WtdwbArzzBWxKEFC0sAVlVDq-8ylTT6QHzg"];
-/// Servidor de licenças. A variável KANGEST_LICENCAS_URL muda-o (testes).
-const SERVIDOR: &str = "https://kangest-licencas.valentinocanguele.workers.dev";
+/// Servidor de licenças: a função kangest do backend central no Supabase (docs/ARQUITETURA.md). As versões até 1.3.4
+/// usam o Worker antigo (kangest-licencas…workers.dev), que encaminha para aqui. A variável KANGEST_LICENCAS_URL muda-o
+/// (testes).
+const SERVIDOR: &str = "https://fissktkxilseymadzppn.supabase.co/functions/v1/kangest";
 /// Verificar no servidor, no máximo, a cada tantas horas.
 pub const HORAS_SINCRONIZAR: i64 = 12;
 /// Período de experiência sem licença. Não vem da configuração (que o cliente pode alterar).
