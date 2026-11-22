@@ -21,7 +21,7 @@ acesso pela Internet, a verificação de humano (Turnstile) e o DNS.
 
 | Produto | Backend | Site |
 |---|---|---|
-| KanGest | Cloudflare: Worker `kangest-licencas` + D1 `kangest-licencas` | kangest.pages.dev |
+| KanGest | Cloudflare: Worker `kangest-licencas` + D1 `kangest-licencas` | kangest.pages.dev e, por enquanto, kangest.livrariaadventista.com (domínio do mesmo projecto Pages) |
 | Livraria | projecto Supabase próprio | livrariaadventista.ao |
 | SIGA Plus | projecto Supabase próprio | portal-siga.com |
 
@@ -93,7 +93,7 @@ Definem-se com o `publicar-licencas.py` (ou `wrangler secret put`), nunca no rep
 | `CHAVE_PRIVADA` | assina as licenças (Ed25519, PEM pkcs8) | sim |
 | `ADMIN_TOKEN` | chave de emergência do produtor e chave das sessões | sim |
 | `ADMIN_EMAIL`, `ADMIN_SENHA` | entrada do produtor com email e senha (a senha só como resumo PBKDF2) | não |
-| `ADMIN_ORIGENS` | sites que podem chamar `/admin/api` e `/v1/conta` (por omissão `https://kangest.pages.dev`) | não |
+| `ADMIN_ORIGENS` | sites que podem chamar `/admin/api` e `/v1/conta`, separados por vírgulas; o primeiro é o endereço que os emails usam (por omissão `https://kangest.pages.dev`; definido como `https://kangest.livrariaadventista.com, https://kangest.pages.dev`) | não |
 | `EMAIL` (ligação `send_email`), `EMAIL_REMETENTE` | os emails pela Cloudflare Email Service, a partir de `kangest.livrariaadventista.com`: os códigos, o aviso ao produtor e as boas-vindas (sem eles, nenhum email sai e os códigos aparecem na área do produtor) | não |
 | `RESEND_API_KEY` | alternativa à Cloudflare Email Service para os mesmos emails | não |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | verificação de humano | não |

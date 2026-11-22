@@ -33,6 +33,9 @@ jobs:
       - name: Site
         run: |
           S=$(jq -r .site site-fonte/config.json)
-          for p in "" admin.html conta.html aderir baixar; do
-            curl -fsSL --retry 3 --retry-delay 10 --max-time 30 -o /dev/null "$S/$p" || { echo "$S/$p não responde"; exit 1; }
+          # o mesmo site também em kangest.livrariaadventista.com (domínio do projecto Pages, por enquanto)
+          for base in "$S" https://kangest.livrariaadventista.com; do
+            for p in "" admin.html conta.html aderir baixar; do
+              curl -fsSL --retry 3 --retry-delay 10 --max-time 30 -o /dev/null "$base/$p" || { echo "$base/$p não responde"; exit 1; }
+            done
           done
