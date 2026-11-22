@@ -12,8 +12,9 @@ Edge Function do Supabase, com a base em Postgres. As rotas e o código são os 
 | `supabase/functions/kangest/d1.js` | a API do D1 sobre Postgres (marcadores, esquemas, tipos, transacções) |
 | `supabase/functions/kangest/nucleo/` | cópia do `worker.js` e do painel, feita por `preparar.mjs`; não vai para o repositório |
 | `supabase/config.toml` | `verify_jwt = false` para a função, que tem a sua própria autenticação |
-| `copiar-d1.mjs` | a cópia dos dados da D1 para o Postgres: exportar, ensaiar, importar |
-| `teste/` | testes em Postgres local (PGlite), sem Docker nem rede |
+| `copiar-d1.mjs` | a cópia dos dados da D1 para o Postgres: exportar, ensaiar, importar (e restaurar uma cópia de segurança) |
+| `copia-supabase.mjs` | a cópia de segurança do Postgres do Supabase para o computador do produtor |
+| `teste/` | testes em Postgres local (PGlite), sem Docker nem rede; `teste/fumo.mjs` é a prova de fumo em produção |
 
 ## Testar
 
@@ -117,3 +118,46 @@ Confirmar: `https://kangest-licencas.valentinocanguele.workers.dev/v1/planos` re
 - Site: `web.licencas` em `site-fonte/config.json` passa a ser o endereço da função. A área do produtor (`/admin.html`)
   e a conta da empresa (`/conta.html`) passam a chamá-la directamente.
 - Programa: `SERVIDOR` em `src-tauri/src/services/licenca.rs` passa a ser o endereço da função, numa versão nova.
+
+## Verificar em produção
+
+**Prova de fumo**, depois de cada publicação da função:
+
+```bash
+node servidor-central/teste/fumo.mjs
+```
+
+Faz o que um cliente faz, com uma empresa de teste (NIF «FUMO…»), e no fim apaga tudo o que criou:
+- registo, código e confirmação;
+- licença assinada, verificada com a chave pública do KanGest;
+- renovação com o estado e a equipa;
+- conta da empresa: código, senha, entrada, resumo e saída;
+- equipa gerida, que chega ao KanGest e fica aplicada;
+- ficha do cliente na área do produtor;
+- a entrada do produtor recusa uma senha errada.
+
+Diz também se o Worker antigo já encaminha para o Supabase. Usa a chave do produtor
+(`~/.kangest-licencas/servidor/admin-token.txt`) e, para apagar, o token do Supabase.
+
+**Vigia** ([`.github/workflows/vigia.yml`](../.github/workflows/vigia.yml)): de 6 em 6 horas confirma que a função, o
+Worker antigo e o site respondem. Se algum falhar, o GitHub avisa por email.
+
+## Plano gratuito do Supabase: pausa e cópias de segurança
+
+O projecto está no plano gratuito, e isso traz dois cuidados:
+
+- **Pausa ao fim de 7 dias sem actividade.** O vigia lê os planos da base de 6 em 6 horas, o que mantém o projecto
+  activo. Se mesmo assim for pausado, o Supabase avisa por email e o projecto reactiva-se no painel.
+- **Sem cópias de segurança que se possam descarregar.** Faça-as no computador do produtor:
+
+  ```bash
+  node servidor-central/copia-supabase.mjs        # ~/.kangest-licencas/copias/supabase-<data>.json (guarda as 30 últimas)
+  node servidor-central/copiar-d1.mjs ensaiar ~/.kangest-licencas/copias/supabase-<data>.json   # confirma que se restaura
+  ```
+
+  Restaurar, só se for preciso:
+  `KANGEST_DB_URL='postgresql://…' node servidor-central/copiar-d1.mjs importar <cópia> --substituir`.
+
+  A cópia só lê a base. Tem os dados dos clientes, por isso fica fora do repositório e só o produtor a lê.
+
+No plano Pro, o Supabase faz cópias diárias e não pausa os projectos.

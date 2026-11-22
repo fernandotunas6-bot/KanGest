@@ -110,6 +110,32 @@ assert.deepEqual((await sql.unsafe("SELECT id FROM licencas.pagamentos ORDER BY 
 assert.equal((await pedir(DB, "GET", "/v1/planos")).corpo.planos.find((p) => p.codigo === "COMERCIO").preco_mes, 15000, "o preço da D1");
 assert.equal((await verificarComServidor(sql)).clientes, 1);
 
+// cópia de segurança do Supabase (copia-supabase.mjs) e restauro noutro Postgres: as mesmas tabelas
+{
+  const { copiarSupabase } = await import("../copia-supabase.mjs");
+  const pedidas = [];
+  const buscarPg = async (url, init) => {
+    const { query, read_only } = JSON.parse(init.body);
+    pedidas.push(query);
+    assert.equal(read_only, true, "a cópia só lê");
+    assert.equal(init.headers.authorization, "Bearer token-supabase");
+    return Response.json(Array.from(await sql.begin("read only", (tx) => tx.unsafe(query))));
+  };
+  const seguranca = await copiarSupabase({ token: "token-supabase", buscar: buscarPg });
+  assert.ok(!("limites" in seguranca.tabelas), "o limite de pedidos não entra na cópia");
+  assert.ok(pedidas.every((q) => /^select \* from \w+\.\w+ order by 1, 2 limit \d+ offset \d+$/.test(q)));
+  const outro = await postgresLocal();
+  await importar(outro.sql, await lerCopia(JSON.stringify(seguranca), "supabase.json"));
+  for (const [esquema, tabelas] of Object.entries(ESQUEMAS)) {
+    for (const t of tabelas.filter((t) => t !== "limites")) {
+      const a = (await sql.unsafe(`SELECT * FROM ${esquema}.${t}`)).map((l) => JSON.stringify(l)).sort();
+      const b = (await outro.sql.unsafe(`SELECT * FROM ${esquema}.${t}`)).map((l) => JSON.stringify(l)).sort();
+      assert.deepEqual(b, a, `restauro de ${t}`);
+    }
+  }
+  await outro.fechar();
+}
+
 // copiar outra vez: só com --substituir; e um erro desfaz tudo
 await assert.rejects(importar(sql, copia), /já tem dados em .*--substituir/);
 const comColunaVelha = structuredClone(copia);
