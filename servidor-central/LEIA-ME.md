@@ -65,6 +65,10 @@ Depois de publicar:
 
 ## Passagem dos dados e do Worker antigo (fase 4)
 
+Em 22/11/2026 a D1 não tinha dados de clientes: 0 clientes, 0 computadores, 0 licenças e 0 pagamentos, só os 3 planos
+de origem, sem preço. Se ainda for assim no dia da passagem, a cópia não é precisa: basta publicar a função e correr o
+`--encaminhar` (mais abaixo). O primeiro comando do ensaio mostra as contagens e diz se é o caso.
+
 **Ensaio**, com tempo e sem tocar no Supabase. Usa o mesmo token do `publicar-licencas.py`:
 
 ```bash
