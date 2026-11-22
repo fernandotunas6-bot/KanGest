@@ -4,7 +4,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { CalendarClock, CalendarX2, CheckCircle2, ChevronRight, CircleDollarSign, Eye, EyeOff, FileClock, FilePlus2, GraduationCap, HandCoins, Hourglass, PackageMinus, Receipt, Repeat, Send, ShieldAlert, ShoppingCart, Table2, TrendingUp, Truck, Unplug, type LucideIcon } from "lucide-react";
+import { CalendarClock, CalendarX2, CheckCircle2, ChevronRight, CircleDollarSign, Eye, EyeOff, FileClock, FilePlus2, GraduationCap, HandCoins, Hourglass, MonitorPlay, PackageMinus, Receipt, Repeat, Send, ShieldAlert, ShoppingCart, Table2, TrendingUp, Truck, Unplug, type LucideIcon } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, dataHora, hojeISO, qtd } from "@/lib/format";
 import { useKz, useOcultarValores } from "@/lib/privacidade";
@@ -123,6 +123,9 @@ export default function Dashboard() {
         subtitle={new Date().toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
         actions={
           <>
+            <Button variant="secondary" onClick={() => nav("/tv")} title="O painel de vendas em ecrã inteiro, para uma televisão">
+              <MonitorPlay className="size-4" /> Modo TV
+            </Button>
             <Button variant="secondary" onClick={() => setOcultar(!ocultar)} title={ocultar ? "Mostrar os valores do painel" : "Ocultar os valores do painel"}>
               {ocultar ? <Eye className="size-4" /> : <EyeOff className="size-4" />} {ocultar ? "Mostrar valores" : "Ocultar valores"}
             </Button>
