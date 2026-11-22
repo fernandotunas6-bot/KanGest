@@ -249,6 +249,8 @@ function VerificacaoHumano({ chave, onToken, reiniciar }: { chave: string; onTok
       id.current = ts.render(ref.current, {
         sitekey: chave,
         language: "pt",
+        // a largura do formulário, alinhado com os campos
+        size: "flexible",
         callback: (t: string) => onToken(t),
         "expired-callback": () => onToken(""),
         "error-callback": () => onToken(""),
@@ -280,5 +282,5 @@ function VerificacaoHumano({ chave, onToken, reiniciar }: { chave: string; onTok
       onToken("");
     }
   }, [reiniciar, onToken]);
-  return <div ref={ref} className="flex min-h-[65px] justify-center" />;
+  return <div ref={ref} className="min-h-[65px] w-full" />;
 }
