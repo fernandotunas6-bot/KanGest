@@ -239,6 +239,9 @@ pub struct LoginIn {
     /// Código da verificação em dois passos (da aplicação ou de recuperação), na segunda volta.
     #[serde(default)]
     codigo: Option<String>,
+    /// «Sair e trocar de conta»: confirma a troca quando o aparelho tem a sessão de outra pessoa.
+    #[serde(default)]
+    trocar: bool,
 }
 
 pub async fn login(st: &AppState, i: LoginIn) -> AppResult<Value> {
@@ -260,6 +263,8 @@ pub async fn login(st: &AppState, i: LoginIn) -> AppResult<Value> {
         registar(st, Some(id), login, "FALHA", Some("conta desactivada".into())).await;
         return Err(AppError::msg("Esta conta está desactivada. Fale com o administrador."));
     }
+    // antes do código de dois passos, para não o gastar numa volta que vai ser recusada
+    conta_diferente(st, id, login, i.trocar).await?;
     match super::dois_passos::no_login(st, &row, i.codigo.as_deref()).await? {
         super::dois_passos::NoLogin::Seguir => {}
         // senha certa: o ecrã pede o código e volta a entrar com ele
@@ -276,6 +281,31 @@ static FALHAS_PIN: FalhasPin = std::sync::Mutex::new(None);
 #[derive(Deserialize)]
 pub struct PinIn {
     pin: String,
+    #[serde(default)]
+    trocar: bool,
+}
+
+/// O início da mensagem de «Conta diferente» (o ecrã de entrada reconhece-a e mostra «Sair e trocar de conta»).
+pub const CONTA_DIFERENTE: &str = "Conta diferente: este aparelho tem a sessão de ";
+
+/// «Incompatibilidade de conta», como no Claude: este aparelho já tem a sessão de outra pessoa (por exemplo, noutra aba
+/// do mesmo browser, que partilha a ligação). Entrar com outra conta substituía-a sem ninguém saber; agora a troca tem
+/// de ser confirmada e fica na auditoria.
+async fn conta_diferente(st: &AppState, novo: i64, login: &str, trocar: bool) -> AppResult<()> {
+    // só nos postos e browsers ligados ao servidor: o programa no próprio computador tem uma janela e só mostra a
+    // entrada sem sessão, por isso aí não há troca silenciosa a evitar
+    if crate::state::contexto().is_none() {
+        return Ok(());
+    }
+    let Some(actual) = st.sessao_opcional() else { return Ok(()) };
+    if actual.id == novo {
+        return Ok(());
+    }
+    if !trocar {
+        return Err(AppError::msg(format!("{CONTA_DIFERENTE}{}.", actual.nome)));
+    }
+    registar(st, Some(novo), login, "CONTA_TROCADA", Some(format!("saiu {} ({}) deste aparelho", actual.nome, actual.login))).await;
+    Ok(())
 }
 
 /// Entrada só com o PIN (terminais POS), se a política o permitir.
@@ -317,6 +347,7 @@ pub async fn login_pin(st: &AppState, i: PinIn) -> AppResult<Value> {
     if let Some(m) = FALHAS_PIN.lock().unwrap().as_mut() {
         m.remove(&posto);
     }
+    conta_diferente(st, row.get("id"), &row.get::<String, _>("login"), i.trocar).await?;
     entrar(st, &row, "PIN").await
 }
 

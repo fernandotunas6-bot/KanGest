@@ -5734,6 +5734,36 @@ async fn aparelhos_com_sessao() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// «Conta diferente» (como no Claude): com a sessão de uma pessoa no aparelho, entrar com outra conta pede a troca
+/// explícita, antes do código de dois passos; confirmada, fica na auditoria. A mesma pessoa entra sem perguntas.
+#[tokio::test]
+async fn conta_diferente_pede_troca() {
+    use crate::state::{Contexto, CONTEXTO};
+    let (st, pasta) = base_com_admin("conta-diferente").await;
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Maria Caixa", "login": "maria", "perfil": "CAIXA", "senha": "Maria-2026", "mudar_senha": false })).await;
+    // um browser ligado ao servidor com a sessão do admin (as abas partilham-na); a Maria tenta entrar noutra aba
+    let sessao = std::sync::Arc::new(std::sync::Mutex::new(Some(st.sessao().unwrap())));
+    let no_browser = |metodo: &'static str, params: Value| {
+        let ctx = Contexto { sessao: sessao.clone(), posto: st.posto(), api_chave: None, pela_internet: false, ligacao: Some("browser-1".into()) };
+        CONTEXTO.scope(ctx, super::dispatch(&st, metodo, params))
+    };
+    let erro = no_browser("auth.login", json!({ "login": "maria", "senha": "Maria-2026" })).await.unwrap_err().to_string();
+    assert!(erro.starts_with("Conta diferente: este aparelho tem a sessão de Admin"), "{erro}");
+    assert_eq!(sessao.lock().unwrap().as_ref().unwrap().login, "admin", "sem confirmar, nada muda");
+    // senha errada não revela a sessão de ninguém
+    assert!(!no_browser("auth.login", json!({ "login": "maria", "senha": "errada" })).await.unwrap_err().to_string().contains("Conta diferente"));
+    // confirmada a troca
+    no_browser("auth.login", json!({ "login": "maria", "senha": "Maria-2026", "trocar": true })).await.unwrap();
+    assert_eq!(sessao.lock().unwrap().as_ref().unwrap().login, "maria");
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM acessos WHERE evento = 'CONTA_TROCADA'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(n, 1, "a troca fica registada");
+    // a mesma pessoa volta a entrar sem perguntas; no próprio computador (sem ligação) não se pergunta
+    no_browser("auth.login", json!({ "login": "maria", "senha": "Maria-2026" })).await.unwrap();
+    rpc(&st, "auth.login", json!({ "login": "maria", "senha": "Maria-2026" })).await;
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 /// Modo TV: vendas de hoje e do mês, hora a hora, a loja contra a meta, as últimas vendas sem nomes de clientes e os
 /// artigos mais vendidos; as metas só se guardam com «Empresa e rede» e para lojas que existem.
 #[tokio::test]

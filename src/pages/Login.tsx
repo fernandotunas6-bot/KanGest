@@ -35,12 +35,16 @@ export default function Login({ empresa }: { empresa: string | null }) {
   const politica = usePolitica();
   const nav = useNavigate();
   const comPin = !!politica.data?.login_pin;
+  // «Incompatibilidade de conta» (como no Claude): o aparelho tem a sessão de outra pessoa
+  const [contaDiferente, setContaDiferente] = useState<{ nome: string; metodo: "auth.login" | "auth.loginPin"; params: object } | null>(null);
+  const [trocar, setTrocar] = useState(false);
 
   async function entrar(metodo: "auth.login" | "auth.loginPin", params: object) {
     setBusy(true);
     setErro("");
     try {
-      const s = await call<Sessao | { dois_passos: true }>(metodo, params);
+      // depois de «Sair e trocar de conta», todas as voltas (incluindo a do código) levam a confirmação
+      const s = await call<Sessao | { dois_passos: true }>(metodo, trocar ? { ...params, trocar: true } : params);
       if ("dois_passos" in s) {
         setPedirCodigo(true);
         setTocado(false);
@@ -49,7 +53,12 @@ export default function Login({ empresa }: { empresa: string | null }) {
       setSessao(s);
       nav(inicioDe(s), { replace: true });
     } catch (err) {
-      setErro((err as Error).message);
+      const msg = (err as Error).message;
+      if (msg.startsWith("Conta diferente:")) {
+        setContaDiferente({ nome: msg.replace(/^Conta diferente: este aparelho tem a sessão de /, "").replace(/\.$/, ""), metodo, params });
+        return;
+      }
+      setErro(msg);
       setCodigo("");
       if (!pedirCodigo) setSenha("");
       setPin("");
@@ -86,6 +95,43 @@ export default function Login({ empresa }: { empresa: string | null }) {
 
   if (vista === "recuperar") return <RecuperarSenha loginInicial={login} onVoltar={() => setVista("entrar")} onAjuda={ajuda} />;
   if (vista === "perguntas") return <PerguntasAcesso seccao={seccao} onVoltar={() => setVista("entrar")} onAjuda={ajuda} />;
+
+  if (contaDiferente) {
+    const c = contaDiferente;
+    return (
+      <Moldura empresa={empresa} onAjuda={ajuda}>
+        <div className="w-full max-w-[440px] text-center">
+          <h1 className="text-[24px] font-semibold tracking-tight text-ink">Incompatibilidade de conta</h1>
+          <p className="mt-3 text-[15px] leading-relaxed text-ink-2">
+            Este aparelho tem a sessão de <b className="text-ink">{c.nome}</b> (por exemplo, noutra aba deste browser). Para entrar com outra conta, a
+            sessão de {c.nome} termina neste aparelho e as outras abas passam para a conta nova.
+          </p>
+          <div className="mt-7 flex justify-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setContaDiferente(null);
+                setSenha("");
+                setPin("");
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              loading={busy}
+              onClick={() => {
+                setContaDiferente(null);
+                setTrocar(true);
+                void entrar(c.metodo, { ...c.params, trocar: true });
+              }}
+            >
+              Sair e trocar de conta
+            </Button>
+          </div>
+        </div>
+      </Moldura>
+    );
+  }
 
   return (
     <Moldura empresa={empresa} onAjuda={ajuda}>

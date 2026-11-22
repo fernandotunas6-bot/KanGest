@@ -8,6 +8,7 @@ import { call, EVENTO_DESLIGADO, ligacaoWeb, MODO_WEB } from "@/lib/api";
 import LigarWeb from "@/pages/LigarWeb";
 import { useSession } from "@/store/session";
 import type { Sessao } from "@/lib/types";
+import { Button } from "@/components/ui";
 import AppShell from "@/components/layout/AppShell";
 import Setup from "@/pages/Setup";
 import { useAparencia } from "@/lib/aparencia";
@@ -96,8 +97,54 @@ export default function App() {
   return <Principal />;
 }
 
+/**
+ * A sessão deste aparelho mudou de pessoa noutra janela (as abas do mesmo browser partilham a ligação ao servidor):
+ * como a «Incompatibilidade de conta» do Claude, pergunta-se antes de continuar com a conta nova.
+ */
+function ContaMudou({ anterior, nova, onContinuar, onSair }: { anterior: string; nova: string; onContinuar: () => void; onSair: () => void }) {
+  return (
+    <div className="grid h-full place-items-center bg-bg p-8">
+      <div className="w-full max-w-[460px] rounded-2xl border border-line bg-surface p-8 text-center shadow-pop">
+        <h1 className="text-[22px] font-semibold tracking-tight text-ink">Incompatibilidade de conta</h1>
+        <p className="mt-3 text-[15px] leading-relaxed text-ink-2">
+          Esta janela estava com a conta de <b className="text-ink">{anterior}</b>, mas entretanto entrou <b className="text-ink">{nova}</b> neste
+          aparelho (noutra janela ou aba). O que fizer aqui fica em nome de {nova}.
+        </p>
+        <div className="mt-7 flex justify-center gap-2">
+          <Button variant="secondary" onClick={onSair}>
+            Sair e trocar de conta
+          </Button>
+          <Button onClick={onContinuar}>Continuar como {nova}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Principal() {
   const { sessao, setSessao, pode } = useSession();
+  // a sessão deste aparelho mudou noutra janela (outra conta entrou, ou terminou noutro aparelho): confere-se ao
+  // voltar a esta janela e de minuto a minuto
+  const [mudou, setMudou] = useState<Sessao | null>(null);
+  useEffect(() => {
+    if (!sessao) return;
+    const conferir = async () => {
+      try {
+        const s = await call<Sessao | null>("auth.sessao");
+        if (!s) setSessao(null);
+        else if (s.id !== sessao.id) setMudou(s);
+      } catch {
+        /* sem ligação: confere-se na próxima volta */
+      }
+    };
+    const aoVoltar = () => document.visibilityState === "visible" && void conferir();
+    document.addEventListener("visibilitychange", aoVoltar);
+    const t = setInterval(conferir, 60_000);
+    return () => {
+      document.removeEventListener("visibilitychange", aoVoltar);
+      clearInterval(t);
+    };
+  }, [sessao, setSessao]);
   const politica = usePolitica();
   useInatividade(politica.data?.inatividade_min ?? 0, !!sessao && !sessao.bloqueada && !sessao.mudar_senha);
   const estado = useQuery({
@@ -128,6 +175,22 @@ function Principal() {
   if (!estado.data?.inicializado) return <Setup onDone={() => estado.refetch()} />;
   if (!sessao) return <Login empresa={estado.data.empresa} />;
   if (sessao.mudar_senha) return <MudarSenhaObrigatoria />;
+  if (mudou && mudou.id !== sessao.id) {
+    return (
+      <ContaMudou
+        anterior={sessao.nome}
+        nova={mudou.nome}
+        onContinuar={() => {
+          setSessao(mudou);
+          setMudou(null);
+        }}
+        onSair={() => {
+          setMudou(null);
+          void call("auth.logout").finally(() => setSessao(null));
+        }}
+      />
+    );
+  }
 
   return (
     <>
