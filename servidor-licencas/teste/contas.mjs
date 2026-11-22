@@ -1,0 +1,103 @@
+// Testes das contas das empresas no site (portal do cliente), sem rede: node servidor-licencas/teste/contas.mjs
+// Os dados são de exemplo (empresa, NIF e emails fictícios).
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { d1Local } from "./d1-local.mjs";
+import worker from "../src/worker.js";
+
+const ADMIN = "b".repeat(40);
+const env = { DB: d1Local(readFileSync(new URL("../schema.sql", import.meta.url), "utf8")), ADMIN_TOKEN: ADMIN };
+const NIF = "5000000001";
+const EMAIL = "dono@loja-exemplo.test";
+
+async function pedir(metodo, caminho, corpo, token, cabecalhos = {}) {
+  const r = await worker.fetch(
+    new Request("https://licencas.teste" + caminho, {
+      method: metodo,
+      headers: { "content-type": "application/json", "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/131.0 Safari/537.36", ...(token ? { authorization: "Bearer " + token } : {}), ...cabecalhos },
+      body: corpo ? JSON.stringify(corpo) : undefined,
+    }),
+    env,
+  );
+  const tipo = r.headers.get("content-type") ?? "";
+  return { estado: r.status, corpo: tipo.includes("json") ? await r.json() : await r.text(), cabecalhos: r.headers };
+}
+const post = (c, b, t) => pedir("POST", "/v1/conta/" + c, b, t);
+const get = (c, t) => pedir("GET", "/v1/conta/" + c, null, t);
+const codigoAberto = async () => (await env.DB.prepare("SELECT codigo_aberto FROM codigos_conta WHERE email = ?").bind(EMAIL).first())?.codigo_aberto;
+
+// uma empresa registada pelo KanGest, com um computador que já mandou o estado
+await env.DB.prepare("INSERT INTO clientes (nif, empresa, email, telefone, criado_em, experiencia_ate) VALUES (?, 'Loja Exemplo', ?, '900 000 000', '2026-11-01T10:00:00Z', '2026-12-01')").bind(NIF, EMAIL).run();
+await env.DB.prepare("INSERT INTO maquinas (nif, maquina, primeiro_contacto, ultimo_contacto, versao) VALUES (?, 'AAAA-BBBB-CCCC', '2026-11-01T10:00:00Z', '2026-11-22T10:00:00Z', '1.4.0')").bind(NIF).run();
+await env.DB.prepare("INSERT INTO instalacoes (nif, maquina, recebido_em, versao, modo, licenca_estado, licenca_fim, copia_ultima, copia_externa_erro) VALUES (?, 'AAAA-BBBB-CCCC', '2026-11-22T10:00:00Z', '1.4.0', 'loja', 'EXPERIENCIA', '2026-12-01', '2026-11-22T09:00:00', 0)").bind(NIF).run();
+
+// pedir o código: a mesma resposta para quem existe e quem não existe
+const r1 = await post("codigo", { email: "ninguem@exemplo.test" });
+const r2 = await post("codigo", { email: " DONO@loja-exemplo.test " });
+assert.equal(r1.estado, 200); assert.equal(r1.corpo.mensagem, r2.corpo.mensagem, "não revela que emails existem");
+assert.equal((await post("codigo", { email: "isto-nao-e-email" })).estado, 400);
+const codigo = await codigoAberto();
+assert.match(codigo, /^\d{6}$/, "sem envio de email, o código fica para o produtor dar");
+
+// o produtor vê-o no painel, em «Pedidos de registo»
+const resumoProdutor = await pedir("GET", "/admin/api/resumo", null, ADMIN);
+assert.ok(resumoProdutor.corpo.codigos.some((c) => c.tipo === "conta" && c.codigo_aberto === codigo && c.empresa === "Loja Exemplo"));
+
+// definir a senha: código errado, senha fraca, depois certo
+assert.equal((await post("definir-senha", { email: EMAIL, codigo: "000000", senha: "Senha-forte-2026" })).corpo.erro, "Código errado.");
+assert.match((await post("definir-senha", { email: EMAIL, codigo, senha: "curta1" })).corpo.erro, /entre 10 e 128/);
+assert.match((await post("definir-senha", { email: EMAIL, codigo, senha: "semalgarismos" })).corpo.erro, /letras e algarismos/);
+assert.equal((await post("definir-senha", { email: EMAIL, codigo, senha: "Senha-forte-2026" })).estado, 200);
+assert.equal((await post("definir-senha", { email: EMAIL, codigo, senha: "Outra-senha-2026" })).estado, 400, "o código só serve uma vez");
+const guardada = (await env.DB.prepare("SELECT senha FROM contas WHERE nif = ?").bind(NIF).first()).senha;
+assert.match(guardada, /^pbkdf2-sha256\$100000\$/); assert.ok(!guardada.includes("Senha-forte"), "só o resumo");
+
+// entrar
+assert.equal((await post("entrar", { email: EMAIL, senha: "errada-2026x" })).estado, 401);
+assert.equal((await post("entrar", { email: "ninguem@exemplo.test", senha: "Senha-forte-2026" })).estado, 401);
+const e1 = await post("entrar", { email: EMAIL, senha: "Senha-forte-2026" });
+assert.equal(e1.estado, 200); assert.match(e1.corpo.token, /^c1\./);
+const t1 = e1.corpo.token;
+
+// o que a conta mostra
+const res = (await get("resumo", t1)).corpo;
+assert.equal(res.empresa.nome, "Loja Exemplo"); assert.equal(res.empresa.estado, "EXPERIENCIA");
+assert.equal(res.maquinas[0].licenca_estado, "EXPERIENCIA"); assert.equal(res.maquinas[0].copia_ultima, "2026-11-22T09:00:00");
+assert.equal((await get("resumo")).estado, 401, "sem sessão, nada");
+assert.equal((await get("resumo", ADMIN)).estado, 401, "a chave do produtor não abre contas");
+const [v, dados, ass] = t1.split(".");
+const outra = `${v}.${Buffer.from(JSON.stringify({ n: "5000000002", exp: Date.now() + 9e9, s: "x" })).toString("base64url")}.${ass}`;
+assert.equal((await get("resumo", outra)).estado, 401, "não se troca de empresa mexendo no token");
+
+// perfil
+assert.equal((await post("perfil", { telefone: "923 111 222" }, t1)).estado, 200);
+assert.equal((await get("resumo", t1)).corpo.empresa.telefone, "923 111 222");
+assert.equal((await post("perfil", { telefone: "<script>" }, t1)).estado, 400);
+
+// onde fez login e sair em todos
+const t2 = (await post("entrar", { email: EMAIL, senha: "Senha-forte-2026" })).corpo.token;
+let ses = (await get("sessoes", t2)).corpo.sessoes;
+assert.equal(ses.length, 2); assert.equal(ses[0].actual, true); assert.equal(ses[0].aparelho, "Chrome (Mac OS X)");
+assert.ok(ses.every((x) => !("ip" in x)));
+assert.equal((await post("sessoes/terminar-outras", {}, t2)).corpo.terminadas, 1);
+assert.equal((await get("resumo", t1)).estado, 401, "a outra sessão terminou");
+
+// mudar a senha: precisa da actual; termina as outras sessões
+const t3 = (await post("entrar", { email: EMAIL, senha: "Senha-forte-2026" })).corpo.token;
+assert.equal((await post("senha", { actual: "errada", nova: "Nova-senha-2027" }, t2)).estado, 400);
+assert.equal((await post("senha", { actual: "Senha-forte-2026", nova: "Nova-senha-2027" }, t2)).estado, 200);
+assert.equal((await get("resumo", t3)).estado, 401, "mudar a senha termina as outras sessões");
+assert.equal((await get("resumo", t2)).estado, 200, "esta continua");
+assert.equal((await post("entrar", { email: EMAIL, senha: "Senha-forte-2026" })).estado, 401, "a senha antiga já não entra");
+
+// sair
+await post("sair", {}, t2);
+assert.equal((await get("resumo", t2)).estado, 401);
+
+// do site: CORS só para as origens autorizadas
+const pre = await worker.fetch(new Request("https://licencas.teste/v1/conta/resumo", { method: "OPTIONS", headers: { origin: "https://kangest.pages.dev" } }), env);
+assert.equal(pre.status, 204); assert.match(pre.headers.get("access-control-allow-headers"), /authorization/);
+const fora = await worker.fetch(new Request("https://licencas.teste/v1/conta/resumo", { method: "OPTIONS", headers: { origin: "https://intruso.example" } }), env);
+assert.equal(fora.status, 403);
+
+console.log("Contas das empresas: todos os testes passaram.");

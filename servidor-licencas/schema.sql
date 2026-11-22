@@ -146,3 +146,32 @@ CREATE TABLE IF NOT EXISTS sessoes_painel (
     local TEXT,
     terminada_em TEXT
 );
+
+-- Contas das empresas no site (portal do cliente, como as definições da conta do Claude): o dono entra com o email do
+-- registo e uma senha (só o resumo PBKDF2). A senha cria-se ou repõe-se com um código de 6 algarismos.
+CREATE TABLE IF NOT EXISTS contas (
+    nif TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    senha TEXT NOT NULL,
+    criada_em TEXT NOT NULL,
+    actualizada_em TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS codigos_conta (
+    email TEXT PRIMARY KEY,
+    nif TEXT NOT NULL,
+    codigo_hash TEXT NOT NULL,
+    codigo_aberto TEXT,               -- só enquanto o envio de email não estiver configurado (o produtor dá-o)
+    expira_em TEXT NOT NULL,
+    tentativas INTEGER NOT NULL DEFAULT 0,
+    criado_em TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessoes_conta (
+    id TEXT PRIMARY KEY,
+    nif TEXT NOT NULL,
+    criada_em TEXT NOT NULL,
+    ultima_em TEXT NOT NULL,
+    aparelho TEXT,
+    local TEXT,
+    terminada_em TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessoes_conta_nif ON sessoes_conta (nif, terminada_em);
