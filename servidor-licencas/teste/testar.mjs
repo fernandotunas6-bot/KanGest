@@ -2,11 +2,12 @@
 // © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 
 // Teste do servidor de licenças sem rede: node teste/testar.mjs
+// Com KANGEST_BD=postgres, o mesmo teste corre no Postgres da função kangest do Supabase (ver teste/base.mjs).
 // Usa uma chave de teste gerada na hora (ou a de KANGEST_CHAVE_SERVIDOR, para gerar exemplos para o KanGest).
 import assert from "node:assert/strict";
 import { createPrivateKey, createPublicKey, generateKeyPairSync, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { d1Local } from "./d1-local.mjs";
+import { baseDeTeste, motor } from "./base.mjs";
 import worker, { hoje } from "../src/worker.js";
 
 const pem = process.env.KANGEST_CHAVE_SERVIDOR
@@ -14,7 +15,7 @@ const pem = process.env.KANGEST_CHAVE_SERVIDOR
   : generateKeyPairSync("ed25519").privateKey.export({ format: "pem", type: "pkcs8" });
 const publica = createPublicKey(createPrivateKey(pem));
 const ADMIN = "a".repeat(40);
-const env = { DB: d1Local(readFileSync(new URL("../schema.sql", import.meta.url), "utf8")), CHAVE_PRIVADA: pem, ADMIN_TOKEN: ADMIN };
+const env = { DB: await baseDeTeste(), CHAVE_PRIVADA: pem, ADMIN_TOKEN: ADMIN };
 
 async function pedir(metodo, caminho, corpo, token) {
   const r = await worker.fetch(
@@ -172,7 +173,7 @@ assert.equal(r.corpo.licenca, null); assert.equal(r.corpo.estado, "EXPIRADA"); a
 assert.equal((await pedir("GET", "/admin/api/resumo")).estado, 401);
 assert.equal((await pedir("GET", "/admin/api/resumo", null, "b".repeat(40))).estado, 401);
 r = await pedir("GET", "/admin");
-assert.equal(r.estado, 200); assert.match(r.corpo, /Painel do produtor/);
+assert.equal(r.estado, 200); assert.match(r.corpo, /Área do produtor/);
 
 // preços
 r = await admin("plano", { codigo: "COMERCIO", nome: "Comércio", postos: 3, preco_mes: "15000", preco_ano: 150000, activo: true, ordem: 2 });
@@ -493,5 +494,6 @@ assert.equal((await pedir("GET", "/nada")).estado, 404);
   delete env.ADMIN_EMAIL; delete env.ADMIN_SENHA;
 }
 
-console.log("Servidor de licenças: todos os testes passaram.");
+await env.DB.fechar?.();
+console.log(`Servidor de licenças (${motor}): todos os testes passaram.`);
 if (process.env.KANGEST_CHAVE_SERVIDOR) console.log("Licença de exemplo:", exemplo);

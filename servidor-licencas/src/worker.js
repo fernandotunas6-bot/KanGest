@@ -91,7 +91,7 @@ async function contar(env, req, tipo) {
   if (!ip) return 0;
   const r = await env.DB.prepare(
     `INSERT INTO limites (chave, janela, n) VALUES (?1, ?2, 1)
-     ON CONFLICT(chave) DO UPDATE SET n = CASE WHEN janela = ?2 THEN n + 1 ELSE 1 END, janela = ?2
+     ON CONFLICT(chave) DO UPDATE SET n = CASE WHEN limites.janela = ?2 THEN limites.n + 1 ELSE 1 END, janela = ?2
      RETURNING n`,
   ).bind(`${tipo}:${ip}`, janelaHora()).first();
   // de vez em quando, esquece as horas passadas
@@ -218,7 +218,7 @@ function idLicenca() {
 /** Emite (ou reaproveita, se já existe uma igual) e regista uma licença. */
 async function emitir(env, { nif, empresa, plano, postos, inicio, fim, tolerancia = TOLERANCIA, maquina = null, modulos = [], origem }) {
   const igual = await env.DB.prepare(
-    `SELECT id, chave FROM licencas WHERE nif = ? AND empresa = ? AND IFNULL(maquina,'') = ? AND plano = ? AND postos = ? AND inicio = ? AND fim = ?
+    `SELECT id, chave FROM licencas WHERE nif = ? AND empresa = ? AND COALESCE(maquina,'') = ? AND plano = ? AND postos = ? AND inicio = ? AND fim = ?
        AND tolerancia = ? ORDER BY emitida_em DESC LIMIT 1`,
   ).bind(nif, empresa, maquina ?? "", plano, postos, inicio, fim, tolerancia).first();
   if (igual) return { id: igual.id, chave: igual.chave };
@@ -367,7 +367,7 @@ async function confirmar(env, c) {
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO maquinas (nif, maquina, primeiro_contacto, ultimo_contacto, versao) VALUES (?1, ?2, ?3, ?3, ?4)
-       ON CONFLICT(nif, maquina) DO UPDATE SET ultimo_contacto = ?3, versao = COALESCE(?4, versao)`,
+       ON CONFLICT(nif, maquina) DO UPDATE SET ultimo_contacto = ?3, versao = COALESCE(?4, maquinas.versao)`,
     ).bind(nif, maquina, t, texto(c.versao, 20) || null),
     env.DB.prepare("DELETE FROM codigos WHERE nif = ? AND maquina = ?").bind(nif, maquina),
   ]);
@@ -940,14 +940,14 @@ function senhaProvisoria() {
 async function subirVersao(env, nif) {
   await env.DB.prepare(
     `INSERT INTO equipa_versoes (nif, versao, actualizado_em) VALUES (?, 1, ?)
-     ON CONFLICT (nif) DO UPDATE SET versao = versao + 1, actualizado_em = excluded.actualizado_em`,
+     ON CONFLICT (nif) DO UPDATE SET versao = equipa_versoes.versao + 1, actualizado_em = excluded.actualizado_em`,
   ).bind(nif, agora()).run();
 }
 
 /** O que o KanGest comunicou (perfis e lojas válidos) e o que está gerido no site. */
 async function equipaGerida(env, nif) {
   const [f, l, p, v, inv] = await env.DB.batch([
-    env.DB.prepare("SELECT id, login, nome, perfil, loja, ativo, senha_provisoria IS NOT NULL AS senha_pendente FROM funcionarios WHERE nif = ? ORDER BY ativo DESC, nome").bind(nif),
+    env.DB.prepare("SELECT id, login, nome, perfil, loja, ativo, CASE WHEN senha_provisoria IS NULL THEN 0 ELSE 1 END AS senha_pendente FROM funcionarios WHERE nif = ? ORDER BY ativo DESC, nome").bind(nif),
     env.DB.prepare("SELECT id, nome, ativo FROM lojas_geridas WHERE nif = ? ORDER BY nome").bind(nif),
     env.DB.prepare("SELECT id, descricao, loja FROM postos_geridos WHERE nif = ? ORDER BY descricao").bind(nif),
     env.DB.prepare("SELECT versao, actualizado_em, aplicada, aplicada_em, aplicada_maquina FROM equipa_versoes WHERE nif = ?").bind(nif),
