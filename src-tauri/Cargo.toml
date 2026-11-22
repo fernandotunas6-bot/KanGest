@@ -1,6 +1,6 @@
 [package]
 name = "kigest"
-version = "1.4.1"
+version = "1.4.2"
 description = "KanGest — Gestão Comercial e POS"
 authors = ["Valentino Canguele <valentinocanguele@gmail.com>"]
 license-file = "../LICENSE"
