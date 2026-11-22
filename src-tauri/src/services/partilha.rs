@@ -90,7 +90,7 @@ pub async fn config_guardar(st: &AppState, i: ConfigIn) -> AppResult<Value> {
 }
 
 /// Configuração completa (com a senha) para enviar.
-async fn servidor(st: &AppState) -> AppResult<(smtp::Servidor, Vec<String>)> {
+pub(crate) async fn servidor(st: &AppState) -> AppResult<(smtp::Servidor, Vec<String>)> {
     let c = cfg(&st.pool).await?;
     if c.servidor.is_empty() || !smtp::email_valido(&c.remetente) {
         return Err(AppError::msg("O envio por email não está configurado (Configurações › Email)."));
@@ -105,7 +105,7 @@ async fn servidor(st: &AppState) -> AppResult<(smtp::Servidor, Vec<String>)> {
     Ok((smtp::Servidor { servidor: c.servidor, porta: c.porta, seguranca: c.seguranca, utilizador: c.utilizador, senha, remetente: c.remetente, nome }, copia))
 }
 
-async fn enviar(srv: smtp::Servidor, m: smtp::Mensagem) -> AppResult<String> {
+pub(crate) async fn enviar(srv: smtp::Servidor, m: smtp::Mensagem) -> AppResult<String> {
     tokio::task::spawn_blocking(move || smtp::enviar(&srv, &m)).await.map_err(|e| AppError::msg(e.to_string()))?
 }
 

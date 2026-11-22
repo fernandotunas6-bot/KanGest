@@ -679,7 +679,7 @@ pub(crate) async fn responder(st: &AppState, q: &Pergunta, hoje: NaiveDate) -> A
             ))
         }
         Intencao::Previsao => {
-            let h = inteligencia::historico(st, hoje).await?;
+            let h = inteligencia::historico(st, hoje, st.loja()).await?;
             let f = inteligencia::fecho_do_mes(&h, hoje);
             if f.is_null() {
                 return Ok(resposta("Previsão do mês".to_string(), vec!["Ainda há pouco histórico: a previsão aparece com 14 dias de vendas.".into()], Vec::new(), "/", None));
@@ -698,8 +698,8 @@ pub(crate) async fn responder(st: &AppState, q: &Pergunta, hoje: NaiveDate) -> A
             ))
         }
         Intencao::Esgotar => {
-            let h = inteligencia::historico(st, hoje).await?;
-            let r = inteligencia::ruptura(st, hoje, &h).await?;
+            let h = inteligencia::historico(st, hoje, st.loja()).await?;
+            let r = inteligencia::ruptura(st, hoje, &h, st.loja()).await?;
             let n = r["n"].as_i64().unwrap_or(0);
             let linhas = r["artigos"]
                 .as_array()
@@ -722,8 +722,8 @@ pub(crate) async fn responder(st: &AppState, q: &Pergunta, hoje: NaiveDate) -> A
             ))
         }
         Intencao::Alertas => {
-            let h = inteligencia::historico(st, hoje).await?;
-            let a = inteligencia::alertas(st, &h, hoje).await?;
+            let h = inteligencia::historico(st, hoje, st.loja()).await?;
+            let a = inteligencia::alertas(st, &h, hoje, st.loja()).await?;
             let nomes: Vec<String> = a.iter().map(|x| nome_alerta(x["tipo"].as_str().unwrap_or("")).to_string()).collect();
             Ok(resposta(
                 "Alertas".to_string(),

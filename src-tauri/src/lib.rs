@@ -139,6 +139,8 @@ pub fn run() {
             services::fe::iniciar(estado.clone());
             // Cópias de segurança periódicas enquanto o programa está aberto.
             services::sistema::iniciar_agendamento(estado.clone());
+            // Resumo diário ao dono por email (se estiver ligado no painel).
+            services::resumo_email::iniciar(estado.clone());
             app.manage(estado);
             Ok(())
         })

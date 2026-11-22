@@ -35,6 +35,7 @@ mod posto;
 mod rh;
 mod tesouraria;
 mod relatorios;
+pub mod resumo_email;
 pub(crate) mod saft;
 mod series;
 mod setup;
@@ -422,6 +423,10 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "inteligencia.painel" => inteligencia::painel(st).await,
         // assistente de perguntas (Ctrl+K): «quanto vendi ontem?», «quem me deve mais?»
         "inteligencia.perguntar" => assistente::perguntar(st, p(params)?).await,
+        // resumo diário ao dono por email (opcional), pelo servidor de email da empresa
+        "inteligencia.resumoConfig" => resumo_email::config_obter(st).await,
+        "inteligencia.resumoGuardar" => resumo_email::config_guardar(st, p(params)?).await,
+        "inteligencia.resumoEnviar" => resumo_email::enviar_agora(st).await,
         "relatorios.vendas" => relatorios::vendas(st, p(params)?).await,
         "relatorios.sintese" => relatorios::sintese(st, p(params)?).await,
         "relatorios.top" => relatorios::top(st, p(params)?).await,

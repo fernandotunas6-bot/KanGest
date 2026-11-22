@@ -2,16 +2,19 @@
 
 // KanGest inteligente no painel: o resumo de ontem, as previsões e os alertas. Tudo é calculado neste computador (ou no
 // servidor da rede) a partir dos dados da empresa (services/inteligencia.rs); nada sai para fora.
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import {
-  ArrowDownRight, Calculator, CalendarRange, CheckCircle2, ChevronRight, FileX2, HandCoins, PackageX, Percent, Snowflake, Sparkles, Tag,
+  ArrowDownRight, Calculator, CalendarRange, CheckCircle2, ChevronRight, FileX2, HandCoins, Mail, PackageX, Percent, Send, Snowflake, Sparkles, Tag,
   TrendingDown, UserX, type LucideIcon,
 } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, pct, qtd } from "@/lib/format";
 import { useKz } from "@/lib/privacidade";
-import { Badge, Card, Delta, cn } from "@/components/ui";
+import { useSession } from "@/store/session";
+import { Badge, Button, Card, Delta, Field, Input, Modal, Select, cn } from "@/components/ui";
 
 interface Resumo {
   dia: string;
@@ -115,9 +118,23 @@ export default function Inteligencia() {
 function ResumoDeOntem({ r }: { r?: Resumo }) {
   const nav = useNavigate();
   const kz = useKz();
+  const [email, setEmail] = useState(false);
+  const podeConfigurar = useSession((s) => s.tem("sistema.configuracoes"));
   return (
     <Card className="flex flex-col p-5">
-      <Titulo icon={Sparkles} titulo="Resumo de ontem" sub={r ? `${r.dia_semana[0].toUpperCase()}${r.dia_semana.slice(1)}, ${data(r.dia)}` : "…"} />
+      <Titulo
+        icon={Sparkles}
+        titulo="Resumo de ontem"
+        sub={r ? `${r.dia_semana[0].toUpperCase()}${r.dia_semana.slice(1)}, ${data(r.dia)}` : "…"}
+        extra={
+          podeConfigurar ? (
+            <Button variant="ghost" size="sm" onClick={() => setEmail(true)} title="Receber este resumo por email todas as manhãs">
+              <Mail className="size-4" /> Por email
+            </Button>
+          ) : undefined
+        }
+      />
+      {email && <ResumoPorEmail onFechar={() => setEmail(false)} />}
       {!r ? (
         <Esqueleto />
       ) : r.docs === 0 ? (
@@ -347,5 +364,100 @@ function CartaoAlertas({ a }: { a?: Alerta[] }) {
         </div>
       )}
     </Card>
+  );
+}
+
+interface ConfigResumo {
+  ativo: boolean;
+  para: string;
+  hora: number;
+  enviado: string | null;
+  email_configurado: boolean;
+}
+
+/** O resumo diário por email: todas as manhãs, à hora escolhida, pelo email da empresa (services/resumo_email.rs). */
+function ResumoPorEmail({ onFechar }: { onFechar: () => void }) {
+  const nav = useNavigate();
+  const qc = useQueryClient();
+  const { data: c } = useQuery({ queryKey: ["resumo-email"], queryFn: () => call<ConfigResumo>("inteligencia.resumoConfig") });
+  const [ativo, setAtivo] = useState(false);
+  const [para, setPara] = useState("");
+  const [hora, setHora] = useState(8);
+  useEffect(() => {
+    if (!c) return;
+    setAtivo(c.ativo);
+    setPara(c.para);
+    setHora(c.hora);
+  }, [c]);
+  const sujo = !!c && (ativo !== c.ativo || para !== c.para || hora !== c.hora);
+  const guardar = useMutation({
+    mutationFn: () => call<ConfigResumo>("inteligencia.resumoGuardar", { ativo, para, hora }),
+    onSuccess: (v) => {
+      qc.setQueryData(["resumo-email"], v);
+      toast.success(v.ativo ? `O resumo sai todos os dias a partir das ${String(v.hora).padStart(2, "0")}:00.` : "Resumo por email desligado.");
+      onFechar();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const enviar = useMutation({
+    mutationFn: async () => {
+      const v = await call<ConfigResumo>("inteligencia.resumoGuardar", { ativo, para, hora });
+      qc.setQueryData(["resumo-email"], v);
+      return call<{ mensagem: string }>("inteligencia.resumoEnviar");
+    },
+    onSuccess: (r) => toast.success(r.mensagem),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Modal
+      open
+      onClose={onFechar}
+      title="Resumo diário por email"
+      width="max-w-lg"
+      sujo={sujo}
+      onGuardar={() => guardar.mutate()}
+      footer={
+        <>
+          <Button variant="secondary" onClick={() => enviar.mutate()} loading={enviar.isPending} disabled={!para.trim() || !c?.email_configurado}>
+            <Send className="size-4" /> Enviar agora
+          </Button>
+          <Button onClick={() => guardar.mutate()} loading={guardar.isPending}>
+            Guardar
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4 text-[13.5px]">
+        <p className="text-ink-2">
+          Todas as manhãs, o resumo de ontem, as previsões e os alertas deste painel, da empresa toda. É calculado neste computador e sai pelo email da
+          empresa a partir da hora escolhida, enquanto o KanGest estiver aberto (numa rede, no servidor).
+        </p>
+        {c && !c.email_configurado && (
+          <div className="rounded-lg border border-accent/30 bg-accent-50 px-3 py-2.5 text-accent-ink">
+            O email da empresa ainda não está configurado.{" "}
+            <button className="font-medium underline underline-offset-2" onClick={() => nav("/configuracoes")}>
+              Configurar em Configurações › Email
+            </button>
+          </div>
+        )}
+        <label className="flex items-center gap-2.5 font-medium">
+          <input type="checkbox" className="size-4" checked={ativo} onChange={(e) => setAtivo(e.target.checked)} />
+          Enviar o resumo todos os dias
+        </label>
+        <Field label="Para" hint="Um ou mais emails, separados por vírgulas.">
+          <Input value={para} onChange={(e) => setPara(e.target.value)} placeholder="dono@empresa.ao" type="text" autoComplete="email" />
+        </Field>
+        <Field label="A partir das">
+          <Select value={hora} onChange={(e) => setHora(Number(e.target.value))} className="w-32">
+            {Array.from({ length: 24 }, (_, h) => (
+              <option key={h} value={h}>
+                {String(h).padStart(2, "0")}:00
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {c?.enviado && <p className="text-[12.5px] text-ink-3">Último envio: {data(c.enviado)}</p>}
+      </div>
+    </Modal>
   );
 }

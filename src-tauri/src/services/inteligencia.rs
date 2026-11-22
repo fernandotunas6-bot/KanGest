@@ -110,12 +110,16 @@ pub(crate) fn variacao(actual: i64, habitual: f64) -> Option<i64> {
 
 /// O filtro da loja (utilizador de uma só loja): o id vem da sessão, é um inteiro.
 pub(crate) fn filtro_loja(st: &AppState) -> String {
-    st.loja().map(|a| format!(" AND d.armazem_id = {a}")).unwrap_or_default()
+    filtro_de(st.loja())
+}
+/// O filtro de uma loja (armazém); `None` é a empresa toda (o resumo diário por email).
+pub(crate) fn filtro_de(armazem: Option<i64>) -> String {
+    armazem.map(|a| format!(" AND d.armazem_id = {a}")).unwrap_or_default()
 }
 
-pub(crate) async fn historico(st: &AppState, hoje: NaiveDate) -> AppResult<Historico> {
+pub(crate) async fn historico(st: &AppState, hoje: NaiveDate, armazem: Option<i64>) -> AppResult<Historico> {
     let p = &st.pool;
-    let loja = filtro_loja(st);
+    let loja = filtro_de(armazem);
     let desde = iso(hoje - Duration::days(JANELA));
     let totais = sqlx::query(&format!(
         "SELECT d.data_emissao AS dia, SUM({SINAL} * d.total) AS total, COUNT(*) AS docs
@@ -160,25 +164,26 @@ pub(crate) async fn historico(st: &AppState, hoje: NaiveDate) -> AppResult<Histo
 pub async fn painel(st: &AppState) -> AppResult<Value> {
     st.exigir_perm("relatorios.ver")?;
     let hoje = data(&db::hoje()).unwrap_or_else(|| chrono::Local::now().date_naive());
-    let h = historico(st, hoje).await?;
+    let loja = st.loja();
+    let h = historico(st, hoje, loja).await?;
     Ok(json!({
         "hoje": iso(hoje),
-        "resumo": resumo_do_dia(st, &h, hoje - Duration::days(1)).await?,
+        "resumo": resumo_do_dia(st, &h, hoje - Duration::days(1), loja).await?,
         "previsoes": {
             "fecho_mes": fecho_do_mes(&h, hoje),
-            "ruptura": ruptura(st, hoje, &h).await?,
-            "tesouraria": tesouraria(st, hoje).await?,
+            "ruptura": ruptura(st, hoje, &h, loja).await?,
+            "tesouraria": tesouraria(st, hoje, loja).await?,
         },
-        "alertas": alertas(st, &h, hoje).await?,
+        "alertas": alertas(st, &h, hoje, loja).await?,
     }))
 }
 
 // ------------------------------------------------------------------ resumo do dia
 
 /// O resumo de um dia (normalmente ontem), face ao habitual nesse dia da semana.
-pub(crate) async fn resumo_do_dia(st: &AppState, h: &Historico, dia: NaiveDate) -> AppResult<Value> {
+pub(crate) async fn resumo_do_dia(st: &AppState, h: &Historico, dia: NaiveDate, armazem: Option<i64>) -> AppResult<Value> {
     let p = &st.pool;
-    let loja = filtro_loja(st);
+    let loja = filtro_de(armazem);
     let x = h.em(dia);
     let habitual = h.media_dia_semana(dia, dia, 4);
     let top = sqlx::query(&format!(
@@ -248,7 +253,7 @@ pub(crate) fn fecho_do_mes(h: &Historico, hoje: NaiveDate) -> Value {
 
 /// Os artigos que esgotam nos próximos 7 dias ao ritmo de venda (últimos 30 dias, ou desde a primeira venda),
 /// contando o que já está encomendado ao fornecedor.
-pub(crate) async fn ruptura(st: &AppState, hoje: NaiveDate, h: &Historico) -> AppResult<Value> {
+pub(crate) async fn ruptura(st: &AppState, hoje: NaiveDate, h: &Historico, armazem: Option<i64>) -> AppResult<Value> {
     let Some(primeira) = h.primeira else { return Ok(json!({ "n": 0, "artigos": [] })) };
     let base = (hoje - primeira).num_days().clamp(7, 30);
     let rows = sqlx::query(
@@ -270,7 +275,7 @@ pub(crate) async fn ruptura(st: &AppState, hoje: NaiveDate, h: &Historico) -> Ap
          WHERE a.ativo = 1 AND a.controla_stock = 1 AND a.composto = 0 AND v.q > 0",
     )
     .bind(iso(hoje - Duration::days(base)))
-    .bind(st.loja())
+    .bind(armazem)
     .bind(iso(hoje))
     .fetch_all(&st.pool)
     .await?;
@@ -297,8 +302,8 @@ pub(crate) async fn ruptura(st: &AppState, hoje: NaiveDate, h: &Historico) -> Ap
 }
 
 /// O que entra (clientes) e sai (fornecedores) nos próximos 30 dias pelos vencimentos, e o que já está em atraso.
-async fn tesouraria(st: &AppState, hoje: NaiveDate) -> AppResult<Value> {
-    let loja = filtro_loja(st);
+pub(crate) async fn tesouraria(st: &AppState, hoje: NaiveDate, armazem: Option<i64>) -> AppResult<Value> {
+    let loja = filtro_de(armazem);
     let r = sqlx::query(&format!(
         "SELECT COALESCE(SUM(CASE WHEN t.grupo = 'VENDAS' AND v >= ?1 AND v <= date(?1, '+30 day') THEN d.valor_pendente END), 0) AS entra,
                 COALESCE(SUM(CASE WHEN t.grupo = 'VENDAS' AND v < ?1 THEN d.valor_pendente END), 0) AS entra_atraso,
@@ -324,9 +329,9 @@ fn alerta(tipo: &str, tom: &str, n: i64, valor: i64, ligacao: &str, itens: Vec<V
     json!({ "tipo": tipo, "tom": tom, "n": n, "valor": valor, "ligacao": ligacao, "itens": itens, "extra": extra })
 }
 
-pub(crate) async fn alertas(st: &AppState, h: &Historico, hoje: NaiveDate) -> AppResult<Vec<Value>> {
+pub(crate) async fn alertas(st: &AppState, h: &Historico, hoje: NaiveDate, armazem: Option<i64>) -> AppResult<Vec<Value>> {
     let p = &st.pool;
-    let loja = filtro_loja(st);
+    let loja = filtro_de(armazem);
     let semana = iso(hoje - Duration::days(7));
     let mut v = Vec::new();
 
@@ -364,7 +369,7 @@ pub(crate) async fn alertas(st: &AppState, h: &Historico, hoje: NaiveDate) -> Ap
          ORDER BY c.fechada_em DESC LIMIT 60",
     )
     .bind(&semana)
-    .bind(st.loja())
+    .bind(armazem)
     .fetch_all(p)
     .await?;
     let mut caixas = Vec::new();
@@ -509,7 +514,7 @@ pub(crate) async fn alertas(st: &AppState, h: &Historico, hoje: NaiveDate) -> Ap
          ORDER BY valor DESC",
     )
     .bind(iso(hoje))
-    .bind(st.loja())
+    .bind(armazem)
     .fetch_all(p)
     .await?;
     if !parado.is_empty() {
