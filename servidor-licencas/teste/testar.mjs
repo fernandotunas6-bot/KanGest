@@ -99,6 +99,48 @@ assert.equal(r.estado, 401);
 r = await post("/v1/renovar", { nif: NIF, maquina: M1, versao: "1.0.1", segredo: SEGREDO_M1 });
 assert.equal(r.estado, 200); assert.equal(ler(r.corpo.licenca).id, idExperiencia);
 
+// estado da instalação na verificação (1.4+): licença e cópias aparecem na ficha; o que não é data é descartado
+{
+  const antiga = "2020-01-01T09:00:00";
+  r = await post("/v1/renovar", {
+    nif: NIF, maquina: M1, versao: "1.4.0", segredo: SEGREDO_M1,
+    estado: { modo: "escola", licenca: { estado: "EXPERIENCIA", fim: "2099-12-31" }, copias: { ultima: antiga, ultima_externa: "<script>", erro_externa: true } },
+  });
+  assert.equal(r.estado, 200);
+  const ficha = (await admin("cliente?nif=" + NIF)).corpo;
+  const m = ficha.maquinas.find((x) => x.maquina === M1);
+  assert.equal(m.modo, "escola"); assert.equal(m.licenca_estado, "EXPERIENCIA"); assert.equal(m.licenca_fim, "2099-12-31");
+  assert.equal(m.copia_ultima, antiga); assert.equal(m.copia_externa_ultima, null, "o que não é data não se guarda"); assert.equal(m.copia_externa_erro, 1);
+  const res = (await admin("resumo")).corpo;
+  assert.equal(res.sem_copia, 1, "cópia com mais de 7 dias conta no resumo");
+  assert.equal(res.clientes.find((c) => c.nif === NIF).sem_copia, true);
+  // uma verificação sem estado (versão antiga) não apaga o que havia
+  await post("/v1/renovar", { nif: NIF, maquina: M1, versao: "1.3.4", segredo: SEGREDO_M1 });
+  assert.equal((await admin("cliente?nif=" + NIF)).corpo.maquinas.find((x) => x.maquina === M1).licenca_estado, "EXPERIENCIA");
+}
+
+// área do produtor no site: CORS só para as origens autorizadas; o token continua obrigatório
+{
+  const pedirDe = (origem, metodo, token) => worker.fetch(new Request("https://licencas.teste/admin/api/resumo", {
+    method: metodo, headers: { origin: origem, ...(token ? { authorization: "Bearer " + token } : {}) },
+  }), env);
+  let x = await pedirDe("https://kangest.pages.dev", "OPTIONS");
+  assert.equal(x.status, 204); assert.equal(x.headers.get("access-control-allow-origin"), "https://kangest.pages.dev");
+  assert.match(x.headers.get("access-control-allow-headers"), /authorization/);
+  x = await pedirDe("https://kangest.pages.dev", "GET", ADMIN);
+  assert.equal(x.status, 200); assert.equal(x.headers.get("access-control-allow-origin"), "https://kangest.pages.dev");
+  x = await pedirDe("https://kangest.pages.dev", "GET");
+  assert.equal(x.status, 401, "sem token, nada");
+  x = await pedirDe("https://intruso.example", "OPTIONS");
+  assert.equal(x.status, 403); assert.equal(x.headers.get("access-control-allow-origin"), null);
+  x = await pedirDe("https://intruso.example", "GET", ADMIN);
+  assert.equal(x.headers.get("access-control-allow-origin"), null, "outra origem não recebe CORS");
+  env.ADMIN_ORIGENS = "https://kangest.ao, https://www.kangest.ao/";
+  assert.equal((await pedirDe("https://www.kangest.ao", "OPTIONS")).status, 204);
+  assert.equal((await pedirDe("https://kangest.pages.dev", "OPTIONS")).status, 403);
+  delete env.ADMIN_ORIGENS;
+}
+
 // segundo computador do mesmo NIF: a experiência NÃO recomeça
 // renovação com o segredo de cada computador (recebido ao confirmar o registo)
 const SEGREDOS = {};
