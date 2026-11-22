@@ -55,6 +55,7 @@
   .s-EXPERIENCIA { background: var(--brand-50); color: var(--brand); }
   .s-TOLERANCIA { background: var(--accent-50); color: #8a5a10; }
   .s-EXPIRADA, .s-BLOQUEADA { background: var(--danger-50); color: var(--danger); }
+  .s-POR_REGISTAR { background: var(--sunken); color: var(--ink-2); }
   .entrada { max-width: 420px; margin: 12vh auto; }
   .chave { word-break: break-all; font-family: var(--mono); font-size: 12px; background: var(--sunken); padding: 10px 12px; border-radius: 9px; max-height: 120px; overflow: auto; }
   .aviso { background: var(--accent-50); border: 1px solid #f0d49f; color: #6b4708; border-radius: 10px; padding: 10px 14px; margin-bottom: 18px; }
@@ -151,7 +152,7 @@
 
     <div data-painel="clientes" class="cartao">
       <div class="grelha" style="margin-bottom:12px"><label>Procurar <input id="procura" placeholder="Empresa, NIF, email ou telefone"></label>
-        <label>Estado <select id="filtro"><option value="">Todos</option><option>EXPERIENCIA</option><option>ACTIVA</option><option>TOLERANCIA</option><option>EXPIRADA</option></select></label></div>
+        <label>Estado <select id="filtro"><option value="">Todos</option><option>EXPERIENCIA</option><option>ACTIVA</option><option>TOLERANCIA</option><option>EXPIRADA</option><option value="POR_REGISTAR">POR REGISTAR</option></select></label></div>
       <div class="tabela"><table><thead><tr><th>Empresa</th><th>NIF</th><th>Contacto</th><th>Estado</th><th>Plano</th><th>Até</th><th class="num">Comp.</th><th>Último contacto</th></tr></thead><tbody id="t-clientes"></tbody></table></div>
     </div>
 
@@ -220,7 +221,7 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const dmy = (d) => d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "—";
 const quando = (d) => d ? new Date(d).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
 const kz = (c) => (Number(c || 0) / 100).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " Kz";
-const ROTULOS = { EXPERIENCIA: "Experiência", ACTIVA: "Activa", TOLERANCIA: "Tolerância", EXPIRADA: "Expirada", BLOQUEADA: "Bloqueada" };
+const ROTULOS = { EXPERIENCIA: "Experiência", ACTIVA: "Activa", TOLERANCIA: "Tolerância", EXPIRADA: "Expirada", BLOQUEADA: "Bloqueada", POR_REGISTAR: "Por registar" };
 const nomePlano = (c) => (dados?.planos.find((p) => p.codigo === c)?.nome) || (c === "EXPERIENCIA" ? "Experiência" : c || "—");
 const ORIGENS = { EXPERIENCIA: "Experiência", RENOVACAO: "Servidor", PAINEL: "Manual" };
 const selo = (e) => `<span class="selo s-${esc(e)}">${esc(ROTULOS[e] || e)}</span>`;
@@ -292,11 +293,11 @@ function desenharClientes() {
 
 function desenharPedidos() {
   $("#t-pedidos").innerHTML = dados.codigos.length ? dados.codigos.map((p) => `<tr>
-    <td><b>${esc(p.empresa)}</b></td><td class="mono">${esc(p.nif)}</td><td>${p.tipo === "conta" ? '<span class="selo s-EXPERIENCIA">Conta do site</span>' : `<span class="mono">${esc(p.maquina)}</span>`}</td>
+    <td><b>${esc(p.empresa)}</b></td><td class="mono">${esc(p.nif)}</td><td>${p.tipo === "conta" ? '<span class="selo s-EXPERIENCIA">Conta do site</span>' : p.tipo === "conta-nova" ? '<span class="selo s-POR_REGISTAR">Conta nova</span>' : `<span class="mono">${esc(p.maquina)}</span>`}</td>
     <td>${esc(p.email || "")}<div class="fraco">${esc(p.telefone || "")}</div></td>
     <td class="mono"><b>${p.codigo_aberto ? esc(p.codigo_aberto) : '<span class="fraco">enviado por email</span>'}</b></td>
     <td>${p.expirado ? selo("EXPIRADA") : quando(p.expira_em)}</td>
-    <td>${p.tipo === "conta" ? "" : `<button class="perigo" data-apagar-pedido="${esc(p.nif)}|${esc(p.maquina)}">Apagar</button>`}</td></tr>`).join("")
+    <td>${p.tipo !== "registo" ? "" : `<button class="perigo" data-apagar-pedido="${esc(p.nif)}|${esc(p.maquina)}">Apagar</button>`}</td></tr>`).join("")
     : `<tr><td colspan="7" class="vazio">Não há pedidos por confirmar.</td></tr>`;
 }
 

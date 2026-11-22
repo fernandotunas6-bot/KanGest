@@ -35,12 +35,16 @@
   .s-EXPERIENCIA { background: var(--brand-50); color: var(--brand); }
   .s-TOLERANCIA { background: var(--accent-50); color: #8a5a10; }
   .s-EXPIRADA, .s-BLOQUEADA, .s-mau { background: var(--danger-50); color: var(--danger); }
+  .s-POR_REGISTAR { background: var(--sunken); color: var(--ink-2); }
   /* entrada */
+  .entrada .outra { margin: 22px 0 0; padding-top: 16px; border-top: 1px solid var(--line); font-size: 14px; color: var(--ink-2); line-height: 1.8; }
+  .entrada .dupla { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .entrada { max-width: 420px; margin: 12vh auto; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 34px 32px; }
   .entrada .marca { font-size: 30px; font-weight: 800; color: var(--brand); letter-spacing: -.01em; }
   .entrada h1 { font-size: 20px; margin: 6px 0 4px; }
   .entrada form { display: grid; gap: 14px; margin-top: 18px; }
   .entrada .accoes { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  @media (max-width: 460px) { .entrada { margin: 6vh 16px; padding: 28px 22px; } .entrada .dupla { grid-template-columns: 1fr; } }
   /* aplicação: como as definições da conta do Claude */
   header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 10px 24px; background: var(--surface); border-bottom: 1px solid var(--line); }
   header .marca { font-size: 18px; font-weight: 700; color: var(--brand); }
@@ -98,10 +102,30 @@
   <form id="form-entrar">
     <label>Email <input id="email" type="email" autocomplete="username" required></label>
     <label>Senha <input id="senha" type="password" autocomplete="current-password" required></label>
-    <div class="accoes"><button class="primario">Entrar</button><button type="button" class="ligacao" id="ir-codigo">Criar conta ou esqueci-me da senha</button></div>
+    <div class="accoes"><button class="primario">Entrar</button><button type="button" class="ligacao" id="ir-codigo">Esqueci-me da senha</button></div>
+    <p class="outra">Ainda não tem conta? <button type="button" class="ligacao" data-ir-vista="criar">Criar conta</button><br>
+      Já registou o KanGest num computador? <button type="button" class="ligacao" id="ir-activar">Activar a conta</button></p>
+  </form>
+  <form id="form-criar" hidden>
+    <p class="fraco" style="margin:0">Para empresas novas, antes de instalar o programa. Depois, transfira o KanGest e registe-o com o mesmo NIF: a experiência de 30 dias começa nesse dia.</p>
+    <label>Nome da empresa <input id="n-empresa" autocomplete="organization" maxlength="120" required></label>
+    <div class="dupla">
+      <label>NIF <input id="n-nif" inputmode="numeric" autocomplete="off" maxlength="20" required></label>
+      <label>Telefone (opcional) <input id="n-telefone" type="tel" autocomplete="tel" maxlength="30"></label>
+    </div>
+    <label>Email <input id="n-email" type="email" autocomplete="email" maxlength="120" required></label>
+    <div class="accoes"><button class="primario">Enviar código</button><button type="button" class="ligacao" data-voltar>Já tenho conta</button></div>
+  </form>
+  <form id="form-criar-codigo" hidden>
+    <p class="fraco" style="margin:0" id="criar-enviado">Enviámos um código de 6 algarismos para o seu email.</p>
+    <label>Código (6 algarismos) <input id="n-codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>
+    <label>Senha <input id="n-senha" type="password" autocomplete="new-password" minlength="10" required></label>
+    <label>Repita a senha <input id="n-senha2" type="password" autocomplete="new-password" minlength="10" required></label>
+    <p class="fraco" style="margin:0">Pelo menos 10 caracteres, com letras e algarismos.</p>
+    <div class="accoes"><button class="primario">Criar conta</button><button type="button" class="ligacao" data-ir-vista="criar">Pedir outro código</button></div>
   </form>
   <form id="form-codigo" hidden>
-    <p class="fraco" style="margin:0">Use o email com que registou a empresa no KanGest. Enviamos um código de 6 algarismos para definir a senha.</p>
+    <p class="fraco" style="margin:0" id="codigo-texto">Escreva o email da conta. Enviamos um código de 6 algarismos para definir uma senha nova.</p>
     <label>Email do registo <input id="email-codigo" type="email" autocomplete="email" required></label>
     <div class="accoes"><button class="primario">Enviar código</button><button type="button" class="ligacao" data-voltar>Voltar a entrar</button></div>
   </form>
@@ -221,7 +245,7 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const dmy = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "—");
 const quando = (d) => (d ? new Date(d).toLocaleString("pt-PT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
 const kz = (c) => (Number(c || 0) / 100).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " Kz";
-const ROTULOS = { EXPERIENCIA: "Experiência", ACTIVA: "Activa", TOLERANCIA: "Tolerância", EXPIRADA: "Expirada", BLOQUEADA: "Bloqueada" };
+const ROTULOS = { EXPERIENCIA: "Experiência", ACTIVA: "Activa", TOLERANCIA: "Tolerância", EXPIRADA: "Expirada", BLOQUEADA: "Bloqueada", POR_REGISTAR: "Por registar" };
 const selo = (e) => `<span class="selo s-${esc(e)}">${esc(ROTULOS[e] || e)}</span>`;
 const METODOS = { TRANSFERENCIA: "Transferência", MULTICAIXA: "Multicaixa", NUMERARIO: "Numerário", OUTRO: "Outro" };
 let sessao = null; // { token, email, expira }
@@ -253,9 +277,18 @@ async function api(caminho, corpo) {
   return d;
 }
 
+// as vistas da entrada; «activar» usa o formulário do código, com outro texto
+const VISTAS = { entrar: "Entrar na sua conta", criar: "Criar a conta da empresa", "criar-codigo": "Confirmar o email", codigo: "Repor a senha", activar: "Activar a conta", senha: "Definir a senha" };
 function vista(qual) {
-  $("#form-entrar").hidden = qual !== "entrar"; $("#form-codigo").hidden = qual !== "codigo"; $("#form-senha").hidden = qual !== "senha";
-  $("#entrada-titulo").textContent = qual === "entrar" ? "Entrar na sua conta" : qual === "codigo" ? "Criar conta ou repor a senha" : "Definir a senha";
+  const form = qual === "activar" ? "codigo" : qual;
+  for (const f of ["entrar", "criar", "criar-codigo", "codigo", "senha"]) $("#form-" + f).hidden = f !== form;
+  $("#entrada-titulo").textContent = VISTAS[qual];
+  $("#entrada-texto").hidden = qual !== "entrar";
+  if (form === "codigo") $("#codigo-texto").textContent = qual === "activar"
+    ? "Para empresas que já registaram o KanGest num computador. Use o email do registo: enviamos um código de 6 algarismos para definir a senha."
+    : "Escreva o email da conta. Enviamos um código de 6 algarismos para definir uma senha nova.";
+  const primeiro = $(`#form-${form} input`);
+  if (primeiro && !primeiro.value) primeiro.focus();
 }
 function sair(avisarServidor = true) {
   if (avisarServidor && sessao) api("sair", {}).catch(() => {});
@@ -274,6 +307,10 @@ async function carregar() {
   const plano = dados.planos.find((p) => p.codigo === e.plano);
   $("#p-nome").textContent = e.estado === "EXPERIENCIA" ? "Experiência" : plano?.nome || e.plano || "—";
   $("#p-texto").textContent = e.estado === "EXPERIENCIA" ? `Experiência até ${dmy(e.experiencia_ate)}` : e.pago_ate ? `Pago até ${dmy(e.pago_ate)}` : "Sem assinatura activa";
+  if (e.estado === "POR_REGISTAR") {
+    $("#p-nome").textContent = "Experiência de 30 dias";
+    $("#p-texto").innerHTML = `Começa quando registar o KanGest com o NIF <b>${esc(e.nif)}</b>. <a href="baixar.html">Transferir o KanGest</a>`;
+  }
   $("#p-estado").innerHTML = selo(e.estado);
   const nomePlano = (c) => dados.planos.find((p) => p.codigo === c)?.nome || (c === "EXPERIENCIA" ? "Experiência" : c || "—");
   $("#t-pagamentos").innerHTML = dados.pagamentos.map((p) => `<tr><td>${dmy(p.registado_em)}</td><td>${esc(nomePlano(p.plano))}</td><td class="num">${esc(p.meses)}</td><td class="num">${kz(p.valor)}</td><td>${esc(METODOS[p.metodo] || p.metodo)}</td><td>${dmy(p.pago_ate)}</td></tr>`).join("")
@@ -386,6 +423,31 @@ $("#form-entrar").addEventListener("submit", (e) => {
   });
 });
 $("#ir-codigo").addEventListener("click", () => { $("#email-codigo").value = $("#email").value; vista("codigo"); });
+$("#ir-activar").addEventListener("click", () => { $("#email-codigo").value = $("#email").value; vista("activar"); });
+$$("[data-ir-vista]").forEach((b) => b.addEventListener("click", () => vista(b.dataset.irVista)));
+// conta nova, antes de instalar o programa: o código chega ao email e a conta abre-se logo
+let emailNovo = "";
+$("#form-criar").addEventListener("submit", (e) => {
+  e.preventDefault();
+  tentar(async () => {
+    emailNovo = $("#n-email").value.trim();
+    const d = await api("criar", { empresa: $("#n-empresa").value, nif: $("#n-nif").value, email: emailNovo, telefone: $("#n-telefone").value });
+    $("#criar-enviado").textContent = d.mensagem;
+    vista("criar-codigo");
+  });
+});
+$("#form-criar-codigo").addEventListener("submit", (e) => {
+  e.preventDefault();
+  if ($("#n-senha").value !== $("#n-senha2").value) return avisar("As duas senhas não são iguais.", true);
+  tentar(async () => {
+    const d = await api("criar/confirmar", { email: emailNovo, codigo: $("#n-codigo").value, senha: $("#n-senha").value });
+    sessao = { token: d.token, email: d.email, expira: d.expira };
+    try { localStorage.setItem(GUARDA, JSON.stringify(sessao)); } catch {}
+    $("#n-senha").value = $("#n-senha2").value = $("#n-codigo").value = "";
+    await carregar();
+    avisar("Conta criada. Agora transfira o KanGest e registe-o com o mesmo NIF.");
+  });
+});
 $$("[data-voltar]").forEach((b) => b.addEventListener("click", () => vista("entrar")));
 $("#form-codigo").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -449,6 +511,7 @@ document.addEventListener("click", (e) => {
 });
 
 if (sessao) tentar(carregar);
+else if (location.hash === "#criar") vista("criar");
 </script>
 </body>
 </html>
