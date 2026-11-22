@@ -450,5 +450,35 @@ assert.equal((await pedir("GET", "/nada")).estado, 404);
   for (const k of ["TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY", "WEB_DOMINIO"]) delete env[k];
 }
 
+// entrada no painel com email e senha: sessão assinada de 12 horas; a chave de administração continua a valer
+{
+  const { pbkdf2Sync, randomBytes } = await import("node:crypto");
+  const b64u = (x) => Buffer.from(x).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const entrar = (corpo) => pedir("POST", "/admin/api/entrar", corpo);
+  assert.equal((await entrar({ email: "a@b.ao", senha: "x" })).estado, 503, "sem configuração, explica");
+  const sal = randomBytes(16);
+  env.ADMIN_EMAIL = "Produtor@Exemplo.ao";
+  env.ADMIN_SENHA = `pbkdf2-sha256$100000$${b64u(sal)}$${b64u(pbkdf2Sync("Senha-do-painel-2026", sal, 100000, 32, "sha256"))}`;
+  assert.equal((await entrar({ email: "produtor@exemplo.ao", senha: "errada-errada" })).estado, 401);
+  assert.equal((await entrar({ email: "outro@exemplo.ao", senha: "Senha-do-painel-2026" })).estado, 401, "email errado");
+  const r = await entrar({ email: " PRODUTOR@exemplo.ao ", senha: "Senha-do-painel-2026" });
+  assert.equal(r.estado, 200); assert.match(r.corpo.token, /^s1\./); assert.equal(r.corpo.email, "produtor@exemplo.ao");
+  const comSessao = (token) => pedir("GET", "/admin/api/resumo", null, token);
+  assert.equal((await comSessao(r.corpo.token)).estado, 200, "a sessão abre o painel");
+  assert.equal((await pedir("GET", "/admin/api/sessao", null, r.corpo.token)).corpo.email, "produtor@exemplo.ao");
+  const [v, dados, ass] = r.corpo.token.split(".");
+  const falsa = `${v}.${b64u(Buffer.from(JSON.stringify({ e: "produtor@exemplo.ao", exp: Date.now() + 9e9 })))}.${ass}`;
+  assert.equal((await comSessao(falsa)).estado, 401, "sessão alterada não vale");
+  assert.equal((await comSessao(`${v}.${dados}.${ass.slice(0, -2)}xx`)).estado, 401, "assinatura alterada não vale");
+  const agora = Date.now;
+  Date.now = () => agora() + 13 * 3_600_000;
+  assert.equal((await comSessao(r.corpo.token)).estado, 401, "ao fim de 12 horas a sessão termina");
+  Date.now = agora;
+  env.ADMIN_EMAIL = "novo@exemplo.ao";
+  assert.equal((await comSessao(r.corpo.token)).estado, 401, "mudar o email do produtor termina as sessões");
+  assert.equal((await admin("resumo")).estado, 200, "a chave de administração continua a valer");
+  delete env.ADMIN_EMAIL; delete env.ADMIN_SENHA;
+}
+
 console.log("Servidor de licenças: todos os testes passaram.");
 if (process.env.KANGEST_CHAVE_SERVIDOR) console.log("Licença de exemplo:", exemplo);

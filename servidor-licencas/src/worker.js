@@ -15,7 +15,9 @@
 // Variáveis: DB (D1), CHAVE_PRIVADA (secreto, PEM pkcs8 Ed25519), ADMIN_TOKEN (secreto),
 //            RESEND_API_KEY + EMAIL_REMETENTE (opcionais: sem eles, o código aparece no painel),
 //            ACCESS_EQUIPA + ACCESS_AUD (opcionais: o painel só responde a quem passou pelo Cloudflare Access),
-//            ADMIN_ORIGENS (opcional: origens da área do produtor no site; por omissão https://kangest.pages.dev).
+//            ADMIN_ORIGENS (opcional: origens da área do produtor no site; por omissão https://kangest.pages.dev),
+//            ADMIN_EMAIL + ADMIN_SENHA (opcionais: entrada no painel com email e senha; a senha só como resumo PBKDF2,
+//            gerado com `node servidor-licencas/resumo-senha.mjs`).
 // Protecção: limite de pedidos por IP e por hora (tabela «limites»), Cloudflare Access à frente do painel,
 //            cabeçalhos de segurança em todas as respostas.
 // As licenças têm o mesmo formato do scripts/licencas/kangest-licencas.mjs: «KG1.<json base64url>.<assinatura>».
@@ -610,8 +612,72 @@ async function webEndereco(env, dado) {
 
 // ------------------------------------------------------------------ painel do produtor
 
-function autorizado(env, req) {
+// ------------------------------------------------------------------ entrada no painel com email e senha
+//
+// ADMIN_EMAIL e ADMIN_SENHA (segredos): o email do produtor e o resumo da senha, «pbkdf2-sha256$<iterações>$<sal>$<resumo>»
+// (base64url). A senha nunca fica no código nem no servidor. A entrada dá uma sessão de 12 horas, «s1.<dados>.<assinatura>»,
+// assinada com HMAC-SHA256 pela ADMIN_TOKEN (que continua a valer como chave de emergência).
+
+const SESSAO_HORAS = 12;
+const deB64url = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+
+/** Comparação em tempo constante de bytes (a «iguais» de cima compara texto). */
+function iguaisBytes(a, b) {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
+  return d === 0;
+}
+
+/** PBKDF2-SHA256 (o mesmo que o resumo-senha.mjs produz). */
+export async function resumoSenha(senha, sal, iteracoes = 100_000) {
+  const chave = await crypto.subtle.importKey("raw", enc.encode(senha), "PBKDF2", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: sal, iterations: iteracoes }, chave, 256));
+}
+
+async function senhaCerta(env, senha) {
+  const [alg, it, sal, res] = String(env.ADMIN_SENHA ?? "").trim().split("$");
+  const iteracoes = Number(it);
+  if (alg !== "pbkdf2-sha256" || !sal || !res || !(iteracoes >= 10_000 && iteracoes <= 100_000)) return false;
+  return iguaisBytes(await resumoSenha(senha, deB64url(sal), iteracoes), deB64url(res));
+}
+
+async function assinarSessao(env, texto) {
+  const k = await crypto.subtle.importKey("raw", enc.encode(env.ADMIN_TOKEN ?? ""), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return b64url(await crypto.subtle.sign("HMAC", k, enc.encode(texto)));
+}
+
+export async function entrarPainel(env, c) {
+  const certo = String(env.ADMIN_EMAIL ?? "").trim().toLowerCase();
+  if (!certo || !env.ADMIN_SENHA || (env.ADMIN_TOKEN ?? "").length < 24) {
+    throw new Falha("A entrada com email e senha ainda não está configurada neste servidor: use a chave de administração.", 503);
+  }
+  const email = String(c?.email ?? "").trim().toLowerCase();
+  const senha = String(c?.senha ?? "");
+  // a senha confere-se sempre (mesmo com o email errado), para o tempo de resposta não dizer qual dos dois falhou
+  const senhaOk = senha.length > 0 && senha.length <= 256 && (await senhaCerta(env, senha));
+  if (!senhaOk || !iguaisBytes(enc.encode(email), enc.encode(certo))) throw new Falha("Email ou senha incorrectos.", 401);
+  const expira = Date.now() + SESSAO_HORAS * 3_600_000;
+  const dados = b64url(enc.encode(JSON.stringify({ e: certo, exp: expira })));
+  return { ok: true, token: `s1.${dados}.${await assinarSessao(env, dados)}`, email: certo, expira: new Date(expira).toISOString() };
+}
+
+/** A sessão do painel, se a assinatura confere e não expirou. */
+async function sessaoPainel(env, token) {
+  const [v, dados, ass] = token.split(".");
+  if (v !== "s1" || !dados || !ass || (env.ADMIN_TOKEN ?? "").length < 24) return null;
+  if (!iguaisBytes(enc.encode(await assinarSessao(env, dados)), enc.encode(ass))) return null;
+  try {
+    const d = JSON.parse(new TextDecoder().decode(deB64url(dados)));
+    return typeof d.exp === "number" && d.exp > Date.now() && d.e === String(env.ADMIN_EMAIL ?? "").trim().toLowerCase() ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+async function autorizado(env, req) {
   const dado = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (dado.startsWith("s1.")) return Boolean(await sessaoPainel(env, dado));
   const certo = env.ADMIN_TOKEN ?? "";
   if (certo.length < 24 || dado.length !== certo.length) return false;
   let dif = 0;
@@ -838,13 +904,26 @@ async function tratar(req, env) {
       },
     });
   }
+  // entrada com email e senha (antes da autorização: é ela que a dá); as falhas contam para o bloqueio por IP
+  if (caminho === "/admin/api/entrar" && m === "POST") {
+    try {
+      return json(await entrarPainel(env, await corpoJson(req)));
+    } catch (e) {
+      if (e instanceof Falha && e.estado === 401) await contar(env, req, "admin");
+      throw e;
+    }
+  }
   if (caminho.startsWith("/admin/api/")) {
-    if (!autorizado(env, req)) {
+    if (!(await autorizado(env, req))) {
       await contar(env, req, "admin");
       return erro("Acesso negado.", 401);
     }
     const accao = caminho.slice("/admin/api/".length);
     if (m === "GET" && accao === "resumo") return json(await resumo(env));
+    if (m === "GET" && accao === "sessao") {
+      const s = await sessaoPainel(env, (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, ""));
+      return json({ ok: true, email: s?.e ?? null, expira: s ? new Date(s.exp).toISOString() : null, chave: !s });
+    }
     if (m === "GET" && accao === "cliente") return json(await fichaCliente(env, url.searchParams.get("nif")));
     if (m === "POST") {
       const c = await corpoJson(req);
