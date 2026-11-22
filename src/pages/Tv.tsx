@@ -86,7 +86,8 @@ export default function Tv() {
 
   const ideal = d ? (d.dia / d.dias_mes) * 100 : 0;
   const variacao = d && d.hoje.semana_passada_ate_agora > 0 ? ((d.hoje.total - d.hoje.semana_passada_ate_agora) / d.hoje.semana_passada_ate_agora) * 100 : null;
-  const projPct = d && d.mes.meta > 0 ? Math.round((d.mes.projeccao / d.mes.meta) * 100) : null;
+  // para baixo: 99,95 % não pode aparecer como «▲ 100 % da meta»
+  const projPct = d && d.mes.meta > 0 ? Math.floor((d.mes.projeccao / d.mes.meta) * 100) : null;
   const horas = useMemo(
     () =>
       (d?.horas ?? [])

@@ -2,6 +2,9 @@
 
 /* Paleta KanGest: verde-petróleo, creme quente, âmbar. */
 @theme {
+  /* Títulos e números grandes um pouco mais compactos, sem as letras se tocarem (o -0,025em do Tailwind juntava-as
+     com a fonte do sistema em negrito: «KanGest», os valores do POS e do modo TV). */
+  --tracking-tight: -0.01em;
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
 

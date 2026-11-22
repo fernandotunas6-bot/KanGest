@@ -92,8 +92,8 @@ export default function AparelhosSessao({ onClose }: { onClose: () => void }) {
             <Th>Aparelho</Th>
             {todos && <Th>Utilizador</Th>}
             <Th>Local</Th>
-            <Th>Entrada</Th>
-            <Th>Última actividade</Th>
+            <Th className="whitespace-nowrap">Entrada</Th>
+            <Th className="whitespace-nowrap">Última actividade</Th>
             <Th />
           </tr>
         </thead>
