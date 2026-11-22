@@ -189,7 +189,15 @@ def main():
     admin = painel.replace(marca, f"const API = {json.dumps(cfg['web']['licencas'].rstrip('/'))};")
     (SAIDA / "admin.html").write_text(admin)
     scripts_em_linha.update(re.findall(r"<script>(.*?)</script>", admin, flags=re.S))
-    (SAIDA / "robots.txt").write_text(f"User-agent: *\nAllow: /\nDisallow: /admin.html\nSitemap: {cfg['site']}/sitemap.xml\n")
+    # A conta de cada empresa (conta.html, como as definições da conta do Claude): licença, pagamentos, computadores e
+    # segurança, a falar com o servidor de licenças (/v1/conta/*). Também fora dos motores de busca.
+    conta = (FONTE / "conta.html").read_text()
+    if marca not in conta:
+        sys.exit("site-fonte/conta.html: falta a marca do endereço da API (const API = \"\" /* KG_API */;)")
+    conta = conta.replace(marca, f"const API = {json.dumps(cfg['web']['licencas'].rstrip('/'))};")
+    (SAIDA / "conta.html").write_text(conta)
+    scripts_em_linha.update(re.findall(r"<script>(.*?)</script>", conta, flags=re.S))
+    (SAIDA / "robots.txt").write_text(f"User-agent: *\nAllow: /\nDisallow: /admin.html\nDisallow: /conta.html\nSitemap: {cfg['site']}/sitemap.xml\n")
     (SAIDA / "_headers").write_text(cabecalhos(scripts_em_linha, cfg["site"], cfg["web"]["licencas"]))
     print(f"Site gerado em {SAIDA.relative_to(RAIZ)}/: {len(paginas)} páginas + 404, sitemap e robots ({versao_ficheiros}).")
 

@@ -292,11 +292,11 @@ function desenharClientes() {
 
 function desenharPedidos() {
   $("#t-pedidos").innerHTML = dados.codigos.length ? dados.codigos.map((p) => `<tr>
-    <td><b>${esc(p.empresa)}</b></td><td class="mono">${esc(p.nif)}</td><td class="mono">${esc(p.maquina)}</td>
+    <td><b>${esc(p.empresa)}</b></td><td class="mono">${esc(p.nif)}</td><td>${p.tipo === "conta" ? '<span class="selo s-EXPERIENCIA">Conta do site</span>' : `<span class="mono">${esc(p.maquina)}</span>`}</td>
     <td>${esc(p.email || "")}<div class="fraco">${esc(p.telefone || "")}</div></td>
     <td class="mono"><b>${p.codigo_aberto ? esc(p.codigo_aberto) : '<span class="fraco">enviado por email</span>'}</b></td>
     <td>${p.expirado ? selo("EXPIRADA") : quando(p.expira_em)}</td>
-    <td><button class="perigo" data-apagar-pedido="${esc(p.nif)}|${esc(p.maquina)}">Apagar</button></td></tr>`).join("")
+    <td>${p.tipo === "conta" ? "" : `<button class="perigo" data-apagar-pedido="${esc(p.nif)}|${esc(p.maquina)}">Apagar</button>`}</td></tr>`).join("")
     : `<tr><td colspan="7" class="vazio">Não há pedidos por confirmar.</td></tr>`;
 }
 

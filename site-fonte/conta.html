@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>KanGest · A sua conta</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --surface: #fff; --sunken: #efece5; --line: #e3dfd6; --ink: #1d2422; --ink-2: #4b5552; --ink-3: #6f7875;
+    --brand: #146b63; --brand-700: #0c4a44; --brand-50: #e6f2f0; --accent-50: #fdf3e2; --danger: #b3261e; --danger-50: #fbeceb;
+    --ok: #1f7a3d; --ok-50: #e8f4ec;
+    --fonte: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #262624; --surface: #30302e; --sunken: #2a2a28; --line: #42413d; --ink: #f5f4ef; --ink-2: #c9c7bf; --ink-3: #9b998f;
+      --brand: #3aa597; --brand-700: #1d4d47; --brand-50: #263a37; --accent-50: #3a3122; --danger: #f0857c; --danger-50: #3b2422; --ok: #7fcf95; --ok-50: #213326; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14.5px/1.5 var(--fonte); }
+  [hidden] { display: none !important; }
+  button, input { font: inherit; }
+  button { font-size: 14px; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+  button.primario { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+  button.perigo { color: var(--danger); }
+  button:disabled { opacity: .55; cursor: default; }
+  .ligacao { background: none; border: 0; padding: 0; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); }
+  input:focus { outline: 2px solid var(--brand-50); border-color: var(--brand); }
+  label { display: grid; gap: 5px; font-size: 13px; color: var(--ink-2); }
+  .fraco { color: var(--ink-3); font-size: 13px; }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+  .selo { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .s-ACTIVA, .s-ok { background: var(--ok-50); color: var(--ok); }
+  .s-EXPERIENCIA { background: var(--brand-50); color: var(--brand); }
+  .s-TOLERANCIA { background: var(--accent-50); color: #8a5a10; }
+  .s-EXPIRADA, .s-BLOQUEADA, .s-mau { background: var(--danger-50); color: var(--danger); }
+  /* entrada */
+  .entrada { max-width: 420px; margin: 12vh auto; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 34px 32px; }
+  .entrada .marca { font-size: 30px; font-weight: 800; color: var(--brand); letter-spacing: -.01em; }
+  .entrada h1 { font-size: 20px; margin: 6px 0 4px; }
+  .entrada form { display: grid; gap: 14px; margin-top: 18px; }
+  .entrada .accoes { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  /* aplicação: como as definições da conta do Claude */
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 10px 24px; background: var(--surface); border-bottom: 1px solid var(--line); }
+  header .marca { font-size: 18px; font-weight: 700; color: var(--brand); }
+  header .sub { color: var(--ink-3); font-size: 13px; padding-left: 12px; border-left: 1px solid var(--line); }
+  header .esp { flex: 1; }
+  .conta-canto { position: relative; }
+  .avatar { width: 34px; height: 34px; border-radius: 50%; padding: 0; background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 700; font-size: 13px; }
+  .menu { position: absolute; right: 0; top: 44px; min-width: 260px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 6px; box-shadow: 0 12px 32px rgba(0,0,0,.2); }
+  .menu .quem { padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; font-size: 13px; color: var(--ink-2); line-height: 1.45; }
+  .menu button { display: block; width: 100%; text-align: left; background: transparent; border: 0; padding: 8px 10px; border-radius: 8px; }
+  .menu button:hover { background: var(--sunken); }
+  main { max-width: 1100px; margin: 0 auto; padding: 28px 16px 60px; }
+  .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; align-items: start; }
+  nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 76px; }
+  nav button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 12px; border-radius: 10px; color: var(--ink-2); background: transparent; border-color: transparent; }
+  nav button svg { width: 17px; height: 17px; flex: none; }
+  nav button:hover { background: var(--sunken); }
+  nav button[aria-pressed="true"] { background: var(--sunken); color: var(--ink); font-weight: 600; }
+  .cartao { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px 24px; }
+  h2 { font-size: 17px; margin: 0 0 6px; }
+  .linha { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .linha:last-child { border-bottom: 0; }
+  .linha .valor { text-align: right; }
+  .titulo-linha { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 28px 0 8px; }
+  .plano { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--sunken); margin: 10px 0 4px; }
+  .plano b { font-size: 18px; }
+  .tabela { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .4px; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr.actual td { background: var(--sunken); }
+  .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .vazio { color: var(--ink-3); text-align: center; padding: 18px 10px; }
+  .grelha { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: end; }
+  #mensagem { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 10px; max-width: 90vw; z-index: 20; }
+  #mensagem.erro { background: var(--danger); color: #fff; }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } nav { flex-direction: row; flex-wrap: wrap; position: static; } header .sub { display: none; } }
+</style>
+</head>
+<body>
+
+<section id="entrada" class="entrada">
+  <div class="marca">KanGest</div>
+  <h1 id="entrada-titulo">Entrar na sua conta</h1>
+  <p class="fraco" id="entrada-texto" style="margin:0">A conta da empresa: licença, pagamentos, computadores e segurança.</p>
+  <form id="form-entrar">
+    <label>Email <input id="email" type="email" autocomplete="username" required></label>
+    <label>Senha <input id="senha" type="password" autocomplete="current-password" required></label>
+    <div class="accoes"><button class="primario">Entrar</button><button type="button" class="ligacao" id="ir-codigo">Criar conta ou esqueci-me da senha</button></div>
+  </form>
+  <form id="form-codigo" hidden>
+    <p class="fraco" style="margin:0">Use o email com que registou a empresa no KanGest. Enviamos um código de 6 algarismos para definir a senha.</p>
+    <label>Email do registo <input id="email-codigo" type="email" autocomplete="email" required></label>
+    <div class="accoes"><button class="primario">Enviar código</button><button type="button" class="ligacao" data-voltar>Voltar a entrar</button></div>
+  </form>
+  <form id="form-senha" hidden>
+    <label>Código (6 algarismos) <input id="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>
+    <label>Senha nova <input id="senha-nova" type="password" autocomplete="new-password" minlength="10" required></label>
+    <label>Repita a senha <input id="senha-nova2" type="password" autocomplete="new-password" minlength="10" required></label>
+    <p class="fraco" style="margin:0">Pelo menos 10 caracteres, com letras e algarismos.</p>
+    <div class="accoes"><button class="primario">Definir senha</button><button type="button" class="ligacao" data-voltar>Voltar a entrar</button></div>
+  </form>
+</section>
+
+<div id="app" hidden>
+  <header>
+    <b class="marca">KanGest</b><span class="sub">A sua conta</span><span class="esp"></span>
+    <div class="conta-canto">
+      <button id="avatar" class="avatar" aria-haspopup="menu" aria-expanded="false" title="A sua conta">K</button>
+      <div id="menu-conta" class="menu" role="menu" hidden>
+        <div id="quem" class="quem"></div>
+        <button data-ir="seguranca" role="menuitem">Segurança</button>
+        <button id="sair" role="menuitem">Sair</button>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="layout">
+      <nav id="abas">
+        <button data-aba="conta" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Conta</button>
+        <button data-aba="cobranca"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>Cobrança</button>
+        <button data-aba="uso"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Uso</button>
+        <button data-aba="seguranca"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Segurança</button>
+      </nav>
+      <div>
+        <section data-painel="conta" class="cartao">
+          <h2>Perfil</h2>
+          <div class="linha"><span>Empresa</span><b id="c-empresa" class="valor"></b></div>
+          <div class="linha"><span>NIF</span><span id="c-nif" class="valor mono"></span></div>
+          <div class="linha"><span>Email</span><span id="c-email" class="valor"></span></div>
+          <div class="linha"><span>Telefone</span><form id="form-perfil" style="display:flex;gap:8px;max-width:320px"><input id="c-telefone" autocomplete="tel"><button>Guardar</button></form></div>
+          <div class="linha"><span>Conta criada</span><span id="c-desde" class="valor fraco"></span></div>
+        </section>
+
+        <section data-painel="cobranca" class="cartao" hidden>
+          <h2>Plano</h2>
+          <div class="plano"><div><b id="p-nome"></b><div id="p-texto" class="fraco"></div></div><span id="p-estado"></span></div>
+          <p class="fraco">Para renovar ou mudar de plano, fale com o suporte do KanGest. Depois do pagamento, a licença nova chega sozinha ao programa (Sistema → Licença e Assinatura → Verificar agora).</p>
+          <div class="titulo-linha"><h2>Pagamentos</h2></div>
+          <div class="tabela"><table><thead><tr><th>Data</th><th>Plano</th><th class="num">Meses</th><th class="num">Valor</th><th>Método</th><th>Pago até</th></tr></thead><tbody id="t-pagamentos"></tbody></table></div>
+          <div class="titulo-linha"><h2>Licenças</h2></div>
+          <div class="tabela"><table><thead><tr><th>Plano</th><th>Período</th><th>Computador</th><th></th></tr></thead><tbody id="t-licencas"></tbody></table></div>
+        </section>
+
+        <section data-painel="uso" class="cartao" hidden>
+          <h2>Computadores</h2>
+          <p class="fraco">O que o KanGest de cada computador comunicou na última verificação (de 12 em 12 horas, com internet).</p>
+          <div class="tabela"><table><thead><tr><th>Computador</th><th>Versão</th><th>Licença</th><th>Cópia local</th><th>Cópia externa</th><th>Último contacto</th></tr></thead><tbody id="t-maquinas"></tbody></table></div>
+        </section>
+
+        <section data-painel="seguranca" class="cartao" hidden>
+          <h2>Senha</h2>
+          <form id="form-mudar" class="grelha" style="margin-top:8px">
+            <label>Senha actual <input id="m-actual" type="password" autocomplete="current-password" required></label>
+            <label>Senha nova <input id="m-nova" type="password" autocomplete="new-password" minlength="10" required></label>
+            <div><button class="primario">Mudar a senha</button></div>
+          </form>
+          <p class="fraco">Mudar a senha termina as sessões nos outros aparelhos.</p>
+          <div class="titulo-linha"><h2>Onde fez login</h2><button id="sair-todos">Sair em todos os aparelhos</button></div>
+          <div class="tabela"><table><thead><tr><th>Dispositivo</th><th>Localização</th><th>Login</th><th>Última atividade</th><th></th></tr></thead><tbody id="t-sessoes"></tbody></table></div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="mensagem" hidden></div>
+
+<script>
+"use strict";
+// Endereço do servidor de licenças: o gerador do site (scripts/gerar-site.py) põe aqui o endereço público.
+const API = "" /* KG_API */;
+const GUARDA = "kg-conta";
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const dmy = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "—");
+const quando = (d) => (d ? new Date(d).toLocaleString("pt-PT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
+const kz = (c) => (Number(c || 0) / 100).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " Kz";
+const ROTULOS = { EXPERIENCIA: "Experiência", ACTIVA: "Activa", TOLERANCIA: "Tolerância", EXPIRADA: "Expirada", BLOQUEADA: "Bloqueada" };
+const selo = (e) => `<span class="selo s-${esc(e)}">${esc(ROTULOS[e] || e)}</span>`;
+const METODOS = { TRANSFERENCIA: "Transferência", MULTICAIXA: "Multicaixa", NUMERARIO: "Numerário", OUTRO: "Outro" };
+let sessao = null; // { token, email, expira }
+try { sessao = JSON.parse(localStorage.getItem(GUARDA) || "null"); } catch {}
+if (sessao && Date.parse(sessao.expira) < Date.now()) sessao = null;
+let dados = null;
+
+function avisar(texto, erro = false) {
+  const m = $("#mensagem");
+  m.textContent = texto; m.className = erro ? "erro" : ""; m.hidden = false;
+  clearTimeout(avisar.t); avisar.t = setTimeout(() => (m.hidden = true), erro ? 6000 : 3500);
+}
+async function tentar(f) { try { await f(); } catch (e) { avisar(e.message, true); } }
+
+async function api(caminho, corpo) {
+  let r;
+  try {
+    r = await fetch(API + "/v1/conta/" + caminho, {
+      method: corpo ? "POST" : "GET",
+      headers: { ...(sessao ? { authorization: "Bearer " + sessao.token } : {}), ...(corpo ? { "content-type": "application/json" } : {}) },
+      body: corpo ? JSON.stringify(corpo) : undefined,
+    });
+  } catch {
+    throw new Error("Sem ligação ao servidor do KanGest. Confirme a internet e tente de novo.");
+  }
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401 && sessao && caminho !== "entrar") { sair(false); throw new Error("A sessão terminou. Entre outra vez."); }
+  if (!r.ok || d.ok === false) throw new Error(d.erro || "Erro " + r.status);
+  return d;
+}
+
+function vista(qual) {
+  $("#form-entrar").hidden = qual !== "entrar"; $("#form-codigo").hidden = qual !== "codigo"; $("#form-senha").hidden = qual !== "senha";
+  $("#entrada-titulo").textContent = qual === "entrar" ? "Entrar na sua conta" : qual === "codigo" ? "Criar conta ou repor a senha" : "Definir a senha";
+}
+function sair(avisarServidor = true) {
+  if (avisarServidor && sessao) api("sair", {}).catch(() => {});
+  sessao = null; try { localStorage.removeItem(GUARDA); } catch {}
+  $("#app").hidden = true; $("#entrada").hidden = false; vista("entrar");
+}
+
+async function carregar() {
+  dados = await api("resumo");
+  $("#entrada").hidden = true; $("#app").hidden = false;
+  const e = dados.empresa;
+  $("#avatar").textContent = (e.nome || "K").trim()[0].toUpperCase();
+  $("#quem").innerHTML = `<b>${esc(e.nome)}</b><br>${esc(sessao.email)}`;
+  $("#c-empresa").textContent = e.nome; $("#c-nif").textContent = e.nif; $("#c-email").textContent = e.email || "—";
+  $("#c-telefone").value = e.telefone || ""; $("#c-desde").textContent = e.conta_desde ? dmy(e.conta_desde) : "—";
+  const plano = dados.planos.find((p) => p.codigo === e.plano);
+  $("#p-nome").textContent = e.estado === "EXPERIENCIA" ? "Experiência" : plano?.nome || e.plano || "—";
+  $("#p-texto").textContent = e.estado === "EXPERIENCIA" ? `Experiência até ${dmy(e.experiencia_ate)}` : e.pago_ate ? `Pago até ${dmy(e.pago_ate)}` : "Sem assinatura activa";
+  $("#p-estado").innerHTML = selo(e.estado);
+  const nomePlano = (c) => dados.planos.find((p) => p.codigo === c)?.nome || (c === "EXPERIENCIA" ? "Experiência" : c || "—");
+  $("#t-pagamentos").innerHTML = dados.pagamentos.map((p) => `<tr><td>${dmy(p.registado_em)}</td><td>${esc(nomePlano(p.plano))}</td><td class="num">${esc(p.meses)}</td><td class="num">${kz(p.valor)}</td><td>${esc(METODOS[p.metodo] || p.metodo)}</td><td>${dmy(p.pago_ate)}</td></tr>`).join("")
+    || '<tr><td colspan="6" class="vazio">Ainda não há pagamentos.</td></tr>';
+  $("#t-licencas").innerHTML = dados.licencas.map((l) => `<tr><td>${esc(nomePlano(l.plano))}</td><td>${dmy(l.inicio)} – ${dmy(l.fim)}</td><td class="mono">${esc(l.maquina || "qualquer")}</td><td class="num"><button data-copiar="${esc(l.chave)}">Copiar licença</button></td></tr>`).join("")
+    || '<tr><td colspan="4" class="vazio">Sem licenças.</td></tr>';
+  const copia = (d, recebido) => !recebido ? "—" : !d ? selo("EXPIRADA").replace(">Expirada<", ">Nunca<")
+    : (Date.parse(recebido) - Date.parse(d)) / 86_400_000 > 7 ? `<span class="selo s-mau">${dmy(d)}</span>` : dmy(d);
+  $("#t-maquinas").innerHTML = dados.maquinas.map((m) => `<tr><td><span class="mono" style="white-space:nowrap">${esc(m.maquina)}</span>${m.bloqueada ? " " + selo("BLOQUEADA") : ""}${m.modo ? `<div class="fraco">${m.modo === "escola" ? "Escola" : "Loja"}</div>` : ""}</td>
+    <td>${esc(m.versao || "—")}</td><td>${m.licenca_estado ? `${selo(m.licenca_estado)}<div class="fraco">até ${dmy(m.licenca_fim)}</div>` : "—"}</td>
+    <td>${copia(m.copia_ultima, m.recebido_em)}</td><td>${m.copia_externa_erro ? '<span class="selo s-mau">A falhar</span>' : m.copia_externa_ultima ? copia(m.copia_externa_ultima, m.recebido_em) : '<span class="fraco">não configurada</span>'}</td>
+    <td>${quando(m.ultimo_contacto)}</td></tr>`).join("") || '<tr><td colspan="6" class="vazio">Ainda nenhum computador comunicou.</td></tr>';
+}
+
+async function desenharSessoes() {
+  const d = await api("sessoes");
+  $("#sair-todos").disabled = d.sessoes.filter((x) => !x.actual).length === 0;
+  $("#t-sessoes").innerHTML = d.sessoes.map((x) => `<tr${x.actual ? ' class="actual"' : ""}><td>${esc(x.aparelho)} ${x.actual ? '<span class="selo s-EXPERIENCIA">Atual</span>' : ""}</td><td>${esc(x.local)}</td>
+    <td>${quando(x.criada_em)}</td><td>${quando(x.ultima_em)}</td><td class="num">${x.actual ? "" : `<button class="perigo" data-terminar="${esc(x.id)}">Terminar</button>`}</td></tr>`).join("");
+}
+
+function abrirAba(aba) {
+  $$("#abas button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.aba === aba)));
+  $$("[data-painel]").forEach((p) => (p.hidden = p.dataset.painel !== aba));
+  if (aba === "seguranca") tentar(desenharSessoes);
+}
+
+let emailCodigo = "";
+$("#form-entrar").addEventListener("submit", (e) => {
+  e.preventDefault();
+  tentar(async () => {
+    const d = await api("entrar", { email: $("#email").value, senha: $("#senha").value });
+    sessao = { token: d.token, email: d.email, expira: d.expira };
+    try { localStorage.setItem(GUARDA, JSON.stringify(sessao)); } catch {}
+    $("#senha").value = "";
+    await carregar();
+  });
+});
+$("#ir-codigo").addEventListener("click", () => { $("#email-codigo").value = $("#email").value; vista("codigo"); });
+$$("[data-voltar]").forEach((b) => b.addEventListener("click", () => vista("entrar")));
+$("#form-codigo").addEventListener("submit", (e) => {
+  e.preventDefault();
+  tentar(async () => {
+    emailCodigo = $("#email-codigo").value.trim();
+    avisar((await api("codigo", { email: emailCodigo })).mensagem);
+    vista("senha"); $("#codigo").focus();
+  });
+});
+$("#form-senha").addEventListener("submit", (e) => {
+  e.preventDefault();
+  if ($("#senha-nova").value !== $("#senha-nova2").value) return avisar("As duas senhas não são iguais.", true);
+  tentar(async () => {
+    avisar((await api("definir-senha", { email: emailCodigo, codigo: $("#codigo").value, senha: $("#senha-nova").value })).mensagem);
+    $("#email").value = emailCodigo; $("#senha-nova").value = $("#senha-nova2").value = $("#codigo").value = "";
+    vista("entrar"); $("#senha").focus();
+  });
+});
+$("#form-perfil").addEventListener("submit", (e) => { e.preventDefault(); tentar(async () => avisar((await api("perfil", { telefone: $("#c-telefone").value })).mensagem)); });
+$("#form-mudar").addEventListener("submit", (e) => {
+  e.preventDefault();
+  tentar(async () => {
+    avisar((await api("senha", { actual: $("#m-actual").value, nova: $("#m-nova").value })).mensagem);
+    $("#m-actual").value = $("#m-nova").value = "";
+    await desenharSessoes();
+  });
+});
+$("#sair-todos").addEventListener("click", () => tentar(async () => { avisar((await api("sessoes/terminar-outras", {})).mensagem); await desenharSessoes(); }));
+$("#abas").addEventListener("click", (e) => { const b = e.target.closest("button[data-aba]"); if (b) abrirAba(b.dataset.aba); });
+$("#avatar").addEventListener("click", (e) => { e.stopPropagation(); const m = $("#menu-conta"); m.hidden = !m.hidden; $("#avatar").setAttribute("aria-expanded", String(!m.hidden)); });
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#menu-conta")) $("#menu-conta").hidden = true;
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.dataset.ir) { $("#menu-conta").hidden = true; abrirAba(t.dataset.ir); }
+  if (t.id === "sair") sair();
+  if (t.dataset.copiar) navigator.clipboard.writeText(t.dataset.copiar).then(() => avisar("Licença copiada. Cole-a no KanGest em Sistema → Licença e Assinatura."), () => avisar("Não foi possível copiar.", true));
+  if (t.dataset.terminar) tentar(async () => { avisar((await api("sessoes/terminar", { id: t.dataset.terminar })).mensagem); await desenharSessoes(); });
+});
+
+if (sessao) tentar(carregar);
+</script>
+</body>
+</html>
