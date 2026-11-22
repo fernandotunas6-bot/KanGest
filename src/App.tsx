@@ -14,6 +14,7 @@ import { useAparencia } from "@/lib/aparencia";
 import type { Cores } from "@/lib/cores";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
+import Tv from "@/pages/Tv";
 import Pos from "@/pages/Pos";
 import Artigos from "@/pages/Artigos";
 import Entidades from "@/pages/Entidades";
@@ -132,6 +133,7 @@ function Principal() {
     <>
     <Routes>
       <Route path="/pos" element={<Pos />} />
+      <Route path="/tv" element={pode("GESTOR") ? <Tv /> : <Navigate to="/pos" replace />} />
       <Route element={<AppShell />}>
         <Route path="/" element={pode("GESTOR") ? <Dashboard /> : <Navigate to="/pos" replace />} />
         <Route path="/artigos" element={<Artigos />} />
