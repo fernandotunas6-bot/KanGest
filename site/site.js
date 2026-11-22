@@ -95,7 +95,7 @@
       if (!dados.nome?.trim()) return (erro.textContent = "Indique o seu nome.");
       if (!emailValido(dados.email || "")) return (erro.textContent = "Indique um email válido, por exemplo nome@empresa.ao.");
       const nome = dados.nome.trim().split(" ")[0];
-      if (!contacto.email) return mostrar(`Obrigado, ${nome}! Pode baixar o KanGest já aqui:`);
+      if (!contacto.email) return mostrar(`Obrigado, ${nome}! Pode transferir o KanGest já aqui:`);
       botao.disabled = true;
       botao.textContent = "A enviar…";
       const links = `Windows: ${dl.windows}\nMac (Apple Silicon): ${dl.macArm}\nMac (Intel): ${dl.macIntel}`;
@@ -105,11 +105,11 @@
           _subject: `Pedido de download do KanGest — ${dados.nome}`,
           _template: "table",
           _captcha: "false",
-          _autoresponse: `Olá ${dados.nome}, obrigado pelo interesse no KanGest!\n\nPode baixar o instalador aqui:\n${links}\n\nNo Mac, na primeira vez abra com o botão direito → Abrir.\nQualquer dúvida, responda a este email.`,
+          _autoresponse: `Olá ${dados.nome}, obrigado pelo interesse no KanGest!\n\nPode transferir o instalador aqui:\n${links}\n\nNo Mac, na primeira vez abra com o botão direito → Abrir.\nQualquer dúvida, responda a este email.`,
         }, form);
-        mostrar(`Enviámos o link para ${dados.email}. Se preferir, pode baixar já aqui:`);
+        mostrar(`Enviámos o link para ${dados.email}. Se preferir, pode transferir já aqui:`);
       } catch {
-        mostrar("Não foi possível enviar o email agora, mas pode baixar já aqui:");
+        mostrar("Não foi possível enviar o email agora, mas pode transferir já aqui:");
       }
     });
   });
