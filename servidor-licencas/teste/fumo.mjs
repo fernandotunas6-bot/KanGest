@@ -2,7 +2,8 @@
 // Faz o que um cliente faz, com uma empresa de teste (NIF «FUMO…»), e no fim apaga tudo o que criou:
 //   registo → código → confirmação → licença assinada (verificada com a chave pública do KanGest) → renovação com o
 //   estado e a equipa → conta da empresa (código, senha, entrada, resumo) → equipa gerida (loja e funcionário) → a
-//   renovação leva a equipa ao KanGest → aplicada → ficha na área do produtor → entrada do produtor recusa senha errada.
+//   renovação leva a equipa ao KanGest → aplicada → conta nova criada no site antes de instalar («por registar», e a
+//   experiência começa no registo do programa) → ficha na área do produtor → entrada do produtor recusa senha errada.
 // Diz também se o encaminhamento no Supabase (para os KanGest 1.4.0) chega a este servidor.
 // O endereço por omissão é o web.licencas do site-fonte/config.json. Precisa da chave do produtor
 // (~/.kangest-licencas/servidor/admin-token.txt ou KANGEST_ADMIN_TOKEN) e, para apagar a empresa de teste, do token da
@@ -40,6 +41,10 @@ const NIF = `FUMO${n}`;
 const MAQ = `F0F0-${n.slice(0, 4)}-${n.slice(4)}`;
 const EMAIL = `fumo-${n}@kangest.invalid`;
 const SENHA = `Prova-de-fumo-${n}`;
+// a conta criada no site antes de instalar: outra empresa de teste
+const NIF_NOVA = `FUMO${n}N`;
+const MAQ_NOVA = `F0F1-${n.slice(0, 4)}-${n.slice(4)}`;
+const EMAIL_NOVA = `fumo-nova-${n}@kangest.invalid`;
 let falhas = 0;
 
 async function pedir(metodo, caminho, corpo, token, base = URL_BASE) {
@@ -61,8 +66,8 @@ function passo(nome, ok, r, detalhe = "") {
   console.log(`${ok ? "✓" : "✗"} ${nome}${r ? ` (${r.estado}, ${r.ms} ms)` : ""}${detalhe ? ` — ${detalhe}` : ""}${erro}`);
   return ok;
 }
-const codigoAberto = async (tipo) =>
-  (await pedir("GET", "/admin/api/resumo", null, ADMIN)).corpo?.codigos?.find((c) => c.tipo === tipo && c.nif === NIF)?.codigo_aberto;
+const codigoAberto = async (tipo, nif = NIF) =>
+  (await pedir("GET", "/admin/api/resumo", null, ADMIN)).corpo?.codigos?.find((c) => c.tipo === tipo && c.nif === nif)?.codigo_aberto;
 
 async function apagar() {
   if (!CLOUDFLARE) {
@@ -71,13 +76,18 @@ async function apagar() {
   }
   try {
     const d1 = await ligarD1({ token: CLOUDFLARE, conta: process.env.CLOUDFLARE_ACCOUNT_ID });
-    await d1.consultar("DELETE FROM codigos_conta WHERE nif = ? OR email = ?", [NIF, EMAIL]);
+    await d1.consultar("DELETE FROM codigos_conta WHERE nif IN (?1, ?2) OR email IN (?3, ?4)", [NIF, NIF_NOVA, EMAIL, EMAIL_NOVA]);
+    await d1.consultar("DELETE FROM pedidos_conta WHERE nif IN (?1, ?2) OR email IN (?3, ?4)", [NIF, NIF_NOVA, EMAIL, EMAIL_NOVA]);
     for (const t of ["funcionarios", "lojas_geridas", "postos_geridos", "equipa_versoes", "equipas", "sessoes_conta", "segredos_maquina",
       "contas", "licencas", "instalacoes", "codigos", "pagamentos", "maquinas", "subdominios", "clientes"]) {
-      await d1.consultar(`DELETE FROM ${t} WHERE nif = ?`, [NIF]);
+      await d1.consultar(`DELETE FROM ${t} WHERE nif IN (?1, ?2)`, [NIF, NIF_NOVA]);
     }
-    const [{ restam }] = await d1.consultar("SELECT (SELECT COUNT(*) FROM clientes WHERE nif = ?1) + (SELECT COUNT(*) FROM licencas WHERE nif = ?1) + (SELECT COUNT(*) FROM codigos_conta WHERE email = ?2) AS restam", [NIF, EMAIL]);
-    passo(`empresa de teste ${NIF} apagada`, restam === 0, null);
+    const [{ restam }] = await d1.consultar(
+      `SELECT (SELECT COUNT(*) FROM clientes WHERE nif IN (?1, ?2)) + (SELECT COUNT(*) FROM licencas WHERE nif IN (?1, ?2))
+            + (SELECT COUNT(*) FROM codigos_conta WHERE email IN (?3, ?4)) + (SELECT COUNT(*) FROM pedidos_conta WHERE email IN (?3, ?4)) AS restam`,
+      [NIF, NIF_NOVA, EMAIL, EMAIL_NOVA],
+    );
+    passo(`empresas de teste ${NIF} e ${NIF_NOVA} apagadas`, restam === 0, null);
   } catch (e) {
     passo(`apagar a empresa de teste ${NIF}`, false, null, e.message);
   }
@@ -135,6 +145,22 @@ try {
   passo("conta: a equipa aparece como aplicada", r.estado === 200 && r.corpo?.versao?.aplicada === g?.versao, r);
   r = await pedir("POST", "/v1/conta/sair", {}, token);
   passo("conta: sair", r.estado === 200 && (await pedir("GET", "/v1/conta/resumo", null, token)).estado === 401, r);
+
+  // conta nova no site, antes de instalar: fica «por registar» até o programa se registar com esse NIF
+  r = await pedir("POST", "/v1/conta/criar", { empresa: "Prova de fumo, conta nova (apagar)", nif: NIF_NOVA, email: EMAIL_NOVA });
+  passo("conta nova: pedir o código", r.estado === 200 && r.corpo?.ok, r);
+  const codigoNova = await codigoAberto("conta-nova", NIF_NOVA);
+  passo("conta nova: o pedido aparece na área do produtor", /^\d{6}$/.test(codigoNova ?? ""), null);
+  r = await pedir("POST", "/v1/conta/criar/confirmar", { email: EMAIL_NOVA, codigo: codigoNova, senha: SENHA });
+  const tokenNova = r.corpo?.token;
+  passo("conta nova: criada, com a sessão aberta", r.estado === 200 && /^c1\./.test(tokenNova ?? ""), r);
+  r = await pedir("GET", "/v1/conta/resumo", null, tokenNova);
+  passo("conta nova: por registar, sem experiência a contar", r.estado === 200 && r.corpo?.empresa?.estado === "POR_REGISTAR" && !r.corpo?.empresa?.experiencia_ate, r);
+  await pedir("POST", "/v1/registo", { nif: NIF_NOVA, empresa: "Prova de fumo, conta nova (apagar)", email: EMAIL_NOVA, maquina: MAQ_NOVA, versao: "1.4.1" });
+  r = await pedir("POST", "/v1/confirmar", { nif: NIF_NOVA, maquina: MAQ_NOVA, codigo: await codigoAberto("registo", NIF_NOVA), versao: "1.4.1" });
+  passo("conta nova: o registo do programa começa a experiência", r.estado === 200 && r.corpo?.estado === "EXPERIENCIA" && assinada(r.corpo?.licenca), r);
+  r = await pedir("GET", "/v1/conta/resumo", null, tokenNova);
+  passo("conta nova: a conta continua, já em experiência", r.estado === 200 && r.corpo?.empresa?.estado === "EXPERIENCIA", r);
 
   // área do produtor
   r = await pedir("GET", `/admin/api/cliente?nif=${NIF}`, null, ADMIN);
