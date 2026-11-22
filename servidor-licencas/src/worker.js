@@ -253,8 +253,10 @@ async function licencaActual(env, cliente, maquina) {
     return { licenca: l.chave, id: l.id, estado: "ACTIVA", plano: cliente.plano, fim: cliente.pago_ate, mensagem: `Licença ${cliente.plano} válida até ${dmy(cliente.pago_ate)}.` };
   }
   if (cliente.experiencia_ate && dia <= cliente.experiencia_ate) {
-    const inicio = cliente.criado_em.slice(0, 10);
-    const l = await emitir(env, { nif: cliente.nif, empresa: cliente.empresa, plano: "EXPERIENCIA", postos: 0, inicio, fim: cliente.experiencia_ate, tolerancia: 0, maquina, origem: "EXPERIENCIA" });
+    // o dia em que a experiência começou: o registo da empresa ou, numa conta criada no site, o primeiro registo do programa
+    const inicio = [cliente.criado_em.slice(0, 10), somarDias(cliente.experiencia_ate, -(DIAS_EXPERIENCIA - 1))].sort()[1];
+    const inicioCerto = inicio > dia ? dia : inicio;
+    const l = await emitir(env, { nif: cliente.nif, empresa: cliente.empresa, plano: "EXPERIENCIA", postos: 0, inicio: inicioCerto, fim: cliente.experiencia_ate, tolerancia: 0, maquina, origem: "EXPERIENCIA" });
     return { licenca: l.chave, id: l.id, estado: "EXPERIENCIA", plano: "EXPERIENCIA", fim: cliente.experiencia_ate, mensagem: `Experiência registada até ${dmy(cliente.experiencia_ate)}. Para continuar depois, escolha um plano.` };
   }
   return {
@@ -392,6 +394,37 @@ export const emailCodigoConta = (env, { empresa, codigo }) => modeloEmail(env, {
   nota: `O código é válido durante ${CODIGO_MINUTOS} minutos. Se não pediu este código, ignore esta mensagem: a conta continua como estava.`,
 });
 
+export const emailCodigoCriarConta = (env, { empresa, codigo }) => modeloEmail(env, {
+  assunto: `KanGest: código ${codigo} para criar a conta de ${empresa}`,
+  previa: `O código para criar a conta de ${empresa} é ${codigo}.`,
+  titulo: "Crie a conta da sua empresa",
+  paragrafos: [["Use este código para criar a conta de ", empresa, " no site do KanGest:"]],
+  codigo,
+  nota: `O código é válido durante ${CODIGO_MINUTOS} minutos. Se não pediu este código, ignore esta mensagem: nenhuma conta é criada sem ele.`,
+});
+
+export const emailJaTemConta = (env, { empresa }) => modeloEmail(env, {
+  assunto: "KanGest: este email já tem conta",
+  previa: `Este email já é o da conta de ${empresa}.`,
+  titulo: "Este email já tem conta",
+  paragrafos: [
+    ["Alguém pediu para criar uma conta nova no site do KanGest com este email, mas ele já é o da conta de ", empresa, "."],
+    "Para entrar, use a senha que já tem. Se não se lembra dela, carregue em «Esqueci-me da senha» na página da conta.",
+  ],
+  botao: { texto: "Abrir a conta da empresa", url: `${siteDe(env)}/conta.html` },
+  nota: "Se não foi você, ignore esta mensagem: a conta continua como estava.",
+});
+
+export const emailAvisoContaNova = (env, { nif, empresa, email, telefone }) => modeloEmail(env, {
+  assunto: `KanGest: conta nova de ${empresa}`,
+  previa: `${empresa} (NIF ${nif}) criou a conta no site.`,
+  titulo: "Conta nova no site",
+  paragrafos: ["Uma empresa criou a conta no site do KanGest. A experiência começa quando registar o programa com este NIF."],
+  dados: [["Empresa", empresa], ["NIF", nif], ["Email", email], ["Telefone", telefone || "—"]],
+  botao: { texto: "Abrir a área do produtor", url: `${siteDe(env)}/admin.html` },
+  nota: "Recebe este aviso porque é o produtor do KanGest.",
+});
+
 export const emailAvisoProdutor = (env, { nif, empresa, email, telefone, maquina, versao, enviado, codigo }) => modeloEmail(env, {
   assunto: `KanGest: pedido de registo de ${empresa}`,
   previa: `${empresa} (NIF ${nif}) pediu o registo de um computador.`,
@@ -496,16 +529,30 @@ async function confirmar(env, c) {
 
   const t = agora();
   let cliente = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(nif).first();
-  const novo = !cliente;
-  if (novo) {
-    const experienciaAte = somarDias(hoje(), DIAS_EXPERIENCIA - 1);
+  // a experiência começa no primeiro registo do programa: empresa nova, ou conta criada no site ainda sem computadores
+  const porRegistar = !!cliente && !cliente.experiencia_ate && !cliente.pago_ate;
+  const experienciaAte = somarDias(hoje(), DIAS_EXPERIENCIA - 1);
+  if (!cliente) {
     await env.DB.prepare("INSERT INTO clientes (nif, empresa, email, telefone, criado_em, experiencia_ate) VALUES (?,?,?,?,?,?)")
       .bind(nif, p.empresa, p.email, p.telefone, t, experienciaAte).run();
-    if (p.email) depois(env, enviarEmail(env, p.email, emailBoasVindas(env, { empresa: p.empresa, maquina, experienciaAte })));
   } else {
-    await env.DB.prepare("UPDATE clientes SET empresa = ?, email = ?, telefone = COALESCE(NULLIF(?, ''), telefone) WHERE nif = ?")
-      .bind(p.empresa, p.email, p.telefone, nif).run();
+    await env.DB.prepare(
+      `UPDATE clientes SET empresa = ?, email = ?, telefone = COALESCE(NULLIF(?, ''), telefone),
+         experiencia_ate = CASE WHEN experiencia_ate IS NULL AND pago_ate IS NULL THEN ? ELSE experiencia_ate END WHERE nif = ?`,
+    ).bind(p.empresa, p.email, p.telefone, experienciaAte, nif).run();
   }
+  if (porRegistar) {
+    // a conta criada no site só fica com quem mostrou ser dono do email do registo (o código chegou lá); a outra
+    // desfaz-se: quem tem o email do registo cria-a de novo em «Já registei o KanGest»
+    const conta = await env.DB.prepare("SELECT email FROM contas WHERE nif = ?").bind(nif).first();
+    if (conta && String(conta.email).toLowerCase() !== String(p.email ?? "").toLowerCase()) {
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM contas WHERE nif = ?").bind(nif),
+        env.DB.prepare("UPDATE sessoes_conta SET terminada_em = ? WHERE nif = ? AND terminada_em IS NULL").bind(t, nif),
+      ]);
+    }
+  }
+  if ((!cliente || porRegistar) && p.email) depois(env, enviarEmail(env, p.email, emailBoasVindas(env, { empresa: p.empresa, maquina, experienciaAte })));
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO maquinas (nif, maquina, primeiro_contacto, ultimo_contacto, versao) VALUES (?1, ?2, ?3, ?3, ?4)
@@ -957,13 +1004,86 @@ export async function contaEntrar(env, c, req) {
   // sem conta, confere-se na mesma um resumo (o tempo de resposta não diz se o email existe)
   const ok = (await confereResumo(conta?.senha ?? `pbkdf2-sha256$${CONTA_ITERACOES}$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`, senha)) && !!conta;
   if (!ok || senha.length > 256) throw new Falha("Email ou senha incorrectos.", 401);
+  return iniciarSessaoConta(env, conta.nif, conta.email, req);
+}
+
+/** Uma sessão nova da conta da empresa (aparelho e local; o IP não se guarda) e o token assinado. */
+async function iniciarSessaoConta(env, nif, email, req) {
   const expira = Date.now() + CONTA_DIAS * 86_400_000;
   const sid = b64url(crypto.getRandomValues(new Uint8Array(16)));
   await env.DB.prepare("INSERT INTO sessoes_conta (id, nif, criada_em, ultima_em, aparelho, local) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(sid, conta.nif, agora(), agora(), descreverAparelho(req?.headers.get("user-agent")).slice(0, 60), localDe(req).slice(0, 80))
+    .bind(sid, nif, agora(), agora(), descreverAparelho(req?.headers.get("user-agent")).slice(0, 60), localDe(req).slice(0, 80))
     .run();
-  const dados = b64url(enc.encode(JSON.stringify({ n: conta.nif, exp: expira, s: sid })));
-  return { ok: true, token: `c1.${dados}.${await hmac(chaveConta(env), dados)}`, email: conta.email, expira: new Date(expira).toISOString() };
+  const dados = b64url(enc.encode(JSON.stringify({ n: nif, exp: expira, s: sid })));
+  return { ok: true, token: `c1.${dados}.${await hmac(chaveConta(env), dados)}`, email, expira: new Date(expira).toISOString() };
+}
+
+/** Conta nova no site, antes de instalar o KanGest: um código para o email. A empresa nasce ao confirmar. */
+export async function contaCriar(env, c) {
+  const nif = validarNif(limpaNif(c?.nif));
+  const empresa = texto(c?.empresa);
+  const email = String(c?.email ?? "").trim().toLowerCase();
+  const telefone = texto(c?.telefone, 30);
+  if (empresa.length < 2) throw new Falha("Indique o nome da empresa.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 120) throw new Falha("Escreva um email válido: é para lá que vai o código.");
+  if (telefone && !/^[0-9+() .-]{6,30}$/.test(telefone)) throw new Falha("O telefone só pode ter algarismos, espaços e + ( ) - .");
+  if (await env.DB.prepare("SELECT 1 AS x FROM clientes WHERE nif = ?").bind(nif).first()) {
+    throw new Falha("Este NIF já está registado no KanGest. Entre na conta ou use «Já registei o KanGest» com o email do registo.", 409);
+  }
+  await env.DB.prepare("DELETE FROM pedidos_conta WHERE expira_em < ?").bind(agora()).run(); // os pedidos esquecidos
+  const antes = await env.DB.prepare("SELECT criado_em FROM pedidos_conta WHERE email = ?").bind(email).first();
+  if (antes && Date.parse(antes.criado_em) > Date.now() - 60_000) throw new Falha("Acabámos de enviar um código para este email. Espere um minuto antes de pedir outro.", 429);
+  const resposta = (enviado) => ({
+    ok: true,
+    enviado,
+    email: mascararEmail(email),
+    mensagem: enviado
+      ? `Enviámos um código de 6 algarismos para ${mascararEmail(email)}. É válido durante ${CODIGO_MINUTOS} minutos.`
+      : "O pedido ficou registado. O suporte do KanGest vai enviar-lhe o código.",
+  });
+  // o email já tem conta: a resposta é a mesma (o site não revela que emails existem) e o dono recebe o aviso
+  const conta = await env.DB.prepare("SELECT c.empresa FROM contas k JOIN clientes c ON c.nif = k.nif WHERE k.email = ?").bind(email).first();
+  if (conta) return resposta(await enviarEmail(env, email, emailJaTemConta(env, { empresa: conta.empresa })));
+  const codigo = String(100_000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900_000));
+  const enviado = await enviarEmail(env, email, emailCodigoCriarConta(env, { empresa, codigo }));
+  const expira = new Date(Date.now() + CODIGO_MINUTOS * 60_000).toISOString().slice(0, 19) + "Z";
+  await env.DB.prepare(
+    `INSERT INTO pedidos_conta (email, nif, empresa, telefone, codigo_hash, codigo_aberto, expira_em, tentativas, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+     ON CONFLICT (email) DO UPDATE SET nif = excluded.nif, empresa = excluded.empresa, telefone = excluded.telefone, codigo_hash = excluded.codigo_hash,
+       codigo_aberto = excluded.codigo_aberto, expira_em = excluded.expira_em, tentativas = 0, criado_em = excluded.criado_em`,
+  ).bind(email, nif, empresa, telefone || null, await sha256(`criar:${email}:${codigo}`), enviado ? null : codigo, expira, agora()).run();
+  return resposta(enviado);
+}
+
+/** Com o código certo, nasce a empresa (por registar) e a conta, e a sessão abre-se logo. */
+export async function contaCriarConfirmar(env, c, req) {
+  const email = String(c?.email ?? "").trim().toLowerCase();
+  const codigo = String(c?.codigo ?? "").replace(/\D/g, "");
+  const senha = validarSenhaNova(c?.senha);
+  const p = await env.DB.prepare("SELECT * FROM pedidos_conta WHERE email = ?").bind(email).first();
+  if (!p || Date.parse(p.expira_em) < Date.now() || p.tentativas >= MAX_TENTATIVAS) throw new Falha("O código expirou ou não é válido. Peça outro.", 400);
+  if (!iguais(await sha256(`criar:${email}:${codigo}`), p.codigo_hash)) {
+    await env.DB.prepare("UPDATE pedidos_conta SET tentativas = tentativas + 1 WHERE email = ?").bind(email).run();
+    throw new Falha("Código errado.", 400);
+  }
+  // entretanto, o NIF pode ter sido registado pelo programa, ou o email pode já ter conta
+  const ocupado = (await env.DB.prepare("SELECT 1 AS x FROM clientes WHERE nif = ?").bind(p.nif).first())
+    ? "Este NIF acabou de ser registado no KanGest. Entre com o email do registo ou use «Já registei o KanGest»."
+    : (await env.DB.prepare("SELECT 1 AS x FROM contas WHERE email = ?").bind(email).first()) ? "Já existe uma conta com este email. Entre ou reponha a senha." : null;
+  if (ocupado) {
+    await env.DB.prepare("DELETE FROM pedidos_conta WHERE email = ?").bind(email).run();
+    throw new Falha(ocupado, 409);
+  }
+  const t = agora();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO clientes (nif, empresa, email, telefone, criado_em) VALUES (?, ?, ?, ?, ?)").bind(p.nif, p.empresa, email, p.telefone, t),
+    env.DB.prepare("INSERT INTO contas (nif, email, senha, criada_em, actualizada_em) VALUES (?, ?, ?, ?, ?)").bind(p.nif, email, await resumoNovo(senha), t, t),
+    env.DB.prepare("DELETE FROM pedidos_conta WHERE email = ?").bind(email),
+  ]);
+  if (env.ADMIN_EMAIL && !DOMINIO_DE_TESTE.test(email.split("@")[1] ?? "")) {
+    depois(env, enviarEmail(env, String(env.ADMIN_EMAIL).trim().toLowerCase(), emailAvisoContaNova(env, { nif: p.nif, empresa: p.empresa, email, telefone: p.telefone })));
+  }
+  return { ...(await iniciarSessaoConta(env, p.nif, email, req)), mensagem: "Conta criada." };
 }
 
 /** A sessão da conta deste pedido (assinatura, validade e registo não terminado), ou null. */
@@ -1206,6 +1326,14 @@ async function rotasConta(env, req, m, accao) {
     await limitar(env, req, "conta");
     return json(await contaDefinirSenha(env, await corpoJson(req)));
   }
+  if (m === "POST" && accao === "criar") {
+    await limitar(env, req, "conta");
+    return json(await contaCriar(env, await corpoJson(req)));
+  }
+  if (m === "POST" && accao === "criar/confirmar") {
+    await limitar(env, req, "conta");
+    return json(await contaCriarConfirmar(env, await corpoJson(req), req));
+  }
   if (m === "POST" && accao === "entrar") {
     if (await excedido(env, req, "contaFalhas")) return erro("Demasiadas tentativas falhadas deste endereço. Tente daqui a uma hora.", 429);
     try {
@@ -1254,7 +1382,8 @@ async function autorizado(env, req) {
 const estadoCliente = (c, dia = hoje()) =>
   c.pago_ate
     ? c.pago_ate >= dia ? "ACTIVA" : somarDias(c.pago_ate, TOLERANCIA) >= dia ? "TOLERANCIA" : "EXPIRADA"
-    : c.experiencia_ate && c.experiencia_ate >= dia ? "EXPERIENCIA" : "EXPIRADA";
+    : c.experiencia_ate ? (c.experiencia_ate >= dia ? "EXPERIENCIA" : "EXPIRADA")
+    : "POR_REGISTAR"; // conta criada no site: a experiência começa no primeiro registo do programa
 
 async function resumo(env) {
   const [planos, clientes, codigos, pagamentos, semCopia] = await env.DB.batch([
@@ -1269,6 +1398,9 @@ async function resumo(env) {
        UNION ALL
        SELECT k.nif, '' AS maquina, c.empresa, k.email, c.telefone, k.codigo_aberto, k.expira_em, k.tentativas, k.criado_em, 'conta' AS tipo
        FROM codigos_conta k LEFT JOIN clientes c ON c.nif = k.nif
+       UNION ALL
+       SELECT n.nif, '' AS maquina, n.empresa, n.email, n.telefone, n.codigo_aberto, n.expira_em, n.tentativas, n.criado_em, 'conta-nova' AS tipo
+       FROM pedidos_conta n
        ORDER BY criado_em DESC LIMIT 100`,
     ),
     env.DB.prepare("SELECT p.*, c.empresa FROM pagamentos p LEFT JOIN clientes c ON c.nif = p.nif ORDER BY p.id DESC LIMIT 50"),
@@ -1381,7 +1513,7 @@ async function guardarCliente(env, c) {
     texto(c.notas ?? cli.notas ?? "", 1000) || null,
     Math.max(1, Math.trunc(Number(c.maquinas_max ?? cli.maquinas_max))),
     c.postos === "" || c.postos === null ? null : c.postos === undefined ? cli.postos : Math.max(0, Math.trunc(Number(c.postos))),
-    c.experiencia_ate === undefined ? cli.experiencia_ate : c.experiencia_ate,
+    c.experiencia_ate === undefined ? cli.experiencia_ate : c.experiencia_ate || cli.experiencia_ate,
     nif,
   ).run();
   return { ok: true, mensagem: "Cliente actualizado." };
