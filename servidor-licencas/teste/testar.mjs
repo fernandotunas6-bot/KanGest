@@ -373,5 +373,40 @@ assert.equal((await pedir("GET", "/nada")).estado, 404);
   globalThis.fetch = fetchOriginal;
 }
 
+// verificação de humano (Turnstile): sem configuração não se exige; com ela, o Cloudflare decide; sem resposta, passa
+{
+  let r = await pedir("GET", "/v1/web/humano");
+  assert.equal(r.corpo.site_key, null);
+  assert.equal((await post("/v1/web/humano", { token: "x" })).corpo.humano, true, "sem configuração não se exige");
+  Object.assign(env, { TURNSTILE_SITE_KEY: "0x4AAA-site", TURNSTILE_SECRET_KEY: "0x4AAA-segredo", WEB_DOMINIO: "kangest.ao" });
+  r = await pedir("GET", "/v1/web/humano");
+  assert.equal(r.corpo.site_key, "0x4AAA-site"); assert.equal(r.corpo.dominio, "kangest.ao");
+  assert.equal(JSON.stringify(r.corpo).includes("segredo"), false, "o segredo nunca sai");
+  const original = globalThis.fetch;
+  let enviado = null;
+  let resposta = { success: true };
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("siteverify")) {
+      enviado = Object.fromEntries(init.body);
+      if (resposta === "falha") throw new Error("rede");
+      return new Response(JSON.stringify(resposta), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return original(url, init);
+  };
+  r = await post("/v1/web/humano", { token: "tok-bom", ip: "203.0.113.7" });
+  assert.equal(r.corpo.humano, true);
+  assert.deepEqual(enviado, { secret: "0x4AAA-segredo", response: "tok-bom", remoteip: "203.0.113.7" });
+  resposta = { success: false, "error-codes": ["timeout-or-duplicate"] };
+  r = await post("/v1/web/humano", { token: "tok-repetido" });
+  assert.equal(r.corpo.humano, false); assert.equal(r.corpo.motivo, "timeout-or-duplicate");
+  assert.equal((await post("/v1/web/humano", { token: "" })).corpo.humano, false, "sem token, não");
+  resposta = { success: false, "error-codes": ["invalid-input-secret"] };
+  assert.deepEqual((await post("/v1/web/humano", { token: "t" })).corpo, { ok: true, humano: true, degradado: true }, "a nossa chave errada não tranca ninguém");
+  resposta = "falha";
+  assert.equal((await post("/v1/web/humano", { token: "t" })).corpo.degradado, true, "sem resposta do Cloudflare, passa");
+  globalThis.fetch = original;
+  for (const k of ["TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY", "WEB_DOMINIO"]) delete env[k];
+}
+
 console.log("Servidor de licenças: todos os testes passaram.");
 if (process.env.KANGEST_CHAVE_SERVIDOR) console.log("Licença de exemplo:", exemplo);

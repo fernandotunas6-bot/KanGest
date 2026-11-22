@@ -5764,6 +5764,41 @@ async fn conta_diferente_pede_troca() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// Verificação de humano (como no Claude): pela Internet, num endereço do KanGest, a entrada pede o widget do Cloudflare
+/// antes da senha; na loja não. Confirmado, o aparelho não volta a pedir durante 10 minutos (o token só se usa uma vez).
+#[tokio::test]
+async fn verificacao_de_humano_pela_internet() {
+    use crate::state::{Contexto, CONTEXTO};
+    let (st, pasta) = base_com_admin("humano").await;
+    sqlx::query("UPDATE empresa SET nome = 'Humano Teste, Lda' WHERE id = 1").execute(&st.pool).await.unwrap();
+    let definir = |resposta: bool| super::humano::TESTE.lock().unwrap().get_or_insert_with(Default::default).insert("Humano Teste, Lda".into(), (Some("0x4AAA-site".into()), resposta));
+    definir(false);
+    let pela_internet = |aparelho: &'static str, metodo: &'static str, params: Value| {
+        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true, ligacao: Some(aparelho.into()) };
+        CONTEXTO.scope(ctx, super::dispatch(&st, metodo, params))
+    };
+    // na loja não se pede
+    assert_eq!(rpc(&st, "seguranca.politica", json!({})).await["humano"], Value::Null);
+    // pela Internet: a chave vai para o ecrã; sem token, ou com um que não vale, a entrada não chega à senha
+    assert_eq!(pela_internet("h-1", "seguranca.politica", json!({})).await.unwrap()["humano"], "0x4AAA-site");
+    let e = pela_internet("h-1", "auth.login", json!({ "login": "admin", "senha": "1234" })).await.unwrap_err().to_string();
+    assert!(e.contains("não é um robô"), "{e}");
+    let e = pela_internet("h-1", "auth.login", json!({ "login": "admin", "senha": "errada", "humano": "tok-mau" })).await.unwrap_err().to_string();
+    assert!(e.contains("não é um robô"), "recusado antes da senha: {e}");
+    // com o token certo entra; o mesmo aparelho, logo a seguir, não precisa de outro
+    definir(true);
+    let e = pela_internet("h-1", "auth.login", json!({ "login": "admin", "senha": "errada", "humano": "tok-bom" })).await.unwrap_err().to_string();
+    assert!(e.contains("incorrect"), "passou a verificação e chegou à senha: {e}");
+    definir(false);
+    pela_internet("h-1", "auth.login", json!({ "login": "admin", "senha": "1234" })).await.unwrap();
+    // outro aparelho precisa da sua
+    let e = pela_internet("h-2", "auth.login", json!({ "login": "admin", "senha": "1234" })).await.unwrap_err().to_string();
+    assert!(e.contains("não é um robô"), "{e}");
+    super::humano::TESTE.lock().unwrap().as_mut().unwrap().remove("Humano Teste, Lda");
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 /// Modo TV: vendas de hoje e do mês, hora a hora, a loja contra a meta, as últimas vendas sem nomes de clientes e os
 /// artigos mais vendidos; as metas só se guardam com «Empresa e rede» e para lojas que existem.
 #[tokio::test]

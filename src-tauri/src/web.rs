@@ -24,7 +24,9 @@ pub fn registar(f: Activos) {
 }
 
 /// Política de segurança das páginas servidas ao browser: só código e ligações do próprio servidor.
-pub const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; \
+// o widget «não sou um robô» da entrada pela Internet (Cloudflare Turnstile) vem de challenges.cloudflare.com
+pub const CSP: &str = "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; \
+style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; \
 font-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; media-src 'self' blob:; object-src 'none'; \
 base-uri 'self'; form-action 'none'; frame-ancestors 'none'";
 

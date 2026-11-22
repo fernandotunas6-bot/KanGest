@@ -15,6 +15,7 @@ mod contas;
 mod documentos;
 mod entidades;
 mod escola;
+mod humano;
 mod tv;
 pub mod fe;
 pub(crate) mod impressao;

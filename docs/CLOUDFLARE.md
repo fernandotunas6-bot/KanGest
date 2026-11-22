@@ -143,3 +143,18 @@ entra directamente (bom para um atalho ou um código QR na loja).
 - **Turnstile** no formulário de contacto do site (precisa de um ponto que confirme o token antes de enviar).
 - **Queues** e Workers para distribuir os avisos automáticos da API a muitos destinos (hoje saem do próprio KanGest).
 - **Email Routing** para os endereços do domínio.
+
+
+## Verificação de humano na entrada pela Internet (Turnstile)
+
+Como no Claude: quem entra pela Internet num endereço do KanGest (`<nome>.<WEB_DOMINIO>`) confirma no ecrã de entrada
+que não é um robô, antes da senha. Na rede da loja e num domínio próprio não se pede.
+
+1. No Cloudflare: **Turnstile → Add widget**, modo «Managed», com o domínio `WEB_DOMINIO` (ex.: `kangest.ao`).
+2. No servidor de licenças, os dois segredos: `TURNSTILE_SITE_KEY` (público) e `TURNSTILE_SECRET_KEY`.
+3. Publicar o servidor de licenças (`scripts/publicar-licencas.py`).
+
+O KanGest pede a chave pública ao servidor (`GET /v1/web/humano`, guardada uma hora) e manda o token para ele conferir
+(`POST /v1/web/humano`). O segredo nunca sai do servidor de licenças. Sem resposta do servidor ou do Cloudflare, a
+entrada segue e fica registado; cada aparelho confirmado não volta a ser verificado durante 10 minutos (o código de
+dois passos e «Sair e trocar de conta» não pedem outro token).

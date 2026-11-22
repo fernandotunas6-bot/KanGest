@@ -441,6 +441,49 @@ function validarNome(v) {
 
 const webConfigurado = (env) => Boolean(env.WEB_DOMINIO && env.CF_CONTA && env.CF_ZONA && env.CF_API_TOKEN);
 
+// ------------------------------------------------------------------ verificação de humano (Cloudflare Turnstile)
+//
+// Na entrada pela Internet dos KanGest com endereço <nome>.<WEB_DOMINIO>, como no Claude: o widget no browser e a
+// confirmação aqui, porque o segredo não vai para os computadores das lojas. Segredos TURNSTILE_SITE_KEY (público) e
+// TURNSTILE_SECRET_KEY, de um widget do Cloudflare com o domínio WEB_DOMINIO. Sem eles, nada se exige.
+
+const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+const humanoConfigurado = (env) => Boolean(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY && env.WEB_DOMINIO);
+
+/** A chave pública do widget, para o KanGest a pôr no ecrã de entrada (null = não se exige). */
+function humanoChave(env) {
+  return { ok: true, site_key: humanoConfigurado(env) ? env.TURNSTILE_SITE_KEY : null, dominio: env.WEB_DOMINIO || null };
+}
+
+/**
+ * Confere o token do widget com o Cloudflare. `humano: false` só quando o Cloudflare diz que o token não vale (ou não
+ * veio); sem resposta do Cloudflare, ou com a nossa chave recusada, deixa passar e diz `degradado` (uma loja que não
+ * entra porque o serviço de outra empresa caiu é pior do que um robô a mais durante esse tempo).
+ */
+export async function humanoVerificar(env, c) {
+  if (!humanoConfigurado(env)) return { ok: true, humano: true, degradado: true };
+  const token = String(c?.token ?? "").trim();
+  if (!token || token.length > 2048) return { ok: true, humano: false, motivo: "missing-input-response" };
+  const corpo = new URLSearchParams({ secret: env.TURNSTILE_SECRET_KEY, response: token });
+  const ip = String(c?.ip ?? "").trim();
+  if (/^[0-9a-f.:]{3,45}$/i.test(ip)) corpo.set("remoteip", ip);
+  try {
+    const r = await fetch(SITEVERIFY, { method: "POST", body: corpo, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return { ok: true, humano: true, degradado: true };
+    const d = await r.json().catch(() => null);
+    if (!d) return { ok: true, humano: true, degradado: true };
+    if (d.success === true) return { ok: true, humano: true };
+    const codigos = Array.isArray(d["error-codes"]) ? d["error-codes"] : [];
+    if (codigos.some((x) => x === "invalid-input-secret" || x === "missing-input-secret")) {
+      console.error("Turnstile: a chave secreta foi recusada", codigos.join(","));
+      return { ok: true, humano: true, degradado: true };
+    }
+    return { ok: true, humano: false, motivo: codigos.join(",") || "rejeitado" };
+  } catch {
+    return { ok: true, humano: true, degradado: true };
+  }
+}
+
 /** Pedido à API da Cloudflare com o token do produtor. Devolve o `result`; os erros passam a Falha 502. */
 async function cf(env, metodo, caminho, corpo) {
   const r = await fetch("https://api.cloudflare.com/client/v4" + caminho, {
@@ -720,6 +763,7 @@ async function tratar(req, env) {
     await limitar(env, req, "renovar");
     return json(await renovar(env, await corpoJson(req)));
   }
+  if (m === "GET" && caminho === "/v1/web/humano") return json(humanoChave(env));
   if (m === "GET" && caminho === "/v1/web/endereco") {
     const cabec = { ...CORS, "cache-control": "no-store" };
     try {
@@ -731,7 +775,7 @@ async function tratar(req, env) {
     }
   }
   if (m === "POST" && caminho.startsWith("/v1/web/")) {
-    const f = { estado: webEstado, activar: webActivar, desactivar: webDesactivar }[caminho.slice("/v1/web/".length)];
+    const f = { estado: webEstado, activar: webActivar, desactivar: webDesactivar, humano: humanoVerificar }[caminho.slice("/v1/web/".length)];
     if (f) {
       await limitar(env, req, "web");
       return json(await f(env, await corpoJson(req)));
