@@ -143,17 +143,16 @@ try {
     r = await pedir("POST", "/admin/api/entrar", { email: EMAIL_PRODUTOR, senha: `errada-${n}` });
     passo("produtor: a entrada com email e senha recusa a senha errada", r.estado === 401, r);
   }
+
+  // o encaminhamento no Supabase (os KanGest 1.4.0 falam com ele) chega a este servidor: a empresa de teste só existe aqui
+  if (URL_BASE !== ENCAMINHAMENTO_SUPABASE) {
+    r = await pedir("GET", `/admin/api/cliente?nif=${NIF}`, null, ADMIN, ENCAMINHAMENTO_SUPABASE).catch(() => null);
+    passo("o encaminhamento no Supabase (KanGest 1.4.0) chega a este servidor", r?.estado === 200 && r.corpo?.maquinas?.[0]?.maquina === MAQ, r);
+  }
 } catch (e) {
   passo(`erro inesperado: ${e.message}`, false, null);
 } finally {
   await apagar();
-}
-
-// o encaminhamento no Supabase (os KanGest 1.4.0 falam com ele): chega a este servidor?
-if (URL_BASE !== ENCAMINHAMENTO_SUPABASE) {
-  const [aqui, la] = await Promise.all([pedir("GET", "/v1/planos"), pedir("GET", "/v1/planos", null, null, ENCAMINHAMENTO_SUPABASE).catch(() => null)]);
-  const recusa = await pedir("POST", "/v1/registo", { nif: "12" }, null, ENCAMINHAMENTO_SUPABASE).catch(() => null);
-  passo("o encaminhamento no Supabase (KanGest 1.4.0) chega a este servidor", la?.estado === 200 && JSON.stringify(la.corpo) === JSON.stringify(aqui.corpo) && recusa?.corpo?.erro === "O NIF não é válido.", la);
 }
 
 console.log(falhas ? `\n${falhas} falha(s).` : "\nTudo a funcionar.");
