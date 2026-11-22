@@ -79,6 +79,11 @@ p { margin: 0; }
 .heroi::after { content: ""; position: absolute; inset: 0; background-image: radial-gradient(rgba(255,255,255,.07) 1px, transparent 1px); background-size: 26px 26px; mask-image: linear-gradient(to bottom, #000 0%, transparent 75%); pointer-events: none; }
 .heroi > .cont { position: relative; z-index: 1; }
 .heroi .olho { color: #9fe0d6; }
+.novidade { display: flex; width: fit-content; align-items: center; gap: 8px; margin-bottom: 18px; padding: 6px 14px 6px 10px; border-radius: 99px; background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.22); color: #fff; font-size: 13.5px; font-weight: 600; text-decoration: none; transition: background .15s; }
+.novidade:hover { background: rgba(255,255,255,.18); }
+.novidade svg { width: 16px; height: 16px; color: var(--accent); }
+.novidade span { opacity: .7; }
+.nota svg { width: 15px; height: 15px; vertical-align: -2px; margin-right: 4px; }
 .heroi h1 { font-size: clamp(36px, 5.2vw, 62px); font-weight: 750; margin: 16px 0 20px; }
 .heroi h1 em { font-style: normal; color: var(--accent); }
 .heroi .sub { color: rgba(255,255,255,.8); }
