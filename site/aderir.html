@@ -15,7 +15,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#0c4a44">
 <link rel="icon" href="assets/kangest-logo.svg" type="image/svg+xml">
-<link rel="stylesheet" href="estilo.css?v=8fb23924">
+<link rel="stylesheet" href="estilo.css?v=2c1069c4">
 </head>
 <body>
 <a class="saltar" href="#conteudo">Saltar para o conteúdo</a>
@@ -26,17 +26,18 @@
       <span>KanGest<small>Sistemas de gestão</small></span>
     </a>
     <nav class="menu" id="menu" aria-label="Principal">
-      <a href="kangest.html">KanGest</a>
+      <a href="kangest.html">Produto</a>
+      <a href="aderir.html" aria-current="page">Preços</a>
+      <a href="equipamento.html">Equipamento</a>
       <a href="migracao-kigest.html">Migração</a>
-      <a href="equipamento.html">Equipamento POS</a>
-      <a href="siga-plus.html">SIGA Plus</a>
-      <a href="projectos.html">Projectos</a>
-      <a href="aderir.html" aria-current="page">Aderir</a>
       <a href="contacto.html">Contacto</a>
+      <a class="so-telemovel" href="conta.html">Conta da empresa</a>
+      <a class="so-telemovel" href="baixar.html">Transferir o KanGest</a>
     </nav>
-    <a class="entrar-topo" href="conta.html" title="A conta da empresa: licença, pagamentos, computadores e segurança"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Conta</a>
-    <a class="entrar-topo" href="entrar.html" title="Entrar no KanGest da sua empresa pela Internet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Entrar</a>
-    <a class="btn btn-verde btn-pequeno" href="baixar.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>Baixar KanGest</a>
+    <div class="topo-accoes">
+      <a class="entrar-topo" href="conta.html" title="A conta da empresa: licença, pagamentos, computadores, equipa e segurança"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Conta</a>
+      <a class="btn btn-verde btn-pequeno" href="baixar.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>Transferir</a>
+    </div>
     <button class="abrir-menu" id="abrirMenu" aria-label="Abrir o menu" aria-expanded="false" aria-controls="menu">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
@@ -136,7 +137,7 @@
       <a class="telefone-grande" href="tel:+244921428367"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg><span><small>Prefere falar? Telefone e WhatsApp</small>921 428 367</span></a>
       <div class="recurso" style="margin-top:28px">
         <h3>Ainda não experimentou?</h3>
-        <p>Pode instalar já e aderir depois: o que lançar na experiência continua lá. <a class="seta" href="baixar.html">Baixar o KanGest <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a></p>
+        <p>Pode instalar já e aderir depois: o que lançar na experiência continua lá. <a class="seta" href="baixar.html">Transferir o KanGest <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a></p>
       </div>
     </div>
 
@@ -193,7 +194,7 @@
       <div class="formulario" id="adesaoEnviada" hidden>
         <div class="resposta"><div class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2.4"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg><span data-mensagem-enviada>Recebemos o seu pedido de adesão. Vamos contactá-lo em breve.</span></div></div>
         <p class="nota" data-reenviar hidden>Se o WhatsApp não abriu, <a href="#" data-abrir-whatsapp>abra-o aqui</a> ou ligue para 921 428 367.</p>
-        <a class="btn btn-linha" href="baixar.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>Baixar o KanGest enquanto espera</a>
+        <a class="btn btn-linha" href="baixar.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>Transferir o KanGest enquanto espera</a>
       </div>
     </div>
   </div>
@@ -222,21 +223,31 @@
         <p style="max-width:34ch">Facturação, ponto de venda e stock para o comércio angolano, gestão escolar e projectos à medida.</p>
       </div>
       <div>
-        <h4>Produtos</h4>
+        <h4>KanGest</h4>
         <ul>
-          <li><a href="kangest.html">KanGest</a></li>
+          <li><a href="kangest.html">O produto</a></li>
+          <li><a href="aderir.html">Preços e planos</a></li>
+          <li><a href="baixar.html">Transferir</a></li>
           <li><a href="equipamento.html">Equipamento POS</a></li>
-          <li><a href="siga-plus.html">SIGA Plus</a></li>
-          <li><a href="projectos.html">Projectos à medida</a></li>
+          <li><a href="migracao-kigest.html">Migração de dados</a></li>
+          <li><a href="https://github.com/fernandotunas6-bot/KanGest/releases" target="_blank" rel="noopener">Todas as versões</a></li>
         </ul>
       </div>
       <div>
-        <h4>KanGest</h4>
+        <h4>Conta</h4>
         <ul>
-          <li><a href="baixar.html">Baixar</a></li>
-          <li><a href="migracao-kigest.html">Migração de dados</a></li>
-          <li><a href="https://github.com/fernandotunas6-bot/KanGest/releases" target="_blank" rel="noopener">Todas as versões</a></li>
-          <li><a href="contacto.html">Pedir orçamento</a></li>
+          <li><a href="conta.html">Conta da empresa</a></li>
+          <li><a href="entrar.html">KanGest pela Internet</a></li>
+          <li><a href="contacto.html">Pedir uma demonstração</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Outros sistemas</h4>
+        <ul>
+          <li><a href="siga-plus.html">SIGA Plus</a></li>
+          <li><a href="projectos.html">Projectos à medida</a></li>
+          <li><a href="https://livrariaadventista.ao" target="_blank" rel="noopener">Livraria Adventista</a></li>
+          <li><a href="https://portal-siga.com" target="_blank" rel="noopener">Portal SIGA</a></li>
         </ul>
       </div>
       <div>
@@ -247,15 +258,6 @@
           <li><a href="contacto.html">Formulário de contacto</a></li>
         </ul>
       </div>
-      <div>
-        <h4>Sites</h4>
-        <ul>
-          <li><a href="https://www.portal-siga.com" target="_blank" rel="noopener">SIGA Plus</a></li>
-          <li><a href="https://portal-siga.com" target="_blank" rel="noopener">Entrar no portal SIGA</a></li>
-          <li><a href="https://docs.portal-siga.com" target="_blank" rel="noopener">Documentação do SIGA</a></li>
-          <li><a href="https://livrariaadventista.ao" target="_blank" rel="noopener">Livraria Adventista</a></li>
-        </ul>
-      </div>
     </div>
     <div class="rodape-fim">
       <span>© <span id="ano">2026</span> KanGest. Feito em Angola. Desenvolvido por Valentino Canguele · <a href="tel:+244926445277">926 445 277</a> · <a href="mailto:valentinocanguele@gmail.com">valentinocanguele@gmail.com</a></span>
@@ -264,6 +266,6 @@
   </div>
 </footer>
 <script>window.KANGEST = {"site": "https://kangest.pages.dev", "versao": "1.4.1", "downloads": {"windows": "/actualizacoes/KanGest_1.4.1_x64-setup.exe", "macArm": "/actualizacoes/KanGest_1.4.1_aarch64.dmg", "macIntel": "/actualizacoes/KanGest_1.4.1_x64.dmg", "versoes": "https://github.com/fernandotunas6-bot/KanGest/releases", "tamanhoWindows": "5,6 MB", "tamanhoMacArm": "5,3 MB", "tamanhoMacIntel": "5,8 MB"}, "contacto": {"email": "", "whatsapp": "244921428367", "telefone": "921 428 367", "telefoneLink": "+244921428367"}, "siga": {"site": "https://www.portal-siga.com", "portal": "https://portal-siga.com", "docs": "https://docs.portal-siga.com"}, "livraria": "https://livrariaadventista.ao", "web": {"licencas": "https://kangest-licencas.valentinocanguele.workers.dev", "dominio": ""}};</script>
-<script src="site.js?v=8fb23924" defer></script>
+<script src="site.js?v=2c1069c4" defer></script>
 </body>
 </html>

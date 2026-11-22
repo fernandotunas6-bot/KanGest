@@ -23,13 +23,13 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 FONTE, SAIDA = RAIZ / "site-fonte", RAIZ / "site"
 
+# o menu do cabeçalho: poucas entradas, curtas, numa só linha (o SIGA Plus, os projectos e o resto ficam no rodapé);
+# «Conta» e «Transferir» ficam à direita, no base.html
 MENU = [
-    ("kangest", "kangest.html", "KanGest"),
+    ("kangest", "kangest.html", "Produto"),
+    ("aderir", "aderir.html", "Preços"),
+    ("equipamento", "equipamento.html", "Equipamento"),
     ("migracao", "migracao-kigest.html", "Migração"),
-    ("equipamento", "equipamento.html", "Equipamento POS"),
-    ("siga", "siga-plus.html", "SIGA Plus"),
-    ("projectos", "projectos.html", "Projectos"),
-    ("aderir", "aderir.html", "Aderir"),
     ("contacto", "contacto.html", "Contacto"),
 ]
 
