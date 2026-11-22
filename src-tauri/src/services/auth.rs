@@ -292,6 +292,11 @@ pub const CONTA_DIFERENTE: &str = "Conta diferente: este aparelho tem a sessão 
 /// do mesmo browser, que partilha a ligação). Entrar com outra conta substituía-a sem ninguém saber; agora a troca tem
 /// de ser confirmada e fica na auditoria.
 async fn conta_diferente(st: &AppState, novo: i64, login: &str, trocar: bool) -> AppResult<()> {
+    // só nos postos e browsers ligados ao servidor: o programa no próprio computador tem uma janela e só mostra a
+    // entrada sem sessão, por isso aí não há troca silenciosa a evitar
+    if crate::state::contexto().is_none() {
+        return Ok(());
+    }
     let Some(actual) = st.sessao_opcional() else { return Ok(()) };
     if actual.id == novo {
         return Ok(());
