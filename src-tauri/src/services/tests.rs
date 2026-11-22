@@ -5897,6 +5897,10 @@ async fn equipa_gerida_no_site() {
     assert_eq!(loja, posto_loja, "o posto fica na loja certa");
     let (perfil, ativo, conta): (String, i64, Option<String>) = sqlx::query_as("SELECT perfil, ativo, conta_id FROM utilizadores WHERE login = 'admin'").fetch_one(&st.pool).await.unwrap();
     assert_eq!((perfil.as_str(), ativo, conta.as_deref()), ("ADMIN", 1, Some("F2")), "o único administrador continua administrador e activo, mas fica ligado ao site");
+    // a Maria fica na loja nova (e só entra nos postos dessa loja); para entrar no posto deste teste, sem loja
+    let loja_maria: Option<i64> = sqlx::query_scalar("SELECT armazem_id FROM utilizadores WHERE login = 'maria'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(loja_maria, Some(loja));
+    sqlx::query("UPDATE utilizadores SET armazem_id = NULL WHERE login = 'maria'").execute(&st.pool).await.unwrap();
     // a Maria entra com a senha provisória e tem de a mudar; a senha provisória não serve para mais nada
     rpc(&st, "auth.logout", json!({})).await;
     assert!(rpc_err(&st, "auth.login", json!({ "login": "maria", "senha": "errada" })).await.contains("incorrect"));
