@@ -9,11 +9,12 @@
 
 Na primeira vez: cria a base D1 «kangest-licencas», aplica o schema.sql, envia o Worker com os segredos e liga o
 endereço *.workers.dev. Nas seguintes: aplica o schema (só cria o que falta) e envia o código, mantendo os segredos.
---segredos volta a enviar a chave de assinatura e a chave do painel.
+--segredos volta a enviar a chave de assinatura e a chave do painel; --senha-painel só o email e a senha do painel.
 
 Segredos (nunca no repositório):
   ~/.kangest-licencas/servidor/privada.pem      chave de assinatura do servidor (a pública está no licenca.rs)
   ~/.kangest-licencas/servidor/admin-token.txt  chave do painel /admin (criada aqui se não existir)
+  ~/.kangest-licencas/servidor/admin-email.txt e admin-senha.txt  entrada no painel com email e senha (resumo PBKDF2)
 O token precisa de «Workers Scripts · Edit» e «D1 · Edit».
 """
 import json, os, secrets, ssl, subprocess, sys, urllib.error, urllib.request, uuid
@@ -113,6 +114,14 @@ def main():
             print(f"Chave do painel criada em {tf}")
         segredos["CHAVE_PRIVADA"] = (PASTA / "privada.pem").read_text()
         segredos["ADMIN_TOKEN"] = tf.read_text().strip()
+    # entrada no painel com email e senha (só o resumo da senha: node servidor-licencas/resumo-senha.mjs)
+    if "--segredos" in a or "--senha-painel" in a or not existe:
+        fe, fs = PASTA / "admin-email.txt", PASTA / "admin-senha.txt"
+        if fe.exists() and fs.exists():
+            segredos["ADMIN_EMAIL"] = fe.read_text().strip()
+            segredos["ADMIN_SENHA"] = fs.read_text().strip()
+        elif "--senha-painel" in a:
+            sys.exit(f"Faltam {fe} e {fs} (o resumo da senha: node servidor-licencas/resumo-senha.mjs > {fs}).")
     if opc("--email-api"):
         segredos["RESEND_API_KEY"] = opc("--email-api")
     if opc("--remetente"):
