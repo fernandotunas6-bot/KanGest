@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { d1Local } from "./d1-local.mjs";
-import worker, { guardarEstado } from "../src/worker.js";
+import worker, { equipaParaKangest, guardarEstado } from "../src/worker.js";
 
 const ADMIN = "b".repeat(40);
 const env = { DB: d1Local(readFileSync(new URL("../schema.sql", import.meta.url), "utf8")), ADMIN_TOKEN: ADMIN };
@@ -106,6 +106,44 @@ assert.equal((await post("senha", { actual: "Senha-forte-2026", nova: "Nova-senh
 assert.equal((await get("resumo", t3)).estado, 401, "mudar a senha termina as outras sessões");
 assert.equal((await get("resumo", t2)).estado, 200, "esta continua");
 assert.equal((await post("entrar", { email: EMAIL, senha: "Senha-forte-2026" })).estado, 401, "a senha antiga já não entra");
+
+// equipa gerida no site (fase 3b)
+{
+  const ap = (c, b) => post("equipa/" + c, b, t2);
+  assert.equal(await equipaParaKangest(env, NIF, "AAAA-BBBB-CCCC", 0), null, "sem nada gerido, nada a aplicar");
+  assert.match((await ap("funcionario", { login: "maria silva", nome: "Maria Caixa", perfil: "CAIXA" })).corpo.erro, /letras minúsculas/, "login com espaço");
+  assert.match((await ap("funcionario", { login: "maria", nome: "Maria Caixa", perfil: "DONO" })).corpo.erro, /Perfil desconhecido/);
+  assert.match((await ap("funcionario", { login: "maria", nome: "Maria Caixa", perfil: "CAIXA", loja: "Loja Nova" })).corpo.erro, /Loja desconhecida/);
+  assert.equal((await ap("loja", { nome: "Loja Nova" })).estado, 200);
+  const nova = await ap("funcionario", { login: "maria", nome: "Maria Caixa", perfil: "CAIXA", loja: "Loja Nova" });
+  assert.equal(nova.estado, 200); assert.match(nova.corpo.senha_provisoria, /^[A-Za-z2-9]{4}-[A-Za-z2-9]{4}-[A-Za-z2-9]{4}$/);
+  const adoptado = await ap("funcionario", { login: "admin", nome: "Administrador", perfil: "ADMIN" });
+  assert.equal(adoptado.corpo.senha_provisoria, null, "quem já existe no programa mantém a senha");
+  assert.match((await ap("funcionario", { login: "maria", nome: "Outra", perfil: "CAIXA" })).corpo.erro, /Já há um funcionário/);
+  assert.equal((await ap("posto", { descricao: "Caixa 3", loja: "Loja Nova" })).estado, 200);
+  assert.match((await ap("posto", { descricao: "Caixa 4" })).corpo.erro, /Escolha a loja/);
+  const g = (await get("equipa", t2)).corpo;
+  assert.equal(g.funcionarios.length, 2); assert.equal(g.versao.versao, 4); assert.equal(g.versao.aplicada, 0);
+  assert.equal(g.funcionarios.find((f) => f.login === "maria").senha_pendente, true);
+  assert.ok(!JSON.stringify(g).includes("pbkdf2"), "o painel não recebe os resumos");
+  // a verificação do KanGest: recebe a equipa enquanto estiver atrás; o resumo da senha provisória vai, a senha não
+  const paraK = await equipaParaKangest(env, NIF, "AAAA-BBBB-CCCC", 0);
+  assert.equal(paraK.versao, 4); assert.equal(paraK.lojas[0].nome, "Loja Nova"); assert.equal(paraK.postos[0].loja, "Loja Nova");
+  const maria = paraK.funcionarios.find((f) => f.login === "maria");
+  assert.match(maria.senha_provisoria, /^pbkdf2-sha256\$100000\$/); assert.ok(!JSON.stringify(paraK).includes(nova.corpo.senha_provisoria));
+  assert.equal(paraK.funcionarios.find((f) => f.login === "admin").senha_provisoria, null);
+  // aplicada: fica registado e os resumos apagam-se
+  assert.equal(await equipaParaKangest(env, NIF, "AAAA-BBBB-CCCC", 4), null);
+  const depois = (await get("equipa", t2)).corpo;
+  assert.equal(depois.versao.aplicada, 4); assert.equal(depois.versao.aplicada_maquina, "AAAA-BBBB-CCCC");
+  assert.equal(depois.funcionarios.find((f) => f.login === "maria").senha_pendente, false);
+  // repor a senha: nova provisória, nova versão
+  const reposta = await ap("repor-senha", { id: depois.funcionarios.find((f) => f.login === "maria").id });
+  assert.match(reposta.corpo.senha_provisoria, /-/);
+  assert.equal((await equipaParaKangest(env, NIF, "AAAA-BBBB-CCCC", 4)).versao, 5);
+  // outra empresa não vê nem mexe
+  assert.equal((await get("equipa")).estado, 401);
+}
 
 // sair
 await post("sair", {}, t2);

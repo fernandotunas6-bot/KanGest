@@ -185,3 +185,47 @@ CREATE TABLE IF NOT EXISTS equipas (
     dados TEXT NOT NULL,
     PRIMARY KEY (nif, maquina)
 );
+
+-- Equipa gerida no site (fase 3b): os funcionários, as lojas e os postos que o dono quer no KanGest. Cada alteração sobe
+-- a versão; o KanGest diz na verificação que versão tem e, se estiver atrás, recebe a equipa e aplica-a (nunca apaga:
+-- desactivar é que tira o acesso). A senha provisória só vai como resumo PBKDF2 e apaga-se quando o KanGest a aplica.
+CREATE TABLE IF NOT EXISTS funcionarios (
+    nif TEXT NOT NULL,
+    id TEXT NOT NULL,
+    login TEXT NOT NULL,
+    nome TEXT NOT NULL,
+    perfil TEXT NOT NULL,
+    loja TEXT,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    senha_provisoria TEXT,
+    criado_em TEXT NOT NULL,
+    actualizado_em TEXT NOT NULL,
+    PRIMARY KEY (nif, id),
+    UNIQUE (nif, login)
+);
+CREATE TABLE IF NOT EXISTS lojas_geridas (
+    nif TEXT NOT NULL,
+    id TEXT NOT NULL,
+    nome TEXT NOT NULL,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    actualizado_em TEXT NOT NULL,
+    PRIMARY KEY (nif, id),
+    UNIQUE (nif, nome)
+);
+CREATE TABLE IF NOT EXISTS postos_geridos (
+    nif TEXT NOT NULL,
+    id TEXT NOT NULL,
+    descricao TEXT NOT NULL,
+    loja TEXT,
+    actualizado_em TEXT NOT NULL,
+    PRIMARY KEY (nif, id),
+    UNIQUE (nif, descricao)
+);
+CREATE TABLE IF NOT EXISTS equipa_versoes (
+    nif TEXT PRIMARY KEY,
+    versao INTEGER NOT NULL,
+    actualizado_em TEXT NOT NULL,
+    aplicada INTEGER NOT NULL DEFAULT 0,
+    aplicada_em TEXT,
+    aplicada_maquina TEXT
+);

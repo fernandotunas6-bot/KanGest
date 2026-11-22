@@ -416,7 +416,9 @@ async function renovar(env, c) {
     .bind(agora(), texto(c.versao, 20) || null, nif, maquina).run();
   await guardarEstado(env, nif, maquina, c);
   const cliente = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(nif).first();
-  return { ok: true, ...(await licencaActual(env, cliente, maquina)) };
+  // a equipa gerida no site, se o KanGest estiver atrás (KanGest 1.4+ diz que versão tem em estado.equipa_versao)
+  const equipa = c?.estado && typeof c.estado === "object" ? await equipaParaKangest(env, nif, maquina, c.estado.equipa_versao) : null;
+  return { ok: true, ...(await licencaActual(env, cliente, maquina)), ...(equipa ? { equipa_gerida: equipa } : {}) };
 }
 
 const dataOuNull = (v) => (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$/.test(String(v ?? "")) ? String(v) : null);
@@ -923,6 +925,152 @@ async function contaMudarSenha(env, s, c) {
   return { ok: true, mensagem: "Senha mudada. As sessões nos outros aparelhos terminaram." };
 }
 
+// ------------------------------------------------------------------ equipa gerida no site (fase 3b)
+
+const PERFIS_BASE = ["ADMIN", "GESTOR", "CAIXA"];
+const ALFABETO_SENHA = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+
+function senhaProvisoria() {
+  const b = crypto.getRandomValues(new Uint8Array(12));
+  let s = "";
+  for (const x of b) s += ALFABETO_SENHA[x % ALFABETO_SENHA.length];
+  return s.slice(0, 4) + "-" + s.slice(4, 8) + "-" + s.slice(8, 12);
+}
+
+async function subirVersao(env, nif) {
+  await env.DB.prepare(
+    `INSERT INTO equipa_versoes (nif, versao, actualizado_em) VALUES (?, 1, ?)
+     ON CONFLICT (nif) DO UPDATE SET versao = versao + 1, actualizado_em = excluded.actualizado_em`,
+  ).bind(nif, agora()).run();
+}
+
+/** O que o KanGest comunicou (perfis e lojas válidos) e o que está gerido no site. */
+async function equipaGerida(env, nif) {
+  const [f, l, p, v, inv] = await env.DB.batch([
+    env.DB.prepare("SELECT id, login, nome, perfil, loja, ativo, senha_provisoria IS NOT NULL AS senha_pendente FROM funcionarios WHERE nif = ? ORDER BY ativo DESC, nome").bind(nif),
+    env.DB.prepare("SELECT id, nome, ativo FROM lojas_geridas WHERE nif = ? ORDER BY nome").bind(nif),
+    env.DB.prepare("SELECT id, descricao, loja FROM postos_geridos WHERE nif = ? ORDER BY descricao").bind(nif),
+    env.DB.prepare("SELECT versao, actualizado_em, aplicada, aplicada_em, aplicada_maquina FROM equipa_versoes WHERE nif = ?").bind(nif),
+    env.DB.prepare("SELECT dados FROM equipas WHERE nif = ? ORDER BY recebido_em DESC LIMIT 1").bind(nif),
+  ]);
+  const comunicada = inv.results[0] ? JSON.parse(inv.results[0].dados) : null;
+  return {
+    funcionarios: f.results.map((x) => ({ ...x, ativo: x.ativo === 1, senha_pendente: x.senha_pendente === 1 })),
+    lojas: l.results.map((x) => ({ ...x, ativo: x.ativo === 1 })),
+    postos: p.results,
+    versao: v.results[0] ?? { versao: 0, aplicada: 0 },
+    perfis: comunicada?.perfis?.length ? comunicada.perfis.map((x) => x.codigo) : PERFIS_BASE,
+    lojas_conhecidas: [...new Set([...(comunicada?.lojas ?? []).map((x) => x.nome), ...l.results.map((x) => x.nome)])],
+    logins_no_programa: (comunicada?.utilizadores ?? []).map((u) => u.login.toLowerCase()),
+  };
+}
+
+async function guardarFuncionario(env, nif, c) {
+  const g = await equipaGerida(env, nif);
+  const login = String(c?.login ?? "").trim().toLowerCase();
+  const nome = texto(c?.nome, 80);
+  const perfil = texto(c?.perfil, 20).toUpperCase();
+  const loja = texto(c?.loja, 60) || null;
+  if (!/^[a-z0-9._-]{2,40}$/.test(login)) throw new Falha("O login tem de ter 2 a 40 letras minúsculas, algarismos, pontos, hífenes ou sublinhados.");
+  if (nome.length < 2) throw new Falha("Escreva o nome do funcionário.");
+  if (!g.perfis.includes(perfil)) throw new Falha(`Perfil desconhecido. Use um destes: ${g.perfis.join(", ")}.`);
+  if (loja && !g.lojas_conhecidas.includes(loja)) throw new Falha("Loja desconhecida: crie-a primeiro em «Lojas e postos».");
+  const ativo = c?.ativo === false ? 0 : 1;
+  const existe = c?.id ? g.funcionarios.find((x) => x.id === String(c.id)) : null;
+  if (c?.id && !existe) throw new Falha("Funcionário não encontrado.", 404);
+  const outro = g.funcionarios.find((x) => x.login === login && x.id !== existe?.id);
+  if (outro) throw new Falha(`Já há um funcionário com o login «${login}».`);
+  // novo: senha provisória, a não ser que já exista no programa com este login (aí mantém a senha que tem)
+  const adoptar = !existe && g.logins_no_programa.includes(login);
+  const senha = !existe && !adoptar ? senhaProvisoria() : null;
+  const resumo = senha ? await resumoNovo(senha) : null;
+  if (existe) {
+    await env.DB.prepare("UPDATE funcionarios SET login = ?, nome = ?, perfil = ?, loja = ?, ativo = ?, actualizado_em = ? WHERE nif = ? AND id = ?")
+      .bind(login, nome, perfil, loja, ativo, agora(), nif, existe.id).run();
+  } else {
+    await env.DB.prepare("INSERT INTO funcionarios (nif, id, login, nome, perfil, loja, ativo, senha_provisoria, criado_em, actualizado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(nif, b64url(crypto.getRandomValues(new Uint8Array(9))), login, nome, perfil, loja, ativo, resumo, agora(), agora()).run();
+  }
+  await subirVersao(env, nif);
+  return {
+    ok: true, senha_provisoria: senha,
+    mensagem: existe ? "Funcionário guardado. Chega ao KanGest na próxima verificação."
+      : adoptar ? `«${login}» já existe no programa: passa a ser gerido aqui e mantém a senha que tem.`
+      : "Funcionário criado. Dê-lhe a senha provisória: no primeiro acesso ao KanGest tem de a mudar.",
+  };
+}
+
+async function reporSenhaFuncionario(env, nif, c) {
+  const f = await env.DB.prepare("SELECT id, login FROM funcionarios WHERE nif = ? AND id = ?").bind(nif, String(c?.id ?? "")).first();
+  if (!f) throw new Falha("Funcionário não encontrado.", 404);
+  const senha = senhaProvisoria();
+  await env.DB.prepare("UPDATE funcionarios SET senha_provisoria = ?, actualizado_em = ? WHERE nif = ? AND id = ?").bind(await resumoNovo(senha), agora(), nif, f.id).run();
+  await subirVersao(env, nif);
+  return { ok: true, senha_provisoria: senha, mensagem: `Senha provisória nova para «${f.login}». Vale depois da próxima verificação do KanGest.` };
+}
+
+async function guardarLoja(env, nif, c) {
+  const nome = texto(c?.nome, 60);
+  if (nome.length < 2) throw new Falha("Escreva o nome da loja.");
+  const ativo = c?.ativo === false ? 0 : 1;
+  const id = c?.id ? String(c.id) : b64url(crypto.getRandomValues(new Uint8Array(9)));
+  const dup = await env.DB.prepare("SELECT id FROM lojas_geridas WHERE nif = ? AND nome = ? AND id <> ?").bind(nif, nome, id).first();
+  if (dup) throw new Falha(`Já há uma loja «${nome}».`);
+  await env.DB.prepare(
+    `INSERT INTO lojas_geridas (nif, id, nome, ativo, actualizado_em) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (nif, id) DO UPDATE SET nome = excluded.nome, ativo = excluded.ativo, actualizado_em = excluded.actualizado_em`,
+  ).bind(nif, id, nome, ativo, agora()).run();
+  await subirVersao(env, nif);
+  return { ok: true, mensagem: "Loja guardada. Chega ao KanGest na próxima verificação." };
+}
+
+async function guardarPosto(env, nif, c) {
+  const g = await equipaGerida(env, nif);
+  const descricao = texto(c?.descricao, 60);
+  const loja = texto(c?.loja, 60) || null;
+  if (descricao.length < 2) throw new Falha("Escreva o nome do posto (ex.: Caixa 2).");
+  if (!loja || !g.lojas_conhecidas.includes(loja)) throw new Falha("Escolha a loja do posto.");
+  const id = c?.id ? String(c.id) : b64url(crypto.getRandomValues(new Uint8Array(9)));
+  const dup = await env.DB.prepare("SELECT id FROM postos_geridos WHERE nif = ? AND descricao = ? AND id <> ?").bind(nif, descricao, id).first();
+  if (dup) throw new Falha(`Já há um posto «${descricao}».`);
+  await env.DB.prepare(
+    `INSERT INTO postos_geridos (nif, id, descricao, loja, actualizado_em) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (nif, id) DO UPDATE SET descricao = excluded.descricao, loja = excluded.loja, actualizado_em = excluded.actualizado_em`,
+  ).bind(nif, id, descricao, loja, agora()).run();
+  await subirVersao(env, nif);
+  return { ok: true, mensagem: "Posto guardado. Chega ao KanGest na próxima verificação." };
+}
+
+/**
+ * Na verificação: regista a versão que o KanGest diz ter e, se estiver atrás, devolve a equipa gerida para aplicar.
+ * Quando o KanGest já tem a versão actual, os resumos das senhas provisórias apagam-se (já não fazem falta aqui).
+ */
+export async function equipaParaKangest(env, nif, maquina, versaoKangest) {
+  const v = await env.DB.prepare("SELECT versao, aplicada FROM equipa_versoes WHERE nif = ?").bind(nif).first();
+  if (!v) return null;
+  const tem = Number.isInteger(versaoKangest) ? versaoKangest : 0;
+  if (tem >= v.versao) {
+    if (v.aplicada < v.versao) {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE equipa_versoes SET aplicada = ?, aplicada_em = ?, aplicada_maquina = ? WHERE nif = ?").bind(v.versao, agora(), maquina, nif),
+        env.DB.prepare("UPDATE funcionarios SET senha_provisoria = NULL WHERE nif = ?").bind(nif),
+      ]);
+    }
+    return null;
+  }
+  const [f, l, p] = await env.DB.batch([
+    env.DB.prepare("SELECT id, login, nome, perfil, loja, ativo, senha_provisoria FROM funcionarios WHERE nif = ? ORDER BY login").bind(nif),
+    env.DB.prepare("SELECT id, nome, ativo FROM lojas_geridas WHERE nif = ? ORDER BY nome").bind(nif),
+    env.DB.prepare("SELECT id, descricao, loja FROM postos_geridos WHERE nif = ? ORDER BY descricao").bind(nif),
+  ]);
+  return {
+    versao: v.versao,
+    funcionarios: f.results.map((x) => ({ ...x, ativo: x.ativo === 1 })),
+    lojas: l.results.map((x) => ({ ...x, ativo: x.ativo === 1 })),
+    postos: p.results,
+  };
+}
+
 /** As rotas /v1/conta/* (o portal do cliente). */
 async function rotasConta(env, req, m, accao) {
   if (m === "POST" && accao === "codigo") {
@@ -951,6 +1099,11 @@ async function rotasConta(env, req, m, accao) {
   if (m === "POST" && accao === "perfil") return json(await contaPerfil(env, s, await corpoJson(req)));
   if (m === "POST" && accao === "senha") return json(await contaMudarSenha(env, s, await corpoJson(req)));
   if (m === "POST" && accao === "sair") return json(await contaTerminar(env, s, { id: s.sid }, false));
+  if (m === "GET" && accao === "equipa") return json({ ok: true, ...(await equipaGerida(env, s.nif)) });
+  if (m === "POST" && accao === "equipa/funcionario") return json(await guardarFuncionario(env, s.nif, await corpoJson(req)));
+  if (m === "POST" && accao === "equipa/repor-senha") return json(await reporSenhaFuncionario(env, s.nif, await corpoJson(req)));
+  if (m === "POST" && accao === "equipa/loja") return json(await guardarLoja(env, s.nif, await corpoJson(req)));
+  if (m === "POST" && accao === "equipa/posto") return json(await guardarPosto(env, s.nif, await corpoJson(req)));
   return erro("Não encontrado.", 404);
 }
 
