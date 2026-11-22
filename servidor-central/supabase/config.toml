@@ -1,0 +1,16 @@
+# Backend central do KanGest no Supabase (docs/ARQUITETURA.md, servidor-central/LEIA-ME.md).
+# Projecto remoto: fissktkxilseymadzppn (supabase link --project-ref fissktkxilseymadzppn).
+project_id = "kangest"
+
+[api]
+# Os esquemas do KanGest (empresas, licencas, equipa, seguranca, web) nunca se expõem na API REST:
+# só a função kangest lhes chega, pela ligação directa ao Postgres.
+schemas = ["public", "graphql_public"]
+
+[db]
+major_version = 17
+
+[functions.kangest]
+# A função tem a sua própria autenticação (produtor, conta da empresa, segredo de cada computador):
+# o KanGest e o site não mandam o JWT do Supabase.
+verify_jwt = false
