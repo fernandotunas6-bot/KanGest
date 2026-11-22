@@ -91,7 +91,7 @@ export default function Tv() {
     () =>
       (d?.horas ?? [])
         .filter((h) => (h.hora >= 7 && h.hora <= 21) || h.hoje !== 0)
-        .map((h) => ({ chave: `${String(h.hora).padStart(2, "0")}:00`, rotulo: `${h.hora}h`, valor: h.hoje / 100 })),
+        .map((h) => ({ chave: `${String(h.hora).padStart(2, "0")}:00`, rotulo: `${h.hora}h`, valor: h.hoje })),
     [d],
   );
 
@@ -186,7 +186,7 @@ export default function Tv() {
           {/* hora a hora e lojas */}
           <Cartao className={cn("flex flex-col", d.loja_unica ? "col-span-12" : "col-span-8")} titulo="Hoje, hora a hora">
             <div className="min-h-0 flex-1 rounded-xl bg-white p-3 text-[#1d2422]">
-              <BarChart dados={horas} formatar={(v) => kz(Math.round(v * 100))} altura={220} />
+              <BarChart dados={horas} formatar={kz} altura={330} />
             </div>
           </Cartao>
           {!d.loja_unica && (
