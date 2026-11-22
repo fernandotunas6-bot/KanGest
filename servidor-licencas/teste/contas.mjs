@@ -1,12 +1,12 @@
 // Testes das contas das empresas no site (portal do cliente), sem rede: node servidor-licencas/teste/contas.mjs
+// Com KANGEST_BD=postgres, o mesmo teste corre no Postgres da função kangest do Supabase (ver teste/base.mjs).
 // Os dados são de exemplo (empresa, NIF e emails fictícios).
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { d1Local } from "./d1-local.mjs";
+import { baseDeTeste, motor } from "./base.mjs";
 import worker, { equipaParaKangest, guardarEstado } from "../src/worker.js";
 
 const ADMIN = "b".repeat(40);
-const env = { DB: d1Local(readFileSync(new URL("../schema.sql", import.meta.url), "utf8")), ADMIN_TOKEN: ADMIN };
+const env = { DB: await baseDeTeste(), ADMIN_TOKEN: ADMIN };
 const NIF = "5000000001";
 const EMAIL = "dono@loja-exemplo.test";
 
@@ -155,4 +155,17 @@ assert.equal(pre.status, 204); assert.match(pre.headers.get("access-control-allo
 const fora = await worker.fetch(new Request("https://licencas.teste/v1/conta/resumo", { method: "OPTIONS", headers: { origin: "https://intruso.example" } }), env);
 assert.equal(fora.status, 403);
 
-console.log("Contas das empresas: todos os testes passaram.");
+// limite de pedidos por IP: conta por hora na tabela «limites» e recusa acima do limite
+{
+  const comIp = () => pedir("POST", "/v1/conta/codigo", { email: "ninguem@exemplo.test" }, null, { "cf-connecting-ip": "192.0.2.10" });
+  assert.equal((await comIp()).estado, 200); assert.equal((await comIp()).estado, 200);
+  assert.equal((await env.DB.prepare("SELECT n FROM limites WHERE chave = ?").bind("conta:192.0.2.10").first()).n, 2);
+  await env.DB.prepare("UPDATE limites SET janela = ? WHERE chave = ?").bind("2000-01-01T00", "conta:192.0.2.10").run();
+  assert.equal((await comIp()).estado, 200, "numa hora nova, a contagem recomeça");
+  assert.equal((await env.DB.prepare("SELECT n FROM limites WHERE chave = ?").bind("conta:192.0.2.10").first()).n, 1);
+  await env.DB.prepare("UPDATE limites SET n = ? WHERE chave = ?").bind(1000, "conta:192.0.2.10").run();
+  assert.equal((await comIp()).estado, 429);
+}
+
+await env.DB.fechar?.();
+console.log(`Contas das empresas (${motor}): todos os testes passaram.`);

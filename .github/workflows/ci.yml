@@ -1,6 +1,7 @@
 # Verificação em cada push e pull request: tipos do frontend, clippy e testes do backend,
 # numa compilação de desenvolvimento e numa com uma chave de produtor de teste (o caminho
-# da versão oficial, em que a chave AGT vem dentro do programa).
+# da versão oficial, em que a chave AGT vem dentro do programa); e o servidor de licenças
+# em SQLite (D1) e em Postgres (Supabase).
 name: CI
 
 on:
@@ -60,3 +61,45 @@ jobs:
         run: |
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:1024 -out "$RUNNER_TEMP/produtor-teste.pem"
           KANGEST_AGT_CHAVE_FICHEIRO="$RUNNER_TEMP/produtor-teste.pem" KANGEST_AGT_CERTIFICADO=999 cargo test --locked
+
+  # O servidor de licenças nos dois motores: SQLite (o D1 da Cloudflare) e Postgres (o Supabase, em PGlite), e os tipos
+  # da função kangest no Deno (docs/ARQUITETURA.md).
+  servidor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: servidor-central/package-lock.json
+
+      - run: npm ci
+        working-directory: servidor-central
+
+      - name: Servidor de licenças (SQLite, como o D1)
+        run: |
+          node servidor-licencas/teste/testar.mjs
+          node servidor-licencas/teste/contas.mjs
+
+      - name: Servidor de licenças (Postgres, como o Supabase)
+        env:
+          KANGEST_BD: postgres
+        run: |
+          node servidor-licencas/teste/testar.mjs
+          node servidor-licencas/teste/contas.mjs
+
+      - name: Consultas nos dois motores e a função de ponta a ponta
+        run: |
+          node servidor-central/teste/consultas.mjs
+          node servidor-central/teste/funcao.mjs
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Tipos da função kangest (Deno)
+        run: |
+          node servidor-central/preparar.mjs
+          deno check servidor-central/supabase/functions/kangest/index.ts

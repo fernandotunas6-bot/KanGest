@@ -64,8 +64,11 @@ servem páginas HTML.
 - `CASE … THEN 1 ELSE 0 END` em vez de comparações no `SELECT`, porque o Postgres devolve `true`/`false`.
 - No `ON CONFLICT … DO UPDATE`, a linha antiga leva o nome da tabela (`limites.n`) e a nova leva `excluded.`.
 
-O teste `servidor-central/teste/consultas.mjs` passa todas as consultas do `worker.js` pelo Postgres e falha se alguma
-não servir.
+Os testes confirmam-no, e o CI corre-os em cada push
+([`servidor-central/LEIA-ME.md`](../servidor-central/LEIA-ME.md)):
+- `servidor-central/teste/consultas.mjs` compila todas as consultas do `worker.js` nos dois motores;
+- `servidor-central/teste/funcao.mjs` percorre a função de ponta a ponta sobre Postgres;
+- com `KANGEST_BD=postgres`, os testes de `servidor-licencas/teste` correm no Postgres.
 
 ### Esquemas (Postgres)
 
