@@ -10,3 +10,8 @@ workers_dev = true
 binding = "DB"
 database_name = "kangest-licencas"
 database_id = "737a973c-e08b-400b-bfaa-264e6f617b43"
+
+# Emails pela Cloudflare Email Service (plano Workers pago e kangest.livrariaadventista.com ligado em Email Sending).
+# O publicar-licencas.py põe esta ligação com --email-cloudflare; para publicar com o wrangler, tire os comentários.
+# [[send_email]]
+# name = "EMAIL"

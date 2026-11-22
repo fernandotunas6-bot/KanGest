@@ -68,6 +68,10 @@ A D1 é SQLite e não tem esquemas: as áreas são as secções do `schema.sql`.
 
 - **Publicar:** `python3 scripts/publicar-licencas.py`, que aplica o `schema.sql` e envia o código, mantendo os
   segredos ([LICENCAS.md](LICENCAS.md)).
+- **Emails:** o Worker envia quatro, todos com o visual do site e uma versão em texto: o código de registo, o código
+  da conta, o aviso ao produtor de cada registo e as boas-vindas no primeiro registo de uma empresa. Saem pela
+  Cloudflare Email Service a partir de `kangest.livrariaadventista.com`; nunca para domínios de teste (`.invalid`,
+  `.test`).
 - **Prova de fumo** depois de cada publicação: `node servidor-licencas/teste/fumo.mjs`. Faz o percurso de um cliente em
   produção com uma empresa de teste, que se apaga no fim.
 - **Vigia** ([`.github/workflows/vigia.yml`](../.github/workflows/vigia.yml)): de 6 em 6 horas confirma que o servidor e
@@ -90,7 +94,8 @@ Definem-se com o `publicar-licencas.py` (ou `wrangler secret put`), nunca no rep
 | `ADMIN_TOKEN` | chave de emergência do produtor e chave das sessões | sim |
 | `ADMIN_EMAIL`, `ADMIN_SENHA` | entrada do produtor com email e senha (a senha só como resumo PBKDF2) | não |
 | `ADMIN_ORIGENS` | sites que podem chamar `/admin/api` e `/v1/conta` (por omissão `https://kangest.pages.dev`) | não |
-| `RESEND_API_KEY`, `EMAIL_REMETENTE` | envio dos códigos por email (sem eles, o código aparece na área do produtor) | não |
+| `EMAIL` (ligação `send_email`), `EMAIL_REMETENTE` | os emails pela Cloudflare Email Service, a partir de `kangest.livrariaadventista.com`: os códigos, o aviso ao produtor e as boas-vindas (sem eles, nenhum email sai e os códigos aparecem na área do produtor) | não |
+| `RESEND_API_KEY` | alternativa à Cloudflare Email Service para os mesmos emails | não |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | verificação de humano | não |
 | `WEB_DOMINIO`, `CF_API_TOKEN`, `CF_CONTA`, `CF_ZONA` | acesso pela Internet (túneis e DNS na Cloudflare) | não |
 | `ACCESS_EQUIPA`, `ACCESS_AUD` | Cloudflare Access à frente do painel | não |

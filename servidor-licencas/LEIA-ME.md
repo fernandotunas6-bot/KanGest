@@ -17,6 +17,7 @@ O mapa geral está em [`docs/ARQUITETURA.md`](../docs/ARQUITETURA.md).
 | `encaminhamento-supabase/` | Temporário: leva ao Worker os pedidos dos KanGest 1.4.0 ([LEIA-ME](encaminhamento-supabase/LEIA-ME.md)) |
 | `teste/testar.mjs` | Teste completo sem rede (D1 imitada com `node:sqlite`) |
 | `teste/contas.mjs` | Contas das empresas no site e equipa gerida |
+| `teste/emails.mjs` | Os emails: quais saem, para quem, HTML escapado, versão em texto, domínios de teste de fora |
 | `teste/copia.mjs`, `teste/encaminhamento.mjs` | A cópia de segurança e o encaminhamento no Supabase |
 | `teste/fumo.mjs` | Prova de fumo em produção, com uma empresa de teste que se apaga no fim |
 | `teste/servidor-local.mjs` | O Worker servido pelo Node, para testar o KanGest (`licencas_servidor_local` no Rust) |
@@ -27,6 +28,7 @@ O mapa geral está em [`docs/ARQUITETURA.md`](../docs/ARQUITETURA.md).
 node servidor-licencas/teste/testar.mjs
 node servidor-licencas/teste/contas.mjs
 node servidor-licencas/teste/copia.mjs
+node servidor-licencas/teste/emails.mjs
 node servidor-licencas/teste/encaminhamento.mjs
 ```
 
@@ -44,6 +46,28 @@ node servidor-licencas/teste/fumo.mjs                             # o percurso d
 - Segredos no Worker: `CHAVE_PRIVADA` e `ADMIN_TOKEN`; opcionais `ADMIN_EMAIL` e `ADMIN_SENHA` (`--senha-painel`),
   `RESEND_API_KEY` e `EMAIL_REMETENTE`, `ACCESS_EQUIPA` e `ACCESS_AUD` e o resto da lista em
   [`docs/ARQUITETURA.md`](../docs/ARQUITETURA.md).
+
+## Emails
+
+O Worker envia quatro emails, todos com o visual do site (HTML) e uma versão em texto:
+- o código de registo de um computador;
+- o código da conta da empresa;
+- o aviso ao produtor de cada pedido de registo (com o código, se não chegou à empresa);
+- as boas-vindas no primeiro registo de uma empresa.
+
+Saem pela Cloudflare Email Service, a partir do subdomínio `kangest.livrariaadventista.com`. Para ligar, uma vez:
+1. no painel da Cloudflare, o plano **Workers pago** (a Email Sending só envia para qualquer destinatário nesse plano);
+2. **Compute → Email Service → Email Sending → Onboard Domain**: `kangest.livrariaadventista.com` (a Cloudflare põe
+   os registos DNS sozinha);
+3. publicar com o remetente:
+
+   ```bash
+   CLOUDFLARE_API_TOKEN=… python3 scripts/publicar-licencas.py --email-cloudflare "KanGest <codigos@kangest.livrariaadventista.com>"
+   ```
+
+O remetente fica em `~/.kangest-licencas/servidor/email-remetente.txt`, e as publicações seguintes mantêm a ligação.
+Sem a ligação nem o Resend, nenhum email sai e os códigos aparecem na área do produtor. Para domínios de teste
+(`.invalid`, `.test`, `.example`) nunca sai nada: a prova de fumo não gera devoluções.
 
 ## Cópias de segurança
 
