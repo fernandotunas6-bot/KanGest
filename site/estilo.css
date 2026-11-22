@@ -236,6 +236,8 @@ code { font: 13.5px ui-monospace, "SF Mono", Consolas, monospace; background: va
 .download .seta { margin-top: auto; }
 
 /* formulários */
+/* campo armadilha dos formulários (anti-robôs, site.js): fora do ecrã, para pessoas e leitores de ecrã */
+.mel { position: absolute !important; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
 .formulario { background: var(--surface); color: var(--ink); border-radius: 20px; padding: 28px; box-shadow: var(--sombra); border: 1px solid var(--line); }
 .formulario h3 { margin-bottom: 4px; }
 .formulario .nota { margin-bottom: 18px; }
