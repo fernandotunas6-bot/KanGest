@@ -146,3 +146,86 @@ CREATE TABLE IF NOT EXISTS sessoes_painel (
     local TEXT,
     terminada_em TEXT
 );
+
+-- Contas das empresas no site (portal do cliente, como as definições da conta do Claude): o dono entra com o email do
+-- registo e uma senha (só o resumo PBKDF2). A senha cria-se ou repõe-se com um código de 6 algarismos.
+CREATE TABLE IF NOT EXISTS contas (
+    nif TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    senha TEXT NOT NULL,
+    criada_em TEXT NOT NULL,
+    actualizada_em TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS codigos_conta (
+    email TEXT PRIMARY KEY,
+    nif TEXT NOT NULL,
+    codigo_hash TEXT NOT NULL,
+    codigo_aberto TEXT,               -- só enquanto o envio de email não estiver configurado (o produtor dá-o)
+    expira_em TEXT NOT NULL,
+    tentativas INTEGER NOT NULL DEFAULT 0,
+    criado_em TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessoes_conta (
+    id TEXT PRIMARY KEY,
+    nif TEXT NOT NULL,
+    criada_em TEXT NOT NULL,
+    ultima_em TEXT NOT NULL,
+    aparelho TEXT,
+    local TEXT,
+    terminada_em TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessoes_conta_nif ON sessoes_conta (nif, terminada_em);
+
+-- A equipa, as lojas e os postos que o KanGest de cada computador comunicou (só login, nome, perfil, loja, activo, dois
+-- passos e último acesso; nunca senhas nem contactos), para a secção «Equipa» da conta da empresa.
+CREATE TABLE IF NOT EXISTS equipas (
+    nif TEXT NOT NULL,
+    maquina TEXT NOT NULL,
+    recebido_em TEXT NOT NULL,
+    dados TEXT NOT NULL,
+    PRIMARY KEY (nif, maquina)
+);
+
+-- Equipa gerida no site (fase 3b): os funcionários, as lojas e os postos que o dono quer no KanGest. Cada alteração sobe
+-- a versão; o KanGest diz na verificação que versão tem e, se estiver atrás, recebe a equipa e aplica-a (nunca apaga:
+-- desactivar é que tira o acesso). A senha provisória só vai como resumo PBKDF2 e apaga-se quando o KanGest a aplica.
+CREATE TABLE IF NOT EXISTS funcionarios (
+    nif TEXT NOT NULL,
+    id TEXT NOT NULL,
+    login TEXT NOT NULL,
+    nome TEXT NOT NULL,
+    perfil TEXT NOT NULL,
+    loja TEXT,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    senha_provisoria TEXT,
+    criado_em TEXT NOT NULL,
+    actualizado_em TEXT NOT NULL,
+    PRIMARY KEY (nif, id),
+    UNIQUE (nif, login)
+);
+CREATE TABLE IF NOT EXISTS lojas_geridas (
+    nif TEXT NOT NULL,
+    id TEXT NOT NULL,
+    nome TEXT NOT NULL,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    actualizado_em TEXT NOT NULL,
+    PRIMARY KEY (nif, id),
+    UNIQUE (nif, nome)
+);
+CREATE TABLE IF NOT EXISTS postos_geridos (
+    nif TEXT NOT NULL,
+    id TEXT NOT NULL,
+    descricao TEXT NOT NULL,
+    loja TEXT,
+    actualizado_em TEXT NOT NULL,
+    PRIMARY KEY (nif, id),
+    UNIQUE (nif, descricao)
+);
+CREATE TABLE IF NOT EXISTS equipa_versoes (
+    nif TEXT PRIMARY KEY,
+    versao INTEGER NOT NULL,
+    actualizado_em TEXT NOT NULL,
+    aplicada INTEGER NOT NULL DEFAULT 0,
+    aplicada_em TEXT,
+    aplicada_maquina TEXT
+);
