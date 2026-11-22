@@ -1,7 +1,7 @@
 // KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
 // © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import { call } from "@/lib/api";
@@ -38,13 +38,18 @@ export default function Login({ empresa }: { empresa: string | null }) {
   // «Incompatibilidade de conta» (como no Claude): o aparelho tem a sessão de outra pessoa
   const [contaDiferente, setContaDiferente] = useState<{ nome: string; metodo: "auth.login" | "auth.loginPin"; params: object } | null>(null);
   const [trocar, setTrocar] = useState(false);
+  // «não sou um robô» (Cloudflare Turnstile), só na entrada pela Internet num endereço do KanGest
+  const chaveHumano = politica.data?.humano ?? null;
+  const [humano, setHumano] = useState("");
+  const [reiniciarHumano, setReiniciarHumano] = useState(0);
 
   async function entrar(metodo: "auth.login" | "auth.loginPin", params: object) {
     setBusy(true);
     setErro("");
     try {
       // depois de «Sair e trocar de conta», todas as voltas (incluindo a do código) levam a confirmação
-      const s = await call<Sessao | { dois_passos: true }>(metodo, trocar ? { ...params, trocar: true } : params);
+      const extra = { ...(trocar ? { trocar: true } : {}), ...(chaveHumano && metodo === "auth.login" ? { humano } : {}) };
+      const s = await call<Sessao | { dois_passos: true }>(metodo, { ...params, ...extra });
       if ("dois_passos" in s) {
         setPedirCodigo(true);
         setTocado(false);
@@ -59,6 +64,8 @@ export default function Login({ empresa }: { empresa: string | null }) {
         return;
       }
       setErro(msg);
+      // cada token do widget só serve uma vez: depois de uma recusa, pede-se outro
+      if (chaveHumano) setReiniciarHumano((n) => n + 1);
       setCodigo("");
       if (!pedirCodigo) setSenha("");
       setPin("");
@@ -75,6 +82,10 @@ export default function Login({ empresa }: { empresa: string | null }) {
       return;
     }
     if (!login.trim() || !senha) return;
+    if (chaveHumano && !humano) {
+      setErro("Confirme que não é um robô (a caixa da Cloudflare, por cima do botão Entrar).");
+      return;
+    }
     entrar("auth.login", { login, senha });
   }
 
@@ -206,6 +217,7 @@ export default function Login({ empresa }: { empresa: string | null }) {
                 Esqueci-me da senha
               </button>
             </div>
+            {chaveHumano && <VerificacaoHumano chave={chaveHumano} onToken={setHumano} reiniciar={reiniciarHumano} />}
             <Button variant="accent" size="lg" className="h-12 w-full text-[15px]" loading={busy}>
               Entrar <ArrowRight className="size-4" />
             </Button>
@@ -216,4 +228,52 @@ export default function Login({ empresa }: { empresa: string | null }) {
       </div>
     </Moldura>
   );
+}
+
+type Turnstile = { render: (el: HTMLElement, o: Record<string, unknown>) => string; reset: (id: string) => void; remove: (id: string) => void };
+
+/** O widget «não sou um robô» do Cloudflare (Turnstile), carregado só quando a entrada é pela Internet. */
+function VerificacaoHumano({ chave, onToken, reiniciar }: { chave: string; onToken: (t: string) => void; reiniciar: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const id = useRef<string | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    const desenhar = () => {
+      const ts = (window as unknown as { turnstile?: Turnstile }).turnstile;
+      if (!vivo || !ts || !ref.current || id.current) return;
+      id.current = ts.render(ref.current, {
+        sitekey: chave,
+        language: "pt",
+        callback: (t: string) => onToken(t),
+        "expired-callback": () => onToken(""),
+        "error-callback": () => onToken(""),
+      });
+    };
+    if ((window as unknown as { turnstile?: Turnstile }).turnstile) desenhar();
+    else {
+      let s = document.querySelector<HTMLScriptElement>("script[data-turnstile]");
+      if (!s) {
+        s = document.createElement("script");
+        s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+        s.async = true;
+        s.dataset.turnstile = "1";
+        document.head.appendChild(s);
+      }
+      s.addEventListener("load", desenhar);
+    }
+    return () => {
+      vivo = false;
+      const ts = (window as unknown as { turnstile?: Turnstile }).turnstile;
+      if (id.current && ts) ts.remove(id.current);
+      id.current = null;
+    };
+  }, [chave, onToken]);
+  useEffect(() => {
+    const ts = (window as unknown as { turnstile?: Turnstile }).turnstile;
+    if (reiniciar && id.current && ts) {
+      ts.reset(id.current);
+      onToken("");
+    }
+  }, [reiniciar, onToken]);
+  return <div ref={ref} className="flex min-h-[65px] justify-center" />;
 }

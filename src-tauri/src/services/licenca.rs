@@ -555,6 +555,19 @@ pub(crate) async fn credenciais(st: &AppState) -> AppResult<Value> {
 }
 
 /// POST ao servidor de licenças. Os erros que o servidor explica passam ao utilizador tal como vêm.
+/// GET ao servidor de licenças (ex.: a chave pública da verificação de humano).
+pub(crate) async fn obter_servidor(caminho: &str) -> AppResult<Value> {
+    let url = format!("{}{caminho}", servidor());
+    let r = tokio::task::spawn_blocking(move || http::pedido("GET", &url, &[("Accept", "application/json".into())], None, std::time::Duration::from_secs(10)))
+        .await
+        .map_err(|e| AppError::msg(e.to_string()))?
+        .map_err(|_| AppError::msg("Sem ligação ao servidor de licenças."))?;
+    if r.estado >= 400 {
+        return Err(AppError::msg(format!("O servidor de licenças respondeu {}.", r.estado)));
+    }
+    serde_json::from_slice(&r.corpo).map_err(|_| AppError::msg("O servidor de licenças deu uma resposta inesperada."))
+}
+
 pub(crate) async fn chamar_servidor(caminho: &str, corpo: Value) -> AppResult<Value> {
     let url = format!("{}{caminho}", servidor());
     let dados = serde_json::to_vec(&corpo)?;

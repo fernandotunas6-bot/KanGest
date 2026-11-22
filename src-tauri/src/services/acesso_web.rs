@@ -294,7 +294,7 @@ pub async fn estado(st: &AppState, i: EstadoIn) -> AppResult<Value> {
 }
 
 /// O acesso usa um túnel da própria empresa (domínio dela), e não um endereço do serviço do KanGest.
-async fn proprio(st: &AppState) -> AppResult<bool> {
+pub(crate) async fn proprio(st: &AppState) -> AppResult<bool> {
     Ok(cfg(st, "web.proprio").await?.as_deref() == Some("1"))
 }
 

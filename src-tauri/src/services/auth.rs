@@ -75,7 +75,9 @@ pub async fn politica(st: &AppState) -> AppResult<Politica> {
 /// Política visível antes de entrar (o ecrã de entrada precisa de saber se há entrada por PIN).
 pub async fn politica_publica(st: &AppState) -> AppResult<Value> {
     let p = politica(st).await?;
-    Ok(json!({ "login_pin": p.login_pin, "senha_min": p.senha_min, "inatividade_min": p.inatividade_min }))
+    // pela Internet, num endereço do KanGest: a chave do widget «não sou um robô» (Cloudflare Turnstile)
+    let humano = super::humano::chave_site(st).await;
+    Ok(json!({ "login_pin": p.login_pin, "senha_min": p.senha_min, "inatividade_min": p.inatividade_min, "humano": humano }))
 }
 
 pub async fn seguranca_obter(st: &AppState) -> AppResult<Value> {
@@ -242,9 +244,14 @@ pub struct LoginIn {
     /// «Sair e trocar de conta»: confirma a troca quando o aparelho tem a sessão de outra pessoa.
     #[serde(default)]
     trocar: bool,
+    /// O token do widget «não sou um robô» (Cloudflare Turnstile), na entrada pela Internet.
+    #[serde(default)]
+    humano: Option<String>,
 }
 
 pub async fn login(st: &AppState, i: LoginIn) -> AppResult<Value> {
+    // antes de tudo, como no Claude: pela Internet, primeiro a verificação de humano (trava as tentativas automáticas)
+    super::humano::confirmar(st, i.humano.as_deref()).await?;
     let pol = politica(st).await?;
     let login = i.login.trim();
     let Some(row) = sqlx::query("SELECT * FROM utilizadores WHERE login = ?").bind(login).fetch_optional(&st.pool).await? else {
