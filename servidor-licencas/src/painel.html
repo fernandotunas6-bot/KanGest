@@ -65,35 +65,89 @@
   dialog .topo { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); }
   dialog .topo h2 { margin: 0; flex: 1; }
   dialog .corpo { padding: 4px 20px 20px; }
+  /* Ao estilo das definições do Claude: barra fina com a conta, menu lateral, secções em linhas; claro ou escuro como o sistema */
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #262624; --surface: #30302e; --sunken: #2a2a28; --line: #42413d; --ink: #f5f4ef; --ink-2: #c9c7bf; --ink-3: #9b998f;
+      --brand: #3aa597; --brand-700: #1d4d47; --brand-50: #263a37; --accent-50: #3a3122; --danger-50: #3b2422; --ok-50: #213326;
+      --danger: #f0857c; --ok: #7fcf95; }
+    input, select, textarea, button { background: var(--sunken); }
+    .s-TOLERANCIA { color: #f2c46d; }
+    .aviso { border-color: #6b5524; color: #f2d79b; }
+    #mensagem { background: #f5f4ef; color: #1d2422; }
+  }
+  header { background: var(--surface); color: var(--ink); border-bottom: 1px solid var(--line); padding: 10px 24px; position: sticky; top: 0; z-index: 5; }
+  header .marca { font-size: 18px; font-weight: 700; letter-spacing: -.01em; color: var(--brand); }
+  header .sub { color: var(--ink-3); font-size: 13px; padding-left: 12px; border-left: 1px solid var(--line); }
+  .conta { position: relative; }
+  header .avatar { width: 34px; height: 34px; border-radius: 50%; padding: 0; background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 700; font-size: 13px; }
+  .menu { position: absolute; right: 0; top: 44px; min-width: 250px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 6px; box-shadow: 0 12px 32px rgba(0,0,0,.2); }
+  .menu .quem { padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; font-size: 13px; color: var(--ink-2); line-height: 1.45; }
+  header .menu button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 0; padding: 8px 10px; border-radius: 8px; color: var(--ink); }
+  header .menu button:hover { background: var(--sunken); }
+  .menu svg { width: 16px; height: 16px; }
+  main { max-width: 1240px; }
+  .layout { display: grid; grid-template-columns: 228px minmax(0, 1fr); gap: 28px; align-items: start; }
+  nav#abas { flex-direction: column; flex-wrap: nowrap; gap: 2px; margin: 0; position: sticky; top: 76px; }
+  nav#abas button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 12px; border-radius: 10px; color: var(--ink-2); background: transparent; border-color: transparent; }
+  nav#abas button svg { width: 17px; height: 17px; flex: none; }
+  nav#abas button:hover { background: var(--sunken); }
+  nav#abas button[aria-pressed="true"] { background: var(--sunken); color: var(--ink); font-weight: 600; }
+  .cartao h2 { font-size: 17px; }
+  .linha { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .linha > span:first-child { color: var(--ink); }
+  .titulo-linha { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 28px 0 8px; }
+  .titulo-linha h2 { margin: 0; }
+  tr.actual td { background: var(--sunken); }
+  .entrada { margin: 12vh auto; padding: 34px 32px; }
+  .entrada .marca-grande { font-size: 30px; font-weight: 800; color: var(--brand); letter-spacing: -.01em; }
+  .entrada form { display: grid; gap: 14px; margin-top: 18px; }
+  .entrada .accoes { align-items: center; justify-content: space-between; }
+  .ligacao { background: none !important; border: 0; padding: 0; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+  @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } nav#abas { flex-direction: row; flex-wrap: wrap; position: static; } header .sub { display: none; } }
 </style>
 </head>
 <body>
 <header>
-  <b>KanGest · Licenças</b><span class="esp"></span>
-  <span id="quem" class="fraco" style="color:#cfe5e1"></span>
-  <button id="sair" hidden>Sair</button>
+  <b class="marca">KanGest</b><span class="sub">Área do produtor</span><span class="esp"></span>
+  <div class="conta" id="conta" hidden>
+    <button id="avatar" class="avatar" aria-haspopup="menu" aria-expanded="false" title="A sua conta">KG</button>
+    <div id="menu-conta" class="menu" role="menu" hidden>
+      <div id="quem" class="quem"></div>
+      <button data-ir="conta" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Conta e segurança</button>
+      <button id="sair" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>Sair</button>
+    </div>
+  </div>
 </header>
 
 <main>
   <section id="entrada" class="cartao entrada">
-    <h2>Painel do produtor</h2>
-    <p class="fraco">Escreva a chave de administração (ADMIN_TOKEN). Fica só nesta janela do navegador.</p>
+    <div class="marca-grande">KanGest</div>
+    <h2 style="margin-top:6px">Entrar na área do produtor</h2>
     <form id="form-entrada">
-      <label>Chave de administração <input id="token" type="password" autocomplete="current-password" required></label>
-      <div class="accoes"><button class="primario">Entrar</button></div>
+      <label>Email <input id="email" type="email" autocomplete="username" required></label>
+      <label>Senha <input id="senha" type="password" autocomplete="current-password" required></label>
+      <div class="accoes"><button class="primario">Entrar</button><button type="button" class="ligacao" id="usar-chave">Usar a chave de administração</button></div>
+    </form>
+    <form id="form-chave" hidden>
+      <p class="fraco" style="margin:0">A chave de administração (ADMIN_TOKEN) é a entrada de emergência. Fica só nesta janela do navegador.</p>
+      <label>Chave de administração <input id="token" type="password" autocomplete="off" required></label>
+      <div class="accoes"><button class="primario">Entrar</button><button type="button" class="ligacao" id="usar-senha">Entrar com email e senha</button></div>
     </form>
   </section>
 
   <section id="app" hidden>
     <div id="aviso-email" class="aviso" hidden>O envio de email ainda não está configurado: os códigos de confirmação aparecem em <b>Pedidos de registo</b> para os dar ao cliente por telefone ou WhatsApp.</div>
     <div class="numeros" id="numeros"></div>
+    <div class="layout">
     <nav id="abas">
-      <button data-aba="clientes" aria-pressed="true">Clientes</button>
-      <button data-aba="pedidos">Pedidos de registo</button>
-      <button data-aba="pagamentos">Pagamentos</button>
-      <button data-aba="planos">Planos e preços</button>
-      <button data-aba="emitir">Emitir licença</button>
+      <button data-aba="clientes" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>Clientes</button>
+      <button data-aba="pedidos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>Pedidos de registo</button>
+      <button data-aba="pagamentos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>Pagamentos</button>
+      <button data-aba="planos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.41 0l8.59-8.59a1 1 0 0 0 0-1.41z"/><circle cx="7" cy="7" r="1.5"/></svg>Planos e preços</button>
+      <button data-aba="emitir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>Emitir licença</button>
+      <button data-aba="conta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Conta e segurança</button>
     </nav>
+    <div class="paineis">
 
     <div data-painel="clientes" class="cartao">
       <div class="grelha" style="margin-bottom:12px"><label>Procurar <input id="procura" placeholder="Empresa, NIF, email ou telefone"></label>
@@ -136,6 +190,17 @@
         <div class="accoes"><button class="primario">Emitir</button></div>
       </form>
       <div id="emitida" hidden><h3>Licença emitida</h3><div class="chave" id="emitida-chave"></div><div class="accoes"><button data-copiar="emitida-chave">Copiar</button></div></div>
+    </div>
+
+    <div data-painel="conta" class="cartao" hidden>
+      <h2>Perfil</h2>
+      <div class="linha"><span>Email do produtor</span><b id="conta-email">—</b></div>
+      <div class="linha"><span>Esta sessão</span><span id="conta-sessao" class="fraco">—</span></div>
+      <div class="linha"><span>Senha</span><span class="fraco">Muda-se no computador do produtor: <code>resumo-senha.mjs</code> e <code>publicar-licencas.py --senha-painel</code>.</span></div>
+      <div class="titulo-linha"><h2>Onde fez login</h2><button id="sair-todos">Sair em todos os aparelhos</button></div>
+      <div class="tabela"><table><thead><tr><th>Dispositivo</th><th>Localização</th><th>Login</th><th>Última atividade</th><th></th></tr></thead><tbody id="t-sessoes"></tbody></table></div>
+    </div>
+    </div>
     </div>
   </section>
 </main>
@@ -186,19 +251,21 @@ async function api(caminho, corpo) {
       : "Sem ligação ao servidor de licenças. Confirme a internet.");
   }
   const d = await r.json().catch(() => ({ erro: "Resposta inválida do servidor." }));
-  if (r.status === 401) { sair(); throw new Error("Chave de administração errada."); }
+  if (r.status === 401) { sair(); throw new Error("A sessão terminou ou os dados de entrada estão errados. Entre outra vez."); }
   if (!r.ok || d.ok === false) throw new Error(d.erro || "Erro " + r.status);
   return d;
 }
 
 function sair() {
-  token = ""; try { sessionStorage.removeItem("kg-admin"); } catch {}
-  $("#app").hidden = true; $("#entrada").hidden = false; $("#sair").hidden = true;
+  token = ""; quem = null;
+  try { sessionStorage.removeItem("kg-admin"); sessionStorage.removeItem("kg-admin-quem"); } catch {}
+  $("#app").hidden = true; $("#entrada").hidden = false; $("#conta").hidden = true; $("#menu-conta").hidden = true;
 }
 
 async function carregar() {
   dados = await api("resumo");
-  $("#entrada").hidden = true; $("#app").hidden = false; $("#sair").hidden = false;
+  $("#entrada").hidden = true; $("#app").hidden = false; $("#conta").hidden = false;
+  mostrarQuem();
   $("#aviso-email").hidden = dados.email_configurado;
   const c = dados.clientes, conta = (e) => c.filter((x) => x.estado === e).length;
   const mes = dados.hoje.slice(0, 7);
@@ -327,17 +394,83 @@ async function copiar(texto) {
 
 async function tentar(f) { try { await f(); } catch (e) { avisar(e.message, true); } }
 
+// entrada com email e senha (a sessão vale 12 horas); a chave de administração fica como entrada de emergência
 $("#form-entrada").addEventListener("submit", (e) => {
   e.preventDefault();
-  token = $("#token").value.trim();
-  try { sessionStorage.setItem("kg-admin", token); } catch {}
+  tentar(async () => {
+    let r;
+    try {
+      r = await fetch(API + "/admin/api/entrar", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: $("#email").value, senha: $("#senha").value }) });
+    } catch {
+      throw new Error("Sem ligação ao servidor de licenças. Confirme a internet" + (API ? " e que o servidor está actualizado e aceita este site." : "."));
+    }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.ok === false) throw new Error(d.erro || "Erro " + r.status);
+    token = d.token; quem = { email: d.email, expira: d.expira };
+    try { sessionStorage.setItem("kg-admin", token); sessionStorage.setItem("kg-admin-quem", JSON.stringify(quem)); } catch {}
+    $("#senha").value = "";
+    await carregar();
+  });
+});
+$("#form-chave").addEventListener("submit", (e) => {
+  e.preventDefault();
+  token = $("#token").value.trim(); quem = null;
+  try { sessionStorage.setItem("kg-admin", token); sessionStorage.removeItem("kg-admin-quem"); } catch {}
+  $("#token").value = "";
   tentar(carregar);
+});
+$("#usar-chave").addEventListener("click", () => { $("#form-entrada").hidden = true; $("#form-chave").hidden = false; $("#token").focus(); });
+$("#usar-senha").addEventListener("click", () => { $("#form-chave").hidden = true; $("#form-entrada").hidden = false; $("#email").focus(); });
+
+// a conta no canto (como no Claude): iniciais, email, sessão, «Conta e segurança» e «Sair»
+let quem = null;
+try { quem = JSON.parse(sessionStorage.getItem("kg-admin-quem") || "null"); } catch {}
+const iniciais = (e) => String(e || "").split("@")[0].split(/[._-]+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join("") || "KG";
+function mostrarQuem() {
+  $("#avatar").textContent = quem ? iniciais(quem.email) : "KG";
+  $("#quem").innerHTML = quem ? `<b>${esc(quem.email)}</b><br>sessão até ${quando(quem.expira)}` : "<b>Chave de administração</b><br>entrada de emergência";
+  $("#conta-email").textContent = quem ? quem.email : "—";
+  $("#conta-sessao").textContent = quem ? `entrou com email e senha · até ${quando(quem.expira)}` : "entrou com a chave de administração";
+}
+function abrirAba(aba) {
+  const b = $(`#abas button[data-aba="${aba}"]`); if (!b) return;
+  $$("#abas button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  $$("[data-painel]").forEach((p) => (p.hidden = p.dataset.painel !== aba));
+  if (aba === "conta") tentar(desenharSessoes);
+}
+$("#avatar").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const m = $("#menu-conta"); m.hidden = !m.hidden; $("#avatar").setAttribute("aria-expanded", String(!m.hidden));
+});
+document.addEventListener("click", (e) => { if (!e.target.closest("#menu-conta")) $("#menu-conta").hidden = true; });
+$("[data-ir=conta]").addEventListener("click", () => { $("#menu-conta").hidden = true; abrirAba("conta"); });
+
+async function desenharSessoes() {
+  if (!quem) {
+    $("#t-sessoes").innerHTML = '<tr><td colspan="5" class="vazio">Entrou com a chave de administração. As entradas com email e senha aparecem aqui.</td></tr>';
+    $("#sair-todos").disabled = true;
+    return;
+  }
+  const d = await api("sessoes");
+  $("#sair-todos").disabled = d.sessoes.filter((x) => !x.actual).length === 0;
+  $("#t-sessoes").innerHTML = d.sessoes.map((x) => `<tr${x.actual ? ' class="actual"' : ""}>
+    <td>${esc(x.aparelho)} ${x.actual ? '<span class="selo s-EXPERIENCIA">Atual</span>' : ""}</td><td>${esc(x.local)}</td>
+    <td>${quando(x.criada_em)}</td><td>${quando(x.ultima_em)}</td>
+    <td class="num">${x.actual ? "" : `<button class="perigo" data-terminar-sessao="${esc(x.id)}">Terminar</button>`}</td></tr>`).join("")
+    || '<tr><td colspan="5" class="vazio">Sem sessões abertas.</td></tr>';
+}
+$("#sair-todos").addEventListener("click", () => tentar(async () => {
+  avisar((await api("sessoes/terminar-outras", {})).mensagem);
+  await desenharSessoes();
+}));
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-terminar-sessao]"); if (!b) return;
+  tentar(async () => { avisar((await api("sessoes/terminar", { id: b.dataset.terminarSessao })).mensagem); await desenharSessoes(); });
 });
 $("#sair").addEventListener("click", sair);
 $("#abas").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-aba]"); if (!b) return;
-  $$("#abas button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
-  $$("[data-painel]").forEach((p) => (p.hidden = p.dataset.painel !== b.dataset.aba));
+  abrirAba(b.dataset.aba);
 });
 $("#procura").addEventListener("input", desenharClientes);
 $("#filtro").addEventListener("change", desenharClientes);
