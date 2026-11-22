@@ -2,11 +2,12 @@
 // © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 
 // Teste do servidor de licenças sem rede: node teste/testar.mjs
+// Com KANGEST_BD=postgres, o mesmo teste corre no Postgres da função kangest do Supabase (ver teste/base.mjs).
 // Usa uma chave de teste gerada na hora (ou a de KANGEST_CHAVE_SERVIDOR, para gerar exemplos para o KanGest).
 import assert from "node:assert/strict";
 import { createPrivateKey, createPublicKey, generateKeyPairSync, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { d1Local } from "./d1-local.mjs";
+import { baseDeTeste, motor } from "./base.mjs";
 import worker, { hoje } from "../src/worker.js";
 
 const pem = process.env.KANGEST_CHAVE_SERVIDOR
@@ -14,7 +15,7 @@ const pem = process.env.KANGEST_CHAVE_SERVIDOR
   : generateKeyPairSync("ed25519").privateKey.export({ format: "pem", type: "pkcs8" });
 const publica = createPublicKey(createPrivateKey(pem));
 const ADMIN = "a".repeat(40);
-const env = { DB: d1Local(readFileSync(new URL("../schema.sql", import.meta.url), "utf8")), CHAVE_PRIVADA: pem, ADMIN_TOKEN: ADMIN };
+const env = { DB: await baseDeTeste(), CHAVE_PRIVADA: pem, ADMIN_TOKEN: ADMIN };
 
 async function pedir(metodo, caminho, corpo, token) {
   const r = await worker.fetch(
@@ -172,7 +173,7 @@ assert.equal(r.corpo.licenca, null); assert.equal(r.corpo.estado, "EXPIRADA"); a
 assert.equal((await pedir("GET", "/admin/api/resumo")).estado, 401);
 assert.equal((await pedir("GET", "/admin/api/resumo", null, "b".repeat(40))).estado, 401);
 r = await pedir("GET", "/admin");
-assert.equal(r.estado, 200); assert.match(r.corpo, /Painel do produtor/);
+assert.equal(r.estado, 200); assert.match(r.corpo, /Área do produtor/);
 
 // preços
 r = await admin("plano", { codigo: "COMERCIO", nome: "Comércio", postos: 3, preco_mes: "15000", preco_ano: 150000, activo: true, ordem: 2 });
@@ -450,5 +451,49 @@ assert.equal((await pedir("GET", "/nada")).estado, 404);
   for (const k of ["TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY", "WEB_DOMINIO"]) delete env[k];
 }
 
-console.log("Servidor de licenças: todos os testes passaram.");
+// entrada no painel com email e senha: sessão assinada de 12 horas; a chave de administração continua a valer
+{
+  const { pbkdf2Sync, randomBytes } = await import("node:crypto");
+  const b64u = (x) => Buffer.from(x).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const entrar = (corpo) => pedir("POST", "/admin/api/entrar", corpo);
+  assert.equal((await entrar({ email: "a@b.ao", senha: "x" })).estado, 503, "sem configuração, explica");
+  const sal = randomBytes(16);
+  env.ADMIN_EMAIL = "Produtor@Exemplo.ao";
+  env.ADMIN_SENHA = `pbkdf2-sha256$100000$${b64u(sal)}$${b64u(pbkdf2Sync("Senha-do-painel-2026", sal, 100000, 32, "sha256"))}`;
+  assert.equal((await entrar({ email: "produtor@exemplo.ao", senha: "errada-errada" })).estado, 401);
+  assert.equal((await entrar({ email: "outro@exemplo.ao", senha: "Senha-do-painel-2026" })).estado, 401, "email errado");
+  const r = await entrar({ email: " PRODUTOR@exemplo.ao ", senha: "Senha-do-painel-2026" });
+  assert.equal(r.estado, 200); assert.match(r.corpo.token, /^s1\./); assert.equal(r.corpo.email, "produtor@exemplo.ao");
+  const comSessao = (token) => pedir("GET", "/admin/api/resumo", null, token);
+  assert.equal((await comSessao(r.corpo.token)).estado, 200, "a sessão abre o painel");
+  assert.equal((await pedir("GET", "/admin/api/sessao", null, r.corpo.token)).corpo.email, "produtor@exemplo.ao");
+  const [v, dados, ass] = r.corpo.token.split(".");
+  const falsa = `${v}.${b64u(Buffer.from(JSON.stringify({ e: "produtor@exemplo.ao", exp: Date.now() + 9e9 })))}.${ass}`;
+  assert.equal((await comSessao(falsa)).estado, 401, "sessão alterada não vale");
+  assert.equal((await comSessao(`${v}.${dados}.${ass.slice(0, -2)}xx`)).estado, 401, "assinatura alterada não vale");
+  const agora = Date.now;
+  Date.now = () => agora() + 13 * 3_600_000;
+  assert.equal((await comSessao(r.corpo.token)).estado, 401, "ao fim de 12 horas a sessão termina");
+  Date.now = agora;
+  // «Onde fez login»: duas entradas; terminar as outras deixa só a actual
+  const r2 = await entrar({ email: "produtor@exemplo.ao", senha: "Senha-do-painel-2026" });
+  let lista = (await pedir("GET", "/admin/api/sessoes", null, r2.corpo.token)).corpo.sessoes;
+  assert.ok(lista.length >= 2); assert.equal(lista[0].actual, true);
+  assert.ok(lista.every((x) => x.aparelho && x.local && !("ip" in x)), "aparelho e local, nunca o IP");
+  const t = await pedir("POST", "/admin/api/sessoes/terminar-outras", {}, r2.corpo.token);
+  assert.ok(t.corpo.terminadas >= 1);
+  assert.equal((await comSessao(r.corpo.token)).estado, 401, "a outra sessão terminou");
+  assert.equal((await comSessao(r2.corpo.token)).estado, 200, "esta continua");
+  lista = (await pedir("GET", "/admin/api/sessoes", null, r2.corpo.token)).corpo.sessoes;
+  assert.equal(lista.length, 1);
+  await pedir("POST", "/admin/api/sessoes/terminar", { id: lista[0].id }, r2.corpo.token);
+  assert.equal((await comSessao(r2.corpo.token)).estado, 401, "terminar a própria sessão sai");
+  env.ADMIN_EMAIL = "novo@exemplo.ao";
+  assert.equal((await comSessao(r.corpo.token)).estado, 401, "mudar o email do produtor termina as sessões");
+  assert.equal((await admin("resumo")).estado, 200, "a chave de administração continua a valer");
+  delete env.ADMIN_EMAIL; delete env.ADMIN_SENHA;
+}
+
+await env.DB.fechar?.();
+console.log(`Servidor de licenças (${motor}): todos os testes passaram.`);
 if (process.env.KANGEST_CHAVE_SERVIDOR) console.log("Licença de exemplo:", exemplo);

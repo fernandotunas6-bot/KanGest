@@ -15,7 +15,9 @@
 // Variáveis: DB (D1), CHAVE_PRIVADA (secreto, PEM pkcs8 Ed25519), ADMIN_TOKEN (secreto),
 //            RESEND_API_KEY + EMAIL_REMETENTE (opcionais: sem eles, o código aparece no painel),
 //            ACCESS_EQUIPA + ACCESS_AUD (opcionais: o painel só responde a quem passou pelo Cloudflare Access),
-//            ADMIN_ORIGENS (opcional: origens da área do produtor no site; por omissão https://kangest.pages.dev).
+//            ADMIN_ORIGENS (opcional: origens da área do produtor no site; por omissão https://kangest.pages.dev),
+//            ADMIN_EMAIL + ADMIN_SENHA (opcionais: entrada no painel com email e senha; a senha só como resumo PBKDF2,
+//            gerado com `node servidor-licencas/resumo-senha.mjs`).
 // Protecção: limite de pedidos por IP e por hora (tabela «limites»), Cloudflare Access à frente do painel,
 //            cabeçalhos de segurança em todas as respostas.
 // As licenças têm o mesmo formato do scripts/licencas/kangest-licencas.mjs: «KG1.<json base64url>.<assinatura>».
@@ -80,7 +82,7 @@ class Falha extends Error {
 // ------------------------------------------------------------------ protecção
 
 /** Pedidos por IP e por hora. O registo envia emails; a confirmação testa códigos; o painel conta só as falhas. */
-export const LIMITES = { registo: 20, confirmar: 60, renovar: 600, admin: 30, web: 60, portal: 120 };
+export const LIMITES = { registo: 20, confirmar: 60, renovar: 600, admin: 30, web: 60, portal: 120, conta: 30, contaFalhas: 20 };
 const janelaHora = () => new Date().toISOString().slice(0, 13);
 
 /** Conta um pedido do IP (CF-Connecting-IP) e recusa acima do limite. Sem IP (testes locais), não limita. */
@@ -89,7 +91,7 @@ async function contar(env, req, tipo) {
   if (!ip) return 0;
   const r = await env.DB.prepare(
     `INSERT INTO limites (chave, janela, n) VALUES (?1, ?2, 1)
-     ON CONFLICT(chave) DO UPDATE SET n = CASE WHEN janela = ?2 THEN n + 1 ELSE 1 END, janela = ?2
+     ON CONFLICT(chave) DO UPDATE SET n = CASE WHEN limites.janela = ?2 THEN limites.n + 1 ELSE 1 END, janela = ?2
      RETURNING n`,
   ).bind(`${tipo}:${ip}`, janelaHora()).first();
   // de vez em quando, esquece as horas passadas
@@ -216,7 +218,7 @@ function idLicenca() {
 /** Emite (ou reaproveita, se já existe uma igual) e regista uma licença. */
 async function emitir(env, { nif, empresa, plano, postos, inicio, fim, tolerancia = TOLERANCIA, maquina = null, modulos = [], origem }) {
   const igual = await env.DB.prepare(
-    `SELECT id, chave FROM licencas WHERE nif = ? AND empresa = ? AND IFNULL(maquina,'') = ? AND plano = ? AND postos = ? AND inicio = ? AND fim = ?
+    `SELECT id, chave FROM licencas WHERE nif = ? AND empresa = ? AND COALESCE(maquina,'') = ? AND plano = ? AND postos = ? AND inicio = ? AND fim = ?
        AND tolerancia = ? ORDER BY emitida_em DESC LIMIT 1`,
   ).bind(nif, empresa, maquina ?? "", plano, postos, inicio, fim, tolerancia).first();
   if (igual) return { id: igual.id, chave: igual.chave };
@@ -365,7 +367,7 @@ async function confirmar(env, c) {
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO maquinas (nif, maquina, primeiro_contacto, ultimo_contacto, versao) VALUES (?1, ?2, ?3, ?3, ?4)
-       ON CONFLICT(nif, maquina) DO UPDATE SET ultimo_contacto = ?3, versao = COALESCE(?4, versao)`,
+       ON CONFLICT(nif, maquina) DO UPDATE SET ultimo_contacto = ?3, versao = COALESCE(?4, maquinas.versao)`,
     ).bind(nif, maquina, t, texto(c.versao, 20) || null),
     env.DB.prepare("DELETE FROM codigos WHERE nif = ? AND maquina = ?").bind(nif, maquina),
   ]);
@@ -414,10 +416,28 @@ async function renovar(env, c) {
     .bind(agora(), texto(c.versao, 20) || null, nif, maquina).run();
   await guardarEstado(env, nif, maquina, c);
   const cliente = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(nif).first();
-  return { ok: true, ...(await licencaActual(env, cliente, maquina)) };
+  // a equipa gerida no site, se o KanGest estiver atrás (KanGest 1.4+ diz que versão tem em estado.equipa_versao)
+  const equipa = c?.estado && typeof c.estado === "object" ? await equipaParaKangest(env, nif, maquina, c.estado.equipa_versao) : null;
+  return { ok: true, ...(await licencaActual(env, cliente, maquina)), ...(equipa ? { equipa_gerida: equipa } : {}) };
 }
 
 const dataOuNull = (v) => (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$/.test(String(v ?? "")) ? String(v) : null);
+
+/** A equipa que o KanGest manda: só os campos conhecidos, com limites (o resto, se viesse, não se guarda). */
+export function limparEquipa(e) {
+  if (!e || typeof e !== "object" || Array.isArray(e)) return null;
+  const lista = (v, n) => (Array.isArray(v) ? v.slice(0, n).filter((x) => x && typeof x === "object") : []);
+  const data = (v) => dataOuNull(String(v ?? "").replace(" ", "T"));
+  return {
+    utilizadores: lista(e.utilizadores, 500).map((u) => ({
+      login: texto(u.login, 40), nome: texto(u.nome, 80), perfil: texto(u.perfil, 20), ativo: u.ativo === true,
+      loja: texto(u.loja, 60) || null, dois_passos: u.dois_passos === true, ultimo_acesso: data(u.ultimo_acesso),
+    })),
+    perfis: lista(e.perfis, 50).map((p) => ({ codigo: texto(p.codigo, 20), descricao: texto(p.descricao, 60) })),
+    lojas: lista(e.lojas, 200).map((l) => ({ nome: texto(l.nome, 60), ativo: l.ativo === true })),
+    postos: lista(e.postos, 200).map((p) => ({ descricao: texto(p.descricao, 60), loja: texto(p.loja, 60) || null })),
+  };
+}
 
 /** O estado que o KanGest manda na verificação (versões antigas não mandam nada: fica o que havia). */
 export async function guardarEstado(env, nif, maquina, c) {
@@ -435,6 +455,13 @@ export async function guardarEstado(env, nif, maquina, c) {
     .bind(nif, maquina, agora(), texto(c.versao, 20) || null, texto(e.modo, 12) || null, texto(lic.estado, 20) || null,
       dataOuNull(lic.fim), dataOuNull(cop.ultima), dataOuNull(cop.ultima_externa), cop.erro_externa ? 1 : 0)
     .run();
+  const equipa = limparEquipa(e.equipa);
+  if (equipa) {
+    await env.DB.prepare(
+      `INSERT INTO equipas (nif, maquina, recebido_em, dados) VALUES (?, ?, ?, ?)
+       ON CONFLICT (nif, maquina) DO UPDATE SET recebido_em = excluded.recebido_em, dados = excluded.dados`,
+    ).bind(nif, maquina, agora(), JSON.stringify(equipa)).run();
+  }
 }
 
 async function planosPublicos(env) {
@@ -610,8 +637,488 @@ async function webEndereco(env, dado) {
 
 // ------------------------------------------------------------------ painel do produtor
 
-function autorizado(env, req) {
+// ------------------------------------------------------------------ entrada no painel com email e senha
+//
+// ADMIN_EMAIL e ADMIN_SENHA (segredos): o email do produtor e o resumo da senha, «pbkdf2-sha256$<iterações>$<sal>$<resumo>»
+// (base64url). A senha nunca fica no código nem no servidor. A entrada dá uma sessão de 12 horas, «s1.<dados>.<assinatura>»,
+// assinada com HMAC-SHA256 pela ADMIN_TOKEN (que continua a valer como chave de emergência).
+
+const SESSAO_HORAS = 12;
+const deB64url = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+
+/** Comparação em tempo constante de bytes (a «iguais» de cima compara texto). */
+function iguaisBytes(a, b) {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
+  return d === 0;
+}
+
+/** PBKDF2-SHA256 (o mesmo que o resumo-senha.mjs produz). */
+export async function resumoSenha(senha, sal, iteracoes = 100_000) {
+  const chave = await crypto.subtle.importKey("raw", enc.encode(senha), "PBKDF2", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: sal, iterations: iteracoes }, chave, 256));
+}
+
+async function senhaCerta(env, senha) {
+  const [alg, it, sal, res] = String(env.ADMIN_SENHA ?? "").trim().split("$");
+  const iteracoes = Number(it);
+  if (alg !== "pbkdf2-sha256" || !sal || !res || !(iteracoes >= 10_000 && iteracoes <= 100_000)) return false;
+  return iguaisBytes(await resumoSenha(senha, deB64url(sal), iteracoes), deB64url(res));
+}
+
+async function assinarSessao(env, texto) {
+  const k = await crypto.subtle.importKey("raw", enc.encode(env.ADMIN_TOKEN ?? ""), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return b64url(await crypto.subtle.sign("HMAC", k, enc.encode(texto)));
+}
+
+/** Como no Claude: «Chrome (Mac OS X)», «Safari (iPhone)». */
+export function descreverAparelho(ua) {
+  const u = String(ua ?? "");
+  if (!u) return "Aparelho desconhecido";
+  const nav = /Edg\//.test(u) ? "Edge" : /OPR\//.test(u) ? "Opera" : /Firefox\/|FxiOS/.test(u) ? "Firefox" : /Chrome\/|CriOS/.test(u) ? "Chrome" : /Safari\//.test(u) ? "Safari" : "Browser";
+  const so = /iPhone/.test(u) ? "iPhone" : /iPad/.test(u) ? "iPad" : /Android/.test(u) ? "Android" : /Windows/.test(u) ? "Windows" : /Mac OS X|Macintosh/.test(u) ? "Mac OS X" : /Linux/.test(u) ? "Linux" : "";
+  return so ? `${nav} (${so})` : nav;
+}
+
+/** Local aproximado dito pela Cloudflare (cidade, região, país). */
+function localDe(req) {
+  const cf = req?.cf ?? {};
+  return [cf.city, cf.region, cf.country].filter(Boolean).join(", ") || "Desconhecido";
+}
+
+export async function entrarPainel(env, c, req) {
+  const certo = String(env.ADMIN_EMAIL ?? "").trim().toLowerCase();
+  if (!certo || !env.ADMIN_SENHA || (env.ADMIN_TOKEN ?? "").length < 24) {
+    throw new Falha("A entrada com email e senha ainda não está configurada neste servidor: use a chave de administração.", 503);
+  }
+  const email = String(c?.email ?? "").trim().toLowerCase();
+  const senha = String(c?.senha ?? "");
+  // a senha confere-se sempre (mesmo com o email errado), para o tempo de resposta não dizer qual dos dois falhou
+  const senhaOk = senha.length > 0 && senha.length <= 256 && (await senhaCerta(env, senha));
+  if (!senhaOk || !iguaisBytes(enc.encode(email), enc.encode(certo))) throw new Falha("Email ou senha incorrectos.", 401);
+  const expira = Date.now() + SESSAO_HORAS * 3_600_000;
+  // cada entrada fica registada, para «Onde fez login» e para a poder terminar
+  const sid = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  await env.DB.prepare("INSERT INTO sessoes_painel (id, email, criada_em, ultima_em, aparelho, local) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(sid, certo, agora(), agora(), descreverAparelho(req?.headers.get("user-agent")).slice(0, 60), localDe(req).slice(0, 80))
+    .run();
+  const dados = b64url(enc.encode(JSON.stringify({ e: certo, exp: expira, s: sid })));
+  return { ok: true, token: `s1.${dados}.${await assinarSessao(env, dados)}`, email: certo, expira: new Date(expira).toISOString() };
+}
+
+/** A sessão do painel, se a assinatura confere e não expirou. */
+async function sessaoPainel(env, token) {
+  const [v, dados, ass] = token.split(".");
+  if (v !== "s1" || !dados || !ass || (env.ADMIN_TOKEN ?? "").length < 24) return null;
+  if (!iguaisBytes(enc.encode(await assinarSessao(env, dados)), enc.encode(ass))) return null;
+  try {
+    const d = JSON.parse(new TextDecoder().decode(deB64url(dados)));
+    if (!(typeof d.exp === "number" && d.exp > Date.now() && d.e === String(env.ADMIN_EMAIL ?? "").trim().toLowerCase())) return null;
+    // a sessão tem de continuar registada e não terminada («Sair em todos os aparelhos»)
+    const s = await env.DB.prepare("SELECT ultima_em, terminada_em FROM sessoes_painel WHERE id = ?").bind(String(d.s ?? "")).first();
+    if (!s || s.terminada_em) return null;
+    if (Date.parse(s.ultima_em) < Date.now() - 5 * 60_000) {
+      await env.DB.prepare("UPDATE sessoes_painel SET ultima_em = ? WHERE id = ?").bind(agora(), d.s).run();
+    }
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+// ------------------------------------------------------------------ contas das empresas (portal do cliente)
+//
+// Como as definições da conta do Claude: o dono da empresa entra no site (kangest.pages.dev/conta) com o email do
+// registo e uma senha, e vê a licença, os pagamentos, os computadores e onde tem sessão. A senha cria-se (ou repõe-se)
+// com um código de 6 algarismos enviado para o email do registo; sem envio de email configurado, o produtor vê-o no
+// painel e dá-o por telefone, como no registo. Sessões de 30 dias, «c1.<dados>.<assinatura>», registadas em
+// sessoes_conta (aparelho e local, sem o IP); mudar ou repor a senha termina as outras.
+
+const CONTA_DIAS = 30;
+const CONTA_ITERACOES = 100_000;
+const MSG_CODIGO = "Se este email for o de uma empresa registada no KanGest, enviámos um código de 6 algarismos para definir a senha. Sem email, peça-o ao suporte do KanGest.";
+
+async function hmac(chave, texto) {
+  const k = await crypto.subtle.importKey("raw", enc.encode(chave), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return b64url(await crypto.subtle.sign("HMAC", k, enc.encode(texto)));
+}
+const chaveConta = (env) => `conta|${env.ADMIN_TOKEN ?? ""}`;
+
+async function resumoNovo(senha) {
+  const sal = crypto.getRandomValues(new Uint8Array(16));
+  return `pbkdf2-sha256$${CONTA_ITERACOES}$${b64url(sal)}$${b64url(await resumoSenha(senha, sal, CONTA_ITERACOES))}`;
+}
+
+async function confereResumo(guardado, senha) {
+  const [alg, it, sal, res] = String(guardado ?? "").split("$");
+  const iteracoes = Number(it);
+  if (alg !== "pbkdf2-sha256" || !sal || !res || !(iteracoes >= 10_000 && iteracoes <= 100_000)) return false;
+  return iguaisBytes(await resumoSenha(senha, deB64url(sal), iteracoes), deB64url(res));
+}
+
+function validarSenhaNova(senha) {
+  const s = String(senha ?? "");
+  if (s.length < 10 || s.length > 128) throw new Falha("A senha tem de ter entre 10 e 128 caracteres.");
+  if (!/[A-Za-z]/.test(s) || !/[0-9]/.test(s)) throw new Falha("A senha tem de ter letras e algarismos.");
+  return s;
+}
+
+async function enviarCodigoConta(env, { email, empresa, codigo }) {
+  if (!env.RESEND_API_KEY || !env.EMAIL_REMETENTE) return false;
+  try {
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        from: env.EMAIL_REMETENTE, to: [email], subject: `KanGest: código ${codigo} para a conta de ${empresa}`,
+        text: `Olá,\n\nO código para definir a senha da conta de ${empresa} no site do KanGest é:\n\n    ${codigo}\n\nÉ válido durante ${CODIGO_MINUTOS} minutos.\n\nSe não pediu este código, ignore esta mensagem: a sua conta continua como estava.\n\nKanGest`,
+      }),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Criar a conta ou repor a senha: um código para o email do registo. A resposta é sempre a mesma. */
+export async function contaPedirCodigo(env, c) {
+  const email = String(c?.email ?? "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 120) throw new Falha("Escreva um email válido.");
+  const cli = await env.DB.prepare("SELECT nif, empresa FROM clientes WHERE lower(email) = ? ORDER BY criado_em LIMIT 1").bind(email).first();
+  if (!cli) return { ok: true, mensagem: MSG_CODIGO };
+  const antes = await env.DB.prepare("SELECT criado_em FROM codigos_conta WHERE email = ?").bind(email).first();
+  if (antes && Date.parse(antes.criado_em) > Date.now() - 60_000) return { ok: true, mensagem: MSG_CODIGO };
+  const codigo = String(100_000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900_000));
+  const enviado = await enviarCodigoConta(env, { email, empresa: cli.empresa, codigo });
+  const expira = new Date(Date.now() + CODIGO_MINUTOS * 60_000).toISOString().slice(0, 19) + "Z";
+  await env.DB.prepare(
+    `INSERT INTO codigos_conta (email, nif, codigo_hash, codigo_aberto, expira_em, tentativas, criado_em) VALUES (?, ?, ?, ?, ?, 0, ?)
+     ON CONFLICT (email) DO UPDATE SET nif = excluded.nif, codigo_hash = excluded.codigo_hash, codigo_aberto = excluded.codigo_aberto,
+       expira_em = excluded.expira_em, tentativas = 0, criado_em = excluded.criado_em`,
+  ).bind(email, cli.nif, await sha256(`conta:${email}:${codigo}`), enviado ? null : codigo, expira, agora()).run();
+  return { ok: true, mensagem: MSG_CODIGO };
+}
+
+/** Com o código certo, define a senha (cria a conta, se ainda não havia) e termina as sessões abertas. */
+export async function contaDefinirSenha(env, c) {
+  const email = String(c?.email ?? "").trim().toLowerCase();
+  const codigo = String(c?.codigo ?? "").replace(/\D/g, "");
+  const senha = validarSenhaNova(c?.senha);
+  const r = await env.DB.prepare("SELECT * FROM codigos_conta WHERE email = ?").bind(email).first();
+  if (!r || Date.parse(r.expira_em) < Date.now() || r.tentativas >= MAX_TENTATIVAS) {
+    throw new Falha("O código expirou ou não é válido. Peça outro.", 400);
+  }
+  if (!iguais(await sha256(`conta:${email}:${codigo}`), r.codigo_hash)) {
+    await env.DB.prepare("UPDATE codigos_conta SET tentativas = tentativas + 1 WHERE email = ?").bind(email).run();
+    throw new Falha("Código errado.", 400);
+  }
+  const resumo = await resumoNovo(senha);
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO contas (nif, email, senha, criada_em, actualizada_em) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (nif) DO UPDATE SET email = excluded.email, senha = excluded.senha, actualizada_em = excluded.actualizada_em`,
+    ).bind(r.nif, email, resumo, agora(), agora()),
+    env.DB.prepare("DELETE FROM codigos_conta WHERE email = ?").bind(email),
+    env.DB.prepare("UPDATE sessoes_conta SET terminada_em = ? WHERE nif = ? AND terminada_em IS NULL").bind(agora(), r.nif),
+  ]);
+  return { ok: true, mensagem: "Senha definida. Já pode entrar." };
+}
+
+export async function contaEntrar(env, c, req) {
+  const email = String(c?.email ?? "").trim().toLowerCase();
+  const senha = String(c?.senha ?? "");
+  const conta = await env.DB.prepare("SELECT nif, email, senha FROM contas WHERE email = ?").bind(email).first();
+  // sem conta, confere-se na mesma um resumo (o tempo de resposta não diz se o email existe)
+  const ok = (await confereResumo(conta?.senha ?? `pbkdf2-sha256$${CONTA_ITERACOES}$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`, senha)) && !!conta;
+  if (!ok || senha.length > 256) throw new Falha("Email ou senha incorrectos.", 401);
+  const expira = Date.now() + CONTA_DIAS * 86_400_000;
+  const sid = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  await env.DB.prepare("INSERT INTO sessoes_conta (id, nif, criada_em, ultima_em, aparelho, local) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(sid, conta.nif, agora(), agora(), descreverAparelho(req?.headers.get("user-agent")).slice(0, 60), localDe(req).slice(0, 80))
+    .run();
+  const dados = b64url(enc.encode(JSON.stringify({ n: conta.nif, exp: expira, s: sid })));
+  return { ok: true, token: `c1.${dados}.${await hmac(chaveConta(env), dados)}`, email: conta.email, expira: new Date(expira).toISOString() };
+}
+
+/** A sessão da conta deste pedido (assinatura, validade e registo não terminado), ou null. */
+async function sessaoConta(env, req) {
+  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  const [v, dados, ass] = token.split(".");
+  if (v !== "c1" || !dados || !ass || (env.ADMIN_TOKEN ?? "").length < 24) return null;
+  if (!iguaisBytes(enc.encode(await hmac(chaveConta(env), dados)), enc.encode(ass))) return null;
+  try {
+    const d = JSON.parse(new TextDecoder().decode(deB64url(dados)));
+    if (!(typeof d.exp === "number" && d.exp > Date.now())) return null;
+    const s = await env.DB.prepare("SELECT nif, ultima_em, terminada_em FROM sessoes_conta WHERE id = ?").bind(String(d.s ?? "")).first();
+    if (!s || s.terminada_em || s.nif !== d.n) return null;
+    if (Date.parse(s.ultima_em) < Date.now() - 5 * 60_000) {
+      await env.DB.prepare("UPDATE sessoes_conta SET ultima_em = ? WHERE id = ?").bind(agora(), d.s).run();
+    }
+    return { nif: d.n, sid: d.s, expira: d.exp };
+  } catch {
+    return null;
+  }
+}
+
+/** Tudo o que a conta mostra: empresa, licença, pagamentos, computadores (com a licença e as cópias de cada um). */
+async function contaResumo(env, s) {
+  const cli = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(s.nif).first();
+  if (!cli) throw new Falha("Empresa não encontrada.", 404);
+  const [conta, maquinas, licencas, pagamentos, planos, equipas] = await env.DB.batch([
+    env.DB.prepare("SELECT email, criada_em FROM contas WHERE nif = ?").bind(s.nif),
+    env.DB.prepare(
+      `SELECT m.maquina, m.versao, m.primeiro_contacto, m.ultimo_contacto, m.bloqueada, i.modo, i.licenca_estado, i.licenca_fim,
+              i.copia_ultima, i.copia_externa_ultima, i.copia_externa_erro, i.recebido_em
+       FROM maquinas m LEFT JOIN instalacoes i ON i.nif = m.nif AND i.maquina = m.maquina WHERE m.nif = ? ORDER BY m.ultimo_contacto DESC`,
+    ).bind(s.nif),
+    env.DB.prepare("SELECT id, maquina, plano, postos, inicio, fim, emitida_em, origem, chave FROM licencas WHERE nif = ? ORDER BY emitida_em DESC LIMIT 20").bind(s.nif),
+    env.DB.prepare("SELECT registado_em, plano, meses, valor, metodo, referencia, pago_ate FROM pagamentos WHERE nif = ? ORDER BY id DESC LIMIT 50").bind(s.nif),
+    env.DB.prepare("SELECT codigo, nome, postos, preco_mes, preco_ano FROM planos WHERE activo = 1 ORDER BY ordem"),
+    env.DB.prepare("SELECT maquina, recebido_em, dados FROM equipas WHERE nif = ? ORDER BY recebido_em DESC LIMIT 1").bind(s.nif),
+  ]);
+  const c = conta.results[0] ?? {};
+  const eq = equipas.results[0];
+  return {
+    ok: true,
+    hoje: hoje(),
+    empresa: {
+      nif: cli.nif, nome: cli.empresa, email: c.email ?? cli.email, telefone: cli.telefone, estado: estadoCliente(cli),
+      plano: cli.plano, pago_ate: cli.pago_ate, experiencia_ate: cli.experiencia_ate, maquinas_max: cli.maquinas_max, conta_desde: c.criada_em,
+    },
+    maquinas: maquinas.results, licencas: licencas.results, pagamentos: pagamentos.results, planos: planos.results,
+    equipa: eq ? { ...JSON.parse(eq.dados), maquina: eq.maquina, recebido_em: eq.recebido_em } : null,
+  };
+}
+
+async function contaSessoes(env, s) {
+  const limite = new Date(Date.now() - CONTA_DIAS * 86_400_000).toISOString().slice(0, 19) + "Z";
+  const { results } = await env.DB.prepare(
+    "SELECT id, aparelho, local, criada_em, ultima_em FROM sessoes_conta WHERE nif = ? AND terminada_em IS NULL AND criada_em >= ? ORDER BY ultima_em DESC LIMIT 50",
+  ).bind(s.nif, limite).all();
+  return { ok: true, sessoes: results.map((x) => ({ ...x, actual: x.id === s.sid })).sort((a, b) => b.actual - a.actual) };
+}
+
+async function contaTerminar(env, s, c, outras) {
+  const r = outras
+    ? await env.DB.prepare("UPDATE sessoes_conta SET terminada_em = ? WHERE nif = ? AND terminada_em IS NULL AND id <> ?").bind(agora(), s.nif, s.sid).run()
+    : await env.DB.prepare("UPDATE sessoes_conta SET terminada_em = ? WHERE nif = ? AND id = ? AND terminada_em IS NULL").bind(agora(), s.nif, String(c?.id ?? "")).run();
+  const n = r.meta?.changes ?? 0;
+  return { ok: true, terminadas: n, mensagem: n ? `${n} ${n === 1 ? "sessão terminada" : "sessões terminadas"}.` : "Não havia sessões para terminar." };
+}
+
+async function contaPerfil(env, s, c) {
+  const telefone = texto(c?.telefone, 30);
+  if (telefone && !/^[0-9 +()-]{6,30}$/.test(telefone)) throw new Falha("O telefone só pode ter algarismos, espaços e + ( ) -.");
+  await env.DB.prepare("UPDATE clientes SET telefone = ? WHERE nif = ?").bind(telefone || null, s.nif).run();
+  return { ok: true, mensagem: "Dados guardados." };
+}
+
+async function contaMudarSenha(env, s, c) {
+  const conta = await env.DB.prepare("SELECT senha FROM contas WHERE nif = ?").bind(s.nif).first();
+  if (!conta || !(await confereResumo(conta.senha, String(c?.actual ?? "")))) throw new Falha("A senha actual está errada.", 400);
+  const nova = validarSenhaNova(c?.nova);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE contas SET senha = ?, actualizada_em = ? WHERE nif = ?").bind(await resumoNovo(nova), agora(), s.nif),
+    env.DB.prepare("UPDATE sessoes_conta SET terminada_em = ? WHERE nif = ? AND terminada_em IS NULL AND id <> ?").bind(agora(), s.nif, s.sid),
+  ]);
+  return { ok: true, mensagem: "Senha mudada. As sessões nos outros aparelhos terminaram." };
+}
+
+// ------------------------------------------------------------------ equipa gerida no site (fase 3b)
+
+const PERFIS_BASE = ["ADMIN", "GESTOR", "CAIXA"];
+const ALFABETO_SENHA = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+
+function senhaProvisoria() {
+  const b = crypto.getRandomValues(new Uint8Array(12));
+  let s = "";
+  for (const x of b) s += ALFABETO_SENHA[x % ALFABETO_SENHA.length];
+  return s.slice(0, 4) + "-" + s.slice(4, 8) + "-" + s.slice(8, 12);
+}
+
+async function subirVersao(env, nif) {
+  await env.DB.prepare(
+    `INSERT INTO equipa_versoes (nif, versao, actualizado_em) VALUES (?, 1, ?)
+     ON CONFLICT (nif) DO UPDATE SET versao = equipa_versoes.versao + 1, actualizado_em = excluded.actualizado_em`,
+  ).bind(nif, agora()).run();
+}
+
+/** O que o KanGest comunicou (perfis e lojas válidos) e o que está gerido no site. */
+async function equipaGerida(env, nif) {
+  const [f, l, p, v, inv] = await env.DB.batch([
+    env.DB.prepare("SELECT id, login, nome, perfil, loja, ativo, CASE WHEN senha_provisoria IS NULL THEN 0 ELSE 1 END AS senha_pendente FROM funcionarios WHERE nif = ? ORDER BY ativo DESC, nome").bind(nif),
+    env.DB.prepare("SELECT id, nome, ativo FROM lojas_geridas WHERE nif = ? ORDER BY nome").bind(nif),
+    env.DB.prepare("SELECT id, descricao, loja FROM postos_geridos WHERE nif = ? ORDER BY descricao").bind(nif),
+    env.DB.prepare("SELECT versao, actualizado_em, aplicada, aplicada_em, aplicada_maquina FROM equipa_versoes WHERE nif = ?").bind(nif),
+    env.DB.prepare("SELECT dados FROM equipas WHERE nif = ? ORDER BY recebido_em DESC LIMIT 1").bind(nif),
+  ]);
+  const comunicada = inv.results[0] ? JSON.parse(inv.results[0].dados) : null;
+  return {
+    funcionarios: f.results.map((x) => ({ ...x, ativo: x.ativo === 1, senha_pendente: x.senha_pendente === 1 })),
+    lojas: l.results.map((x) => ({ ...x, ativo: x.ativo === 1 })),
+    postos: p.results,
+    versao: v.results[0] ?? { versao: 0, aplicada: 0 },
+    perfis: comunicada?.perfis?.length ? comunicada.perfis.map((x) => x.codigo) : PERFIS_BASE,
+    lojas_conhecidas: [...new Set([...(comunicada?.lojas ?? []).map((x) => x.nome), ...l.results.map((x) => x.nome)])],
+    logins_no_programa: (comunicada?.utilizadores ?? []).map((u) => u.login.toLowerCase()),
+  };
+}
+
+async function guardarFuncionario(env, nif, c) {
+  const g = await equipaGerida(env, nif);
+  const login = String(c?.login ?? "").trim().toLowerCase();
+  const nome = texto(c?.nome, 80);
+  const perfil = texto(c?.perfil, 20).toUpperCase();
+  const loja = texto(c?.loja, 60) || null;
+  if (!/^[a-z0-9._-]{2,40}$/.test(login)) throw new Falha("O login tem de ter 2 a 40 letras minúsculas, algarismos, pontos, hífenes ou sublinhados.");
+  if (nome.length < 2) throw new Falha("Escreva o nome do funcionário.");
+  if (!g.perfis.includes(perfil)) throw new Falha(`Perfil desconhecido. Use um destes: ${g.perfis.join(", ")}.`);
+  if (loja && !g.lojas_conhecidas.includes(loja)) throw new Falha("Loja desconhecida: crie-a primeiro em «Lojas e postos».");
+  const ativo = c?.ativo === false ? 0 : 1;
+  const existe = c?.id ? g.funcionarios.find((x) => x.id === String(c.id)) : null;
+  if (c?.id && !existe) throw new Falha("Funcionário não encontrado.", 404);
+  const outro = g.funcionarios.find((x) => x.login === login && x.id !== existe?.id);
+  if (outro) throw new Falha(`Já há um funcionário com o login «${login}».`);
+  // novo: senha provisória, a não ser que já exista no programa com este login (aí mantém a senha que tem)
+  const adoptar = !existe && g.logins_no_programa.includes(login);
+  const senha = !existe && !adoptar ? senhaProvisoria() : null;
+  const resumo = senha ? await resumoNovo(senha) : null;
+  if (existe) {
+    await env.DB.prepare("UPDATE funcionarios SET login = ?, nome = ?, perfil = ?, loja = ?, ativo = ?, actualizado_em = ? WHERE nif = ? AND id = ?")
+      .bind(login, nome, perfil, loja, ativo, agora(), nif, existe.id).run();
+  } else {
+    await env.DB.prepare("INSERT INTO funcionarios (nif, id, login, nome, perfil, loja, ativo, senha_provisoria, criado_em, actualizado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(nif, b64url(crypto.getRandomValues(new Uint8Array(9))), login, nome, perfil, loja, ativo, resumo, agora(), agora()).run();
+  }
+  await subirVersao(env, nif);
+  return {
+    ok: true, senha_provisoria: senha,
+    mensagem: existe ? "Funcionário guardado. Chega ao KanGest na próxima verificação."
+      : adoptar ? `«${login}» já existe no programa: passa a ser gerido aqui e mantém a senha que tem.`
+      : "Funcionário criado. Dê-lhe a senha provisória: no primeiro acesso ao KanGest tem de a mudar.",
+  };
+}
+
+async function reporSenhaFuncionario(env, nif, c) {
+  const f = await env.DB.prepare("SELECT id, login FROM funcionarios WHERE nif = ? AND id = ?").bind(nif, String(c?.id ?? "")).first();
+  if (!f) throw new Falha("Funcionário não encontrado.", 404);
+  const senha = senhaProvisoria();
+  await env.DB.prepare("UPDATE funcionarios SET senha_provisoria = ?, actualizado_em = ? WHERE nif = ? AND id = ?").bind(await resumoNovo(senha), agora(), nif, f.id).run();
+  await subirVersao(env, nif);
+  return { ok: true, senha_provisoria: senha, mensagem: `Senha provisória nova para «${f.login}». Vale depois da próxima verificação do KanGest.` };
+}
+
+async function guardarLoja(env, nif, c) {
+  const nome = texto(c?.nome, 60);
+  if (nome.length < 2) throw new Falha("Escreva o nome da loja.");
+  const ativo = c?.ativo === false ? 0 : 1;
+  const id = c?.id ? String(c.id) : b64url(crypto.getRandomValues(new Uint8Array(9)));
+  const dup = await env.DB.prepare("SELECT id FROM lojas_geridas WHERE nif = ? AND nome = ? AND id <> ?").bind(nif, nome, id).first();
+  if (dup) throw new Falha(`Já há uma loja «${nome}».`);
+  await env.DB.prepare(
+    `INSERT INTO lojas_geridas (nif, id, nome, ativo, actualizado_em) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (nif, id) DO UPDATE SET nome = excluded.nome, ativo = excluded.ativo, actualizado_em = excluded.actualizado_em`,
+  ).bind(nif, id, nome, ativo, agora()).run();
+  await subirVersao(env, nif);
+  return { ok: true, mensagem: "Loja guardada. Chega ao KanGest na próxima verificação." };
+}
+
+async function guardarPosto(env, nif, c) {
+  const g = await equipaGerida(env, nif);
+  const descricao = texto(c?.descricao, 60);
+  const loja = texto(c?.loja, 60) || null;
+  if (descricao.length < 2) throw new Falha("Escreva o nome do posto (ex.: Caixa 2).");
+  if (!loja || !g.lojas_conhecidas.includes(loja)) throw new Falha("Escolha a loja do posto.");
+  const id = c?.id ? String(c.id) : b64url(crypto.getRandomValues(new Uint8Array(9)));
+  const dup = await env.DB.prepare("SELECT id FROM postos_geridos WHERE nif = ? AND descricao = ? AND id <> ?").bind(nif, descricao, id).first();
+  if (dup) throw new Falha(`Já há um posto «${descricao}».`);
+  await env.DB.prepare(
+    `INSERT INTO postos_geridos (nif, id, descricao, loja, actualizado_em) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (nif, id) DO UPDATE SET descricao = excluded.descricao, loja = excluded.loja, actualizado_em = excluded.actualizado_em`,
+  ).bind(nif, id, descricao, loja, agora()).run();
+  await subirVersao(env, nif);
+  return { ok: true, mensagem: "Posto guardado. Chega ao KanGest na próxima verificação." };
+}
+
+/**
+ * Na verificação: regista a versão que o KanGest diz ter e, se estiver atrás, devolve a equipa gerida para aplicar.
+ * Quando o KanGest já tem a versão actual, os resumos das senhas provisórias apagam-se (já não fazem falta aqui).
+ */
+export async function equipaParaKangest(env, nif, maquina, versaoKangest) {
+  const v = await env.DB.prepare("SELECT versao, aplicada FROM equipa_versoes WHERE nif = ?").bind(nif).first();
+  if (!v) return null;
+  const tem = Number.isInteger(versaoKangest) ? versaoKangest : 0;
+  if (tem >= v.versao) {
+    if (v.aplicada < v.versao) {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE equipa_versoes SET aplicada = ?, aplicada_em = ?, aplicada_maquina = ? WHERE nif = ?").bind(v.versao, agora(), maquina, nif),
+        env.DB.prepare("UPDATE funcionarios SET senha_provisoria = NULL WHERE nif = ?").bind(nif),
+      ]);
+    }
+    return null;
+  }
+  const [f, l, p] = await env.DB.batch([
+    env.DB.prepare("SELECT id, login, nome, perfil, loja, ativo, senha_provisoria FROM funcionarios WHERE nif = ? ORDER BY login").bind(nif),
+    env.DB.prepare("SELECT id, nome, ativo FROM lojas_geridas WHERE nif = ? ORDER BY nome").bind(nif),
+    env.DB.prepare("SELECT id, descricao, loja FROM postos_geridos WHERE nif = ? ORDER BY descricao").bind(nif),
+  ]);
+  return {
+    versao: v.versao,
+    funcionarios: f.results.map((x) => ({ ...x, ativo: x.ativo === 1 })),
+    lojas: l.results.map((x) => ({ ...x, ativo: x.ativo === 1 })),
+    postos: p.results,
+  };
+}
+
+/** As rotas /v1/conta/* (o portal do cliente). */
+async function rotasConta(env, req, m, accao) {
+  if (m === "POST" && accao === "codigo") {
+    await limitar(env, req, "conta");
+    return json(await contaPedirCodigo(env, await corpoJson(req)));
+  }
+  if (m === "POST" && accao === "definir-senha") {
+    await limitar(env, req, "conta");
+    return json(await contaDefinirSenha(env, await corpoJson(req)));
+  }
+  if (m === "POST" && accao === "entrar") {
+    if (await excedido(env, req, "contaFalhas")) return erro("Demasiadas tentativas falhadas deste endereço. Tente daqui a uma hora.", 429);
+    try {
+      return json(await contaEntrar(env, await corpoJson(req), req));
+    } catch (e) {
+      if (e instanceof Falha && e.estado === 401) await contar(env, req, "contaFalhas");
+      throw e;
+    }
+  }
+  const s = await sessaoConta(env, req);
+  if (!s) return erro("A sessão terminou. Entre outra vez.", 401);
+  if (m === "GET" && accao === "resumo") return json(await contaResumo(env, s));
+  if (m === "GET" && accao === "sessoes") return json(await contaSessoes(env, s));
+  if (m === "POST" && accao === "sessoes/terminar") return json(await contaTerminar(env, s, await corpoJson(req), false));
+  if (m === "POST" && accao === "sessoes/terminar-outras") return json(await contaTerminar(env, s, null, true));
+  if (m === "POST" && accao === "perfil") return json(await contaPerfil(env, s, await corpoJson(req)));
+  if (m === "POST" && accao === "senha") return json(await contaMudarSenha(env, s, await corpoJson(req)));
+  if (m === "POST" && accao === "sair") return json(await contaTerminar(env, s, { id: s.sid }, false));
+  if (m === "GET" && accao === "equipa") return json({ ok: true, ...(await equipaGerida(env, s.nif)) });
+  if (m === "POST" && accao === "equipa/funcionario") return json(await guardarFuncionario(env, s.nif, await corpoJson(req)));
+  if (m === "POST" && accao === "equipa/repor-senha") return json(await reporSenhaFuncionario(env, s.nif, await corpoJson(req)));
+  if (m === "POST" && accao === "equipa/loja") return json(await guardarLoja(env, s.nif, await corpoJson(req)));
+  if (m === "POST" && accao === "equipa/posto") return json(await guardarPosto(env, s.nif, await corpoJson(req)));
+  return erro("Não encontrado.", 404);
+}
+
+/** «Onde fez login»: as sessões do painel ainda abertas (a actual primeiro). */
+async function sessoesPainel(env, actual) {
+  const limite = new Date(Date.now() - SESSAO_HORAS * 3_600_000).toISOString().slice(0, 19) + "Z";
+  const { results } = await env.DB.prepare(
+    "SELECT id, aparelho, local, criada_em, ultima_em FROM sessoes_painel WHERE terminada_em IS NULL AND criada_em >= ? ORDER BY ultima_em DESC LIMIT 50",
+  ).bind(limite).all();
+  return { ok: true, sessoes: results.map((s) => ({ ...s, actual: s.id === actual })).sort((a, b) => b.actual - a.actual) };
+}
+
+async function autorizado(env, req) {
   const dado = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (dado.startsWith("s1.")) return Boolean(await sessaoPainel(env, dado));
   const certo = env.ADMIN_TOKEN ?? "";
   if (certo.length < 24 || dado.length !== certo.length) return false;
   let dif = 0;
@@ -632,7 +1139,13 @@ async function resumo(env) {
               (SELECT MAX(ultimo_contacto) FROM maquinas m WHERE m.nif = c.nif) AS ultimo_contacto
        FROM clientes c ORDER BY c.criado_em DESC LIMIT 500`,
     ),
-    env.DB.prepare("SELECT nif, maquina, empresa, email, telefone, codigo_aberto, expira_em, tentativas, criado_em FROM codigos ORDER BY criado_em DESC LIMIT 100"),
+    env.DB.prepare(
+      `SELECT nif, maquina, empresa, email, telefone, codigo_aberto, expira_em, tentativas, criado_em, 'registo' AS tipo FROM codigos
+       UNION ALL
+       SELECT k.nif, '' AS maquina, c.empresa, k.email, c.telefone, k.codigo_aberto, k.expira_em, k.tentativas, k.criado_em, 'conta' AS tipo
+       FROM codigos_conta k LEFT JOIN clientes c ON c.nif = k.nif
+       ORDER BY criado_em DESC LIMIT 100`,
+    ),
     env.DB.prepare("SELECT p.*, c.empresa FROM pagamentos p LEFT JOIN clientes c ON c.nif = p.nif ORDER BY p.id DESC LIMIT 50"),
     // computadores activos (contacto nos últimos 30 dias) sem cópia local há mais de 7 dias, ou com a cópia externa a falhar
     env.DB.prepare(
@@ -781,7 +1294,7 @@ async function tratar(req, env) {
   const m = req.method;
 
   // a área do produtor no site (kangest.pages.dev/admin.html) usa a mesma API: o pedido prévio do browser não leva o token
-  if (m === "OPTIONS" && caminho.startsWith("/admin/api/")) {
+  if (m === "OPTIONS" && (caminho.startsWith("/admin/api/") || caminho.startsWith("/v1/conta/"))) {
     const corsAdmin = origemAdmin(env, req);
     return corsAdmin ? new Response(null, { status: 204, headers: corsAdmin }) : erro("Origem não autorizada.", 403);
   }
@@ -838,13 +1351,37 @@ async function tratar(req, env) {
       },
     });
   }
+  // portal do cliente (conta da empresa no site)
+  if (caminho.startsWith("/v1/conta/")) return rotasConta(env, req, m, caminho.slice("/v1/conta/".length));
+  // entrada com email e senha (antes da autorização: é ela que a dá); as falhas contam para o bloqueio por IP
+  if (caminho === "/admin/api/entrar" && m === "POST") {
+    try {
+      return json(await entrarPainel(env, await corpoJson(req), req));
+    } catch (e) {
+      if (e instanceof Falha && e.estado === 401) await contar(env, req, "admin");
+      throw e;
+    }
+  }
   if (caminho.startsWith("/admin/api/")) {
-    if (!autorizado(env, req)) {
+    if (!(await autorizado(env, req))) {
       await contar(env, req, "admin");
       return erro("Acesso negado.", 401);
     }
     const accao = caminho.slice("/admin/api/".length);
     if (m === "GET" && accao === "resumo") return json(await resumo(env));
+    const sessaoActual = await sessaoPainel(env, (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, ""));
+    if (m === "GET" && accao === "sessao") {
+      return json({ ok: true, email: sessaoActual?.e ?? null, expira: sessaoActual ? new Date(sessaoActual.exp).toISOString() : null, chave: !sessaoActual });
+    }
+    if (m === "GET" && accao === "sessoes") return json(await sessoesPainel(env, sessaoActual?.s));
+    if (m === "POST" && (accao === "sessoes/terminar" || accao === "sessoes/terminar-outras")) {
+      const c = await corpoJson(req);
+      const r = accao === "sessoes/terminar"
+        ? await env.DB.prepare("UPDATE sessoes_painel SET terminada_em = ? WHERE id = ? AND terminada_em IS NULL").bind(agora(), String(c.id ?? "")).run()
+        : await env.DB.prepare("UPDATE sessoes_painel SET terminada_em = ? WHERE terminada_em IS NULL AND id <> ?").bind(agora(), String(sessaoActual?.s ?? "")).run();
+      const n = r.meta?.changes ?? 0;
+      return json({ ok: true, terminadas: n, mensagem: n ? `${n} ${n === 1 ? "sessão terminada" : "sessões terminadas"}.` : "Não havia sessões para terminar." });
+    }
     if (m === "GET" && accao === "cliente") return json(await fichaCliente(env, url.searchParams.get("nif")));
     if (m === "POST") {
       const c = await corpoJson(req);
@@ -887,7 +1424,8 @@ export default {
   async fetch(req, env) {
     const r = await responder(req, env);
     const h = new Headers(r.headers);
-    const cors = new URL(req.url).pathname.startsWith("/admin/api/") ? origemAdmin(env, req) : null;
+    const p = new URL(req.url).pathname;
+    const cors = p.startsWith("/admin/api/") || p.startsWith("/v1/conta/") ? origemAdmin(env, req) : null;
     if (cors) for (const [k, v] of Object.entries(cors)) h.set(k, v);
     for (const [k, v] of Object.entries(SEGURANCA)) if (!h.has(k)) h.set(k, v);
     return new Response(r.body, { status: r.status, statusText: r.statusText, headers: h });
