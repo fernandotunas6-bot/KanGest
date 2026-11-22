@@ -35,9 +35,23 @@ pub(super) fn senha_confere(senha: &str, hash: &str) -> bool {
 }
 
 fn verificar(senha: &str, hash: &str) -> bool {
+    // a senha provisória de um funcionário criado no site (conta da empresa): resumo PBKDF2, mudado no primeiro acesso
+    if let Some(resto) = hash.strip_prefix("pbkdf2-sha256$") {
+        return verificar_pbkdf2(senha, resto);
+    }
     PasswordHash::new(hash)
         .map(|h| Argon2::default().verify_password(senha.as_bytes(), &h).is_ok())
         .unwrap_or(false)
+}
+
+/// «<iterações>$<sal>$<resumo>» (base64url sem preenchimento), como o servidor de licenças os gera.
+fn verificar_pbkdf2(senha: &str, resto: &str) -> bool {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let partes: Vec<&str> = resto.split('$').collect();
+    let [it, sal, res] = partes[..] else { return false };
+    let Some(it) = it.parse::<u32>().ok().filter(|n| (10_000..=1_000_000).contains(n)).and_then(std::num::NonZeroU32::new) else { return false };
+    let (Ok(sal), Ok(res)) = (URL_SAFE_NO_PAD.decode(sal), URL_SAFE_NO_PAD.decode(res)) else { return false };
+    ring::pbkdf2::verify(ring::pbkdf2::PBKDF2_HMAC_SHA256, it, &sal, senha.as_bytes(), &res).is_ok()
 }
 
 // ============================== política de segurança ==============================

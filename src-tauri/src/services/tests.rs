@@ -4856,6 +4856,7 @@ async fn acesso_pela_internet_por_subdominio() {
     assert!(!equipa["perfis"].as_array().unwrap().is_empty() && !equipa["lojas"].as_array().unwrap().is_empty() && !equipa["postos"].as_array().unwrap().is_empty());
     let texto = equipa.to_string();
     assert!(!texto.contains("senha") && !texto.contains("pin") && !texto.contains("$argon") && !texto.contains("totp_segredo"), "{texto}");
+    assert_eq!(renovar["estado"]["equipa_versao"], 0, "ainda nenhuma equipa do site aplicada");
 
     // activar: pede o endereço com o segredo e a porta do servidor; o token fica cifrado e o túnel liga-se
     let e = rpc(&arc, "web.activar", json!({ "nome": " Kianda " })).await;
@@ -5859,6 +5860,56 @@ async fn modo_tv() {
     // tirar a meta (0) deixa a loja sem percentagem
     rpc(&st, "tv.metasGuardar", json!({ "metas": { loja.to_string(): 0 } })).await;
     assert_eq!(rpc(&st, "tv.painel", json!({})).await["lojas"][0]["percentagem"], Value::Null);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Equipa gerida no site: lojas, postos e funcionários aplicados na verificação; adopta o que já existe pelo nome ou
+/// login; a senha provisória (PBKDF2) entra uma vez e obriga a mudar; o último administrador nunca perde o acesso;
+/// aplicar de novo a mesma versão não duplica nada.
+#[tokio::test]
+async fn equipa_gerida_no_site() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let (st, pasta) = base_com_admin("equipa-site").await;
+    let resumo = |senha: &str| {
+        let sal = b"sal-de-teste-16b";
+        let mut r = [0u8; 32];
+        ring::pbkdf2::derive(ring::pbkdf2::PBKDF2_HMAC_SHA256, std::num::NonZeroU32::new(100_000).unwrap(), sal, senha.as_bytes(), &mut r);
+        format!("pbkdf2-sha256$100000${}${}", URL_SAFE_NO_PAD.encode(sal), URL_SAFE_NO_PAD.encode(r))
+    };
+    let equipa = json!({
+        "versao": 3,
+        "lojas": [{ "id": "L1", "nome": "Loja Nova", "ativo": true }],
+        "postos": [{ "id": "P1", "descricao": "Caixa Nova", "loja": "Loja Nova" }, { "id": "P2", "descricao": "Caixa Fantasma", "loja": "Loja Inexistente" }],
+        "funcionarios": [
+            { "id": "F1", "login": "Maria", "nome": "Maria Caixa", "perfil": "CAIXA", "loja": "Loja Nova", "ativo": true, "senha_provisoria": resumo("Prov-1234-abcd") },
+            { "id": "F2", "login": "admin", "nome": "Administrador", "perfil": "CAIXA", "loja": null, "ativo": false, "senha_provisoria": null },
+            { "id": "F3", "login": "joao", "nome": "Sem Senha", "perfil": "CAIXA", "ativo": true, "senha_provisoria": null },
+            { "id": "F4", "login": "rui", "nome": "Perfil Estranho", "perfil": "DONO", "ativo": true, "senha_provisoria": resumo("x") },
+        ],
+    });
+    let r = super::equipa_conta::aplicar(&st, &equipa).await.unwrap();
+    assert_eq!(r["aplicada"], 3);
+    let avisos = r["avisos"].to_string();
+    assert!(avisos.contains("Loja Inexistente") && avisos.contains("único administrador") && avisos.contains("falta a senha provisória") && avisos.contains("DONO"), "{avisos}");
+    assert_eq!(super::equipa_conta::versao(&st).await, 3);
+    let (loja, posto_loja): (i64, i64) = sqlx::query_as("SELECT a.id, p.armazem_id FROM armazens a JOIN postos p ON p.conta_id = 'P1' WHERE a.conta_id = 'L1'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(loja, posto_loja, "o posto fica na loja certa");
+    let (perfil, ativo, conta): (String, i64, Option<String>) = sqlx::query_as("SELECT perfil, ativo, conta_id FROM utilizadores WHERE login = 'admin'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!((perfil.as_str(), ativo, conta.as_deref()), ("ADMIN", 1, Some("F2")), "o único administrador continua administrador e activo, mas fica ligado ao site");
+    // a Maria entra com a senha provisória e tem de a mudar; a senha provisória não serve para mais nada
+    rpc(&st, "auth.logout", json!({})).await;
+    assert!(rpc_err(&st, "auth.login", json!({ "login": "maria", "senha": "errada" })).await.contains("incorrect"));
+    let s = rpc(&st, "auth.login", json!({ "login": "maria", "senha": "Prov-1234-abcd" })).await;
+    assert_eq!(s["mudar_senha"], true);
+    rpc(&st, "auth.alterarSenha", json!({ "atual": "Prov-1234-abcd", "nova": "Maria-Nova-2026" })).await;
+    let hash: String = sqlx::query_scalar("SELECT senha_hash FROM utilizadores WHERE login = 'maria'").fetch_one(&st.pool).await.unwrap();
+    assert!(hash.starts_with("$argon2"), "a senha nova já é do programa");
+    // a mesma versão outra vez não muda nada (nem volta a pôr a senha provisória)
+    super::equipa_conta::aplicar(&st, &equipa).await.unwrap();
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM utilizadores WHERE login = 'maria'").fetch_one(&st.pool).await.unwrap();
+    let hash2: String = sqlx::query_scalar("SELECT senha_hash FROM utilizadores WHERE login = 'maria'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!((n, hash2), (1, hash));
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }

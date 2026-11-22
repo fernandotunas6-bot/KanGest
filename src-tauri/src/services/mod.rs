@@ -14,6 +14,7 @@ pub(crate) mod catalogo;
 mod contas;
 mod documentos;
 mod entidades;
+mod equipa_conta;
 mod escola;
 mod humano;
 mod tv;

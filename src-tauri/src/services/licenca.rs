@@ -700,7 +700,12 @@ pub async fn sincronizar(st: &AppState, i: SincronizarIn) -> AppResult<Value> {
     let v = chamar_servidor("/v1/renovar", json!({ "nif": nif, "maquina": id_maquina(), "versao": env!("CARGO_PKG_VERSION"), "segredo": segredo, "estado": estado })).await?;
     cfg_gravar(&st.pool, "licenca.sincronizada_em", &db::agora()).await?;
     let mudou = aplicar(st, &v, Some(s.id)).await?;
-    Ok(json!({ "mudou": mudou, "mensagem": v.get("mensagem"), "estado": calcular(st).await? }))
+    // a equipa gerida no site (conta da empresa), quando este KanGest está atrás
+    let equipa = match v.get("equipa_gerida").filter(|e| e.is_object()) {
+        Some(e) => Some(super::equipa_conta::aplicar(st, e).await?),
+        None => None,
+    };
+    Ok(json!({ "mudou": mudou, "mensagem": v.get("mensagem"), "estado": calcular(st).await?, "equipa": equipa }))
 }
 
 /// O que vai ao servidor de licenças em cada verificação, para a área do produtor: modo de gestão, licença como este
@@ -717,6 +722,7 @@ pub(crate) async fn estado_instalacao(st: &AppState, lic: &Estado) -> AppResult<
             "erro_externa": cfg("copias.erro_externa").await?.is_some(),
         },
         "equipa": equipa(st).await?,
+        "equipa_versao": super::equipa_conta::versao(st).await,
     }))
 }
 
