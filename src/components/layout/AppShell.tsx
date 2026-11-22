@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { ChevronDown, ChevronRight, Hand, Keyboard, KeyRound, LayoutDashboard, Lock, LogOut, Menu as IconeMenu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Plus, Search, ShieldCheck, ShoppingCart, Star, Sun, UserRound, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Hand, Keyboard, KeyRound, LayoutDashboard, Lock, LogOut, Menu as IconeMenu, Monitor, MonitorSmartphone, Moon, PanelLeftClose, PanelLeftOpen, Plus, Search, ShieldCheck, ShoppingCart, Star, Sun, UserRound, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { call } from "@/lib/api";
@@ -18,6 +18,7 @@ import { AvisoLicenca } from "@/components/AvisoLicenca";
 import { PaletaComandos } from "@/components/Comandos";
 import DocumentoModal from "@/components/DocumentoModal";
 import DoisPassos from "@/components/DoisPassos";
+import AparelhosSessao from "@/components/AparelhosSessao";
 import MeuPerfil, { Avatar } from "@/components/MeuPerfil";
 import { useMeuPerfil } from "@/lib/perfil";
 import { useTabelas } from "@/lib/hooks";
@@ -54,6 +55,7 @@ export default function AppShell() {
   const qc = useQueryClient();
   const [senha, setSenha] = useState(false);
   const [doisPassos, setDoisPassos] = useState(false);
+  const [aparelhos, setAparelhos] = useState(false);
   const [meuPerfil, setMeuPerfil] = useState(false);
   const [paleta, setPaleta] = useState(false);
   const [docAberto, setDocAberto] = useState<number | null>(null);
@@ -261,7 +263,7 @@ export default function AppShell() {
           <span className="hidden sm:contents">
             <BotaoTema />
           </span>
-          <MenuUtilizador sessao={sessao} onPerfil={() => setMeuPerfil(true)} onSenha={() => setSenha(true)} onDoisPassos={() => setDoisPassos(true)} onSair={sair} />
+          <MenuUtilizador sessao={sessao} onPerfil={() => setMeuPerfil(true)} onSenha={() => setSenha(true)} onDoisPassos={() => setDoisPassos(true)} onAparelhos={() => setAparelhos(true)} onSair={sair} />
         </header>
 
         <main className="min-w-0 flex-1 overflow-y-auto">
@@ -283,6 +285,7 @@ export default function AppShell() {
       <DocumentoModal id={docAberto} onClose={() => setDocAberto(null)} />
       {senha && <AlterarSenha onClose={() => setSenha(false)} />}
       {doisPassos && <DoisPassos onClose={() => setDoisPassos(false)} />}
+      {aparelhos && <AparelhosSessao onClose={() => setAparelhos(false)} />}
       {meuPerfil && <MeuPerfil onClose={() => setMeuPerfil(false)} />}
     </div>
   );
@@ -496,12 +499,14 @@ function MenuUtilizador({
   onPerfil,
   onSenha,
   onDoisPassos,
+  onAparelhos,
   onSair,
 }: {
   sessao: Sessao | null;
   onPerfil: () => void;
   onSenha: () => void;
   onDoisPassos: () => void;
+  onAparelhos: () => void;
   onSair: () => void;
 }) {
   const nav = useNavigate();
@@ -556,6 +561,15 @@ function MenuUtilizador({
             }}
           >
             Verificação em dois passos
+          </MenuItem>
+          <MenuItem
+            icon={MonitorSmartphone}
+            onClick={() => {
+              fechar();
+              onAparelhos();
+            }}
+          >
+            Aparelhos com sessão
           </MenuItem>
           <MenuItem
             icon={Lock}

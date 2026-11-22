@@ -4951,7 +4951,7 @@ async fn verificacao_em_dois_passos() {
     nova["login_pin"] = json!(true);
     rpc(&st, "seguranca.guardar", nova).await;
     let pela_internet = |metodo: &'static str, params: Value| {
-        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true };
+        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true, ligacao: None };
         CONTEXTO.scope(ctx, super::dispatch(&st, metodo, params))
     };
     let e = pela_internet("auth.login", json!({ "login": "ana", "senha": "ana12345" })).await.unwrap_err().to_string();
@@ -5037,7 +5037,7 @@ async fn recuperar_a_senha_com_dois_passos() {
 
     // pela Internet (túnel) não se recupera
     let pela_internet = |metodo: &'static str, params: Value| {
-        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true };
+        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true, ligacao: None };
         CONTEXTO.scope(ctx, super::dispatch(&st, metodo, params))
     };
     let e = pela_internet("auth.recuperarVerificar", verificar("admin", &recuperacao[2])).await.unwrap_err().to_string();
@@ -5671,6 +5671,65 @@ async fn aviso_de_integracao_parada() {
     sqlx::query("INSERT INTO api_webhooks (nome, url, segredo, falhas_seguidas) VALUES ('Livraria', 'https://x.invalid', 's', 3)")
         .execute(&st.pool).await.unwrap();
     assert_eq!(paradas().await, 2);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// «Aparelhos com sessão» (como no Claude): este computador e os postos ou browsers ligados, com o aparelho e o local;
+/// terminar uma, «sair em todos os aparelhos» e mudar a senha (que termina as outras). O token nunca sai.
+#[tokio::test]
+async fn aparelhos_com_sessao() {
+    use crate::rede::{descrever_aparelho, id_ligacao, ligar_para_teste, sessoes_ligadas, terminar_ligacao};
+    let mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
+    assert_eq!(descrever_aparelho(Some(mac), ""), "Chrome (Mac OS X)");
+    assert_eq!(
+        descrever_aparelho(Some("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"), ""),
+        "Safari (iPhone)"
+    );
+    assert_eq!(descrever_aparelho(Some("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 Edg/131.0"), ""), "Edge (Windows)");
+    assert_eq!(descrever_aparelho(None, "Caixa 2"), "Programa KanGest (Caixa 2)");
+
+    let (st, pasta) = base_com_admin("aparelhos").await;
+    let admin = st.sessao().unwrap();
+    let mut outro = admin.clone();
+    outro.id = 999_001;
+    outro.nome = "Outra Pessoa".into();
+    let pref = format!("teste-aparelhos-{}", std::process::id());
+    let (ta, tb, tc) = (format!("{pref}-a"), format!("{pref}-b"), format!("{pref}-c"));
+    ligar_para_teste(&ta, Some(admin.clone()), Some(mac), "", "Lubango, Huíla, AO", true);
+    ligar_para_teste(&tb, Some(admin.clone()), None, "Caixa 2", "Rede da loja", false);
+    ligar_para_teste(&tc, Some(outro), None, "Caixa 3", "Rede da loja", false);
+    let lista = |v: Value| v["sessoes"].as_array().unwrap().clone();
+    let ids = |l: &[Value]| l.iter().filter_map(|x| x["id"].as_str().map(String::from)).collect::<Vec<_>>();
+
+    let minhas = lista(rpc(&st, "auth.sessoes", json!({})).await);
+    let ver = ids(&minhas);
+    assert!(ver.contains(&"local".to_string()) && ver.contains(&id_ligacao(&ta)) && ver.contains(&id_ligacao(&tb)), "{ver:?}");
+    assert!(!ver.contains(&id_ligacao(&tc)), "as sessões de outra pessoa não aparecem");
+    assert_eq!((minhas[0]["id"].as_str(), minhas[0]["actual"].as_bool()), (Some("local"), Some(true)), "este aparelho vem primeiro");
+    assert!(minhas[0]["entrada"].is_string(), "a hora de entrada deste computador");
+    let a = minhas.iter().find(|x| x["id"] == id_ligacao(&ta)).unwrap();
+    assert_eq!((a["aparelho"].as_str(), a["local"].as_str(), a["pela_internet"].as_bool()), (Some("Chrome (Mac OS X)"), Some("Lubango, Huíla, AO"), Some(true)));
+    assert!(!serde_json::to_string(&minhas).unwrap().contains(&pref), "o token das ligações nunca sai");
+    assert!(ids(&lista(rpc(&st, "auth.sessoes", json!({ "todos": true })).await)).contains(&id_ligacao(&tc)), "com «Utilizadores», as de toda a gente");
+
+    // terminar uma
+    rpc(&st, "auth.terminarSessao", json!({ "id": id_ligacao(&ta) })).await;
+    assert!(!ids(&lista(rpc(&st, "auth.sessoes", json!({})).await)).contains(&id_ligacao(&ta)));
+    assert!(rpc_err(&st, "auth.terminarSessao", json!({ "id": id_ligacao(&ta) })).await.contains("já terminou"));
+
+    // sair em todos os aparelhos: fica só este computador; a sessão de outra pessoa não se mexe
+    assert_eq!(rpc(&st, "auth.terminarOutras", json!({})).await["terminadas"], 1);
+    assert_eq!(lista(rpc(&st, "auth.sessoes", json!({})).await).len(), 1);
+    assert!(sessoes_ligadas().iter().any(|x| x.id == id_ligacao(&tc)));
+
+    // mudar a senha termina as sessões nos outros aparelhos
+    ligar_para_teste(&tb, Some(admin.clone()), None, "Caixa 2", "Rede da loja", false);
+    rpc(&st, "auth.alterarSenha", json!({ "atual": "1234", "nova": "Nova-senha-2026" })).await;
+    assert!(!sessoes_ligadas().iter().any(|x| x.id == id_ligacao(&tb)), "a senha mudou: o Caixa 2 volta ao ecrã de entrada");
+    assert!(st.sessao().is_ok(), "este aparelho continua com sessão");
+
+    terminar_ligacao(&id_ligacao(&tc));
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }

@@ -190,6 +190,8 @@ pub struct Contexto {
     pub api_chave: Option<i64>,
     /// O pedido chegou pela Internet (túnel da Cloudflare até este servidor), não da rede da loja.
     pub pela_internet: bool,
+    /// O aparelho (posto ou browser) que fez o pedido: o resumo do token da ligação, nunca o token (rede::id_ligacao).
+    pub ligacao: Option<String>,
 }
 
 /// O pedido em curso chegou pela Internet (acesso por subdomínio): pede mais na entrada (dois passos, sem PIN).
@@ -209,6 +211,8 @@ pub fn contexto() -> Option<Contexto> {
 pub struct AppState {
     pub pool: SqlitePool,
     pub sessao: Mutex<Option<Sessao>>,
+    /// Quando começou a sessão deste computador (para «Aparelhos com sessão»).
+    pub entrada_local: Mutex<Option<String>>,
     /// Serializa a emissão de documentos (numeração + cadeia de hash sem saltos).
     pub emissao: tokio::sync::Mutex<()>,
     pub posto: RwLock<PostoAtual>,
@@ -223,6 +227,7 @@ impl AppState {
         Self {
             pool,
             sessao: Mutex::new(None),
+            entrada_local: Mutex::new(None),
             emissao: tokio::sync::Mutex::new(()),
             posto: RwLock::new(PostoAtual::default()),
             pasta_exportacao: std::env::temp_dir(),
@@ -283,7 +288,13 @@ impl AppState {
     pub fn definir_sessao(&self, s: Option<Sessao>) {
         match contexto() {
             Some(c) => *c.sessao.lock().unwrap() = s,
-            None => *self.sessao.lock().unwrap() = s,
+            None => {
+                let mut actual = self.sessao.lock().unwrap();
+                if actual.as_ref().map(|x| x.id) != s.as_ref().map(|x| x.id) {
+                    *self.entrada_local.lock().unwrap() = s.as_ref().map(|_| crate::db::agora());
+                }
+                *actual = s;
+            }
         }
     }
 

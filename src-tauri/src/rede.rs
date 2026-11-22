@@ -254,6 +254,14 @@ struct Ligacao {
     posto_id: i64,
     posto: String,
     utilizador: Option<String>,
+    utilizador_id: Option<i64>,
+    /// Quando entrou a pessoa que tem a sessão neste aparelho.
+    entrada: Option<String>,
+    /// «Chrome (Mac OS X)», «Programa KanGest (Caixa 2)»…
+    aparelho: String,
+    /// «Lubango, Huíla, AO» (pela Internet, dito pela Cloudflare) ou «Rede da loja».
+    local: String,
+    pela_internet: bool,
     endereco: String,
     ultimo: String,
     pedidos: u64,
@@ -371,6 +379,10 @@ struct PedidoHttp {
     aceita_gzip: bool,
     /// IP de quem pediu, dito pelo túnel da Cloudflare (`CF-Connecting-IP`); só conta se a ligação vier do próprio computador.
     ip_cloudflare: Option<std::net::IpAddr>,
+    /// Para «Aparelhos com sessão»: o browser e o sistema (os programas KanGest dos postos não o mandam).
+    user_agent: Option<String>,
+    /// Local aproximado dito pela Cloudflare (cidade, região, país); só conta quando o pedido vem pelo túnel.
+    cf_local: Option<String>,
     corpo: String,
 }
 
@@ -421,6 +433,16 @@ fn ler_pedido(fluxo: &mut TcpStream) -> Result<PedidoHttp, String> {
     let aceita_html = valor("accept").is_some_and(|a| a.contains("text/html"));
     let aceita_gzip = valor("accept-encoding").is_some_and(|a| a.contains("gzip"));
     let ip_cloudflare = valor("cf-connecting-ip").and_then(|v| v.parse().ok());
+    let user_agent = valor("user-agent").map(|v| v.chars().take(300).collect::<String>());
+    let cf_local = {
+        let partes: Vec<String> = ["cf-ipcity", "cf-region", "cf-ipcountry"]
+            .iter()
+            .filter_map(|k| valor(k))
+            .map(|v| v.chars().take(60).collect::<String>())
+            .filter(|v| !v.is_empty() && v != "XX" && v != "T1")
+            .collect();
+        (!partes.is_empty()).then(|| partes.join(", "))
+    };
     let mut corpo = dados[corte..].to_vec();
     while corpo.len() < tamanho {
         let n = fluxo.read(&mut tampao).map_err(|e| format!("Leitura interrompida: {e}"))?;
@@ -429,7 +451,7 @@ fn ler_pedido(fluxo: &mut TcpStream) -> Result<PedidoHttp, String> {
         }
         corpo.extend_from_slice(&tampao[..n]);
     }
-    Ok(PedidoHttp { metodo, caminho, aceita_html, aceita_gzip, ip_cloudflare, corpo: String::from_utf8_lossy(&corpo).to_string() })
+    Ok(PedidoHttp { metodo, caminho, aceita_html, aceita_gzip, ip_cloudflare, user_agent, cf_local, corpo: String::from_utf8_lossy(&corpo).to_string() })
 }
 
 #[derive(Deserialize)]
@@ -484,7 +506,7 @@ fn atender(st: &AppState, seg: &Seguranca, mut fluxo: TcpStream) {
         Ok(_) if bloqueado(&endereco) => {
             resposta(429, &json!({ "ok": false, "erro": "Demasiadas tentativas com a chave de rede errada a partir deste posto. Aguarde 10 minutos." }))
         }
-        Ok(PedidoHttp { corpo, .. }) => match serde_json::from_str::<Value>(&corpo) {
+        Ok(PedidoHttp { corpo, user_agent, cf_local, .. }) => match serde_json::from_str::<Value>(&corpo) {
             Err(e) => resposta(400, &json!({ "ok": false, "erro": format!("Pedido inválido: {e}") })),
             // postos com o protocolo antigo (chave em claro): não se atendem
             Ok(v) if v.get("chave").is_some() => resposta(
@@ -506,7 +528,9 @@ fn atender(st: &AppState, seg: &Seguranca, mut fluxo: TcpStream) {
                         Ok(p) if ja_visto(&p.id) => json!({ "ok": false, "id": p.id, "erro": "Pedido repetido recusado." }),
                         Ok(p) => {
                             let id = p.id.clone();
-                            let mut r = executar(st, p, &endereco, pela_internet);
+                            // o local só se aceita da Cloudflare (pelo túnel); na loja, a rede da loja
+                            let local = if pela_internet { cf_local.clone().unwrap_or_else(|| "Internet".into()) } else { "Rede da loja".into() };
+                            let mut r = executar(st, p, &endereco, pela_internet, user_agent.as_deref(), &local);
                             r["id"] = json!(id);
                             r
                         }
@@ -520,7 +544,7 @@ fn atender(st: &AppState, seg: &Seguranca, mut fluxo: TcpStream) {
     let _ = fluxo.flush();
 }
 
-fn executar(st: &AppState, p: Pedido, endereco: &str, pela_internet: bool) -> Value {
+fn executar(st: &AppState, p: Pedido, endereco: &str, pela_internet: bool, user_agent: Option<&str>, local: &str) -> Value {
     if SO_NA_MAQUINA.iter().any(|l| p.metodo.starts_with(l)) {
         return json!({ "ok": false, "erro": "Esta função só se usa no próprio computador (na aplicação KanGest instalada), não a partir de outro posto." });
     }
@@ -537,6 +561,11 @@ fn executar(st: &AppState, p: Pedido, endereco: &str, pela_internet: bool) -> Va
             posto_id: p.posto,
             posto: p.descricao_posto.clone().unwrap_or_default(),
             utilizador: None,
+            utilizador_id: None,
+            entrada: None,
+            aparelho: String::new(),
+            local: String::new(),
+            pela_internet,
             endereco: endereco.to_string(),
             ultimo: crate::db::agora(),
             pedidos: 0,
@@ -548,18 +577,27 @@ fn executar(st: &AppState, p: Pedido, endereco: &str, pela_internet: bool) -> Va
         if let Some(d) = &p.descricao_posto {
             e.posto = d.clone();
         }
+        e.aparelho = descrever_aparelho(user_agent, &e.posto);
+        e.local = local.to_string();
+        e.pela_internet = pela_internet;
         e.sessao.clone()
     };
 
     let r = tauri::async_runtime::block_on(async {
         let posto = st.ler_posto(p.posto).await?;
-        let ctx = Contexto { sessao: sessao.clone(), posto, api_chave: None, pela_internet };
+        let ctx = Contexto { sessao: sessao.clone(), posto, api_chave: None, pela_internet, ligacao: Some(id_ligacao(&p.token)) };
         CONTEXTO.scope(ctx, services::dispatch(st, &p.metodo, p.params)).await
     });
 
     if let Ok(mut l) = ligacoes().lock() {
         if let Some(e) = l.get_mut(&p.token) {
-            e.utilizador = sessao.lock().unwrap().as_ref().map(|s| s.nome.clone());
+            let quem = sessao.lock().unwrap().as_ref().map(|s| (s.id, s.nome.clone()));
+            // entrou (ou trocou de conta) neste pedido: a hora de entrada é agora
+            if quem.as_ref().map(|q| q.0) != e.utilizador_id {
+                e.entrada = quem.as_ref().map(|_| crate::db::agora());
+            }
+            e.utilizador_id = quem.as_ref().map(|q| q.0);
+            e.utilizador = quem.map(|q| q.1);
         }
     }
     match r {
@@ -610,6 +648,125 @@ fn descarregar(token: &str, params: &Value) -> Value {
         },
         Err(e) => json!({ "ok": false, "erro": format!("Não foi possível ler o ficheiro: {e}") }),
     }
+}
+
+/// Resumo do token de um posto ou browser: identifica a ligação em «Aparelhos com sessão» sem revelar o token.
+pub fn id_ligacao(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(token.as_bytes()).iter().take(6).map(|b| format!("{b:02x}")).collect()
+}
+
+/// Como no Claude: «Chrome (Mac OS X)», «Safari (iPhone)». Sem User-Agent é o programa KanGest de um posto.
+pub(crate) fn descrever_aparelho(ua: Option<&str>, posto: &str) -> String {
+    let Some(ua) = ua.filter(|u| !u.trim().is_empty()) else {
+        return if posto.trim().is_empty() { "Programa KanGest".into() } else { format!("Programa KanGest ({})", posto.trim()) };
+    };
+    let navegador = if ua.contains("Edg/") || ua.contains("EdgA/") {
+        "Edge"
+    } else if ua.contains("OPR/") {
+        "Opera"
+    } else if ua.contains("SamsungBrowser") {
+        "Samsung Internet"
+    } else if ua.contains("Firefox/") || ua.contains("FxiOS") {
+        "Firefox"
+    } else if ua.contains("Chrome/") || ua.contains("CriOS") {
+        "Chrome"
+    } else if ua.contains("Safari/") {
+        "Safari"
+    } else {
+        "Browser"
+    };
+    let sistema = if ua.contains("iPhone") {
+        "iPhone"
+    } else if ua.contains("iPad") {
+        "iPad"
+    } else if ua.contains("Android") {
+        "Android"
+    } else if ua.contains("Windows") {
+        "Windows"
+    } else if ua.contains("Mac OS X") || ua.contains("Macintosh") {
+        "Mac OS X"
+    } else if ua.contains("CrOS") {
+        "Chrome OS"
+    } else if ua.contains("Linux") {
+        "Linux"
+    } else {
+        ""
+    };
+    if sistema.is_empty() {
+        navegador.into()
+    } else {
+        format!("{navegador} ({sistema})")
+    }
+}
+
+/// Uma sessão aberta num posto ou browser ligado a este servidor.
+#[derive(serde::Serialize, Clone)]
+pub struct SessaoLigada {
+    pub id: String,
+    pub utilizador_id: i64,
+    pub utilizador: String,
+    pub aparelho: String,
+    pub posto: String,
+    pub local: String,
+    pub endereco: String,
+    pub entrada: Option<String>,
+    pub ultimo: String,
+    pub pela_internet: bool,
+}
+
+/// Os postos e browsers com sessão iniciada neste servidor (os que só se ligaram, sem entrar, não contam).
+pub fn sessoes_ligadas() -> Vec<SessaoLigada> {
+    let mut l = ligacoes().lock().unwrap();
+    limpar_antigas(&mut l);
+    l.iter()
+        .filter_map(|(token, e)| {
+            let s = e.sessao.lock().unwrap().clone()?;
+            Some(SessaoLigada {
+                id: id_ligacao(token),
+                utilizador_id: s.id,
+                utilizador: s.nome,
+                aparelho: e.aparelho.clone(),
+                posto: e.posto.clone(),
+                local: e.local.clone(),
+                endereco: e.endereco.clone(),
+                entrada: e.entrada.clone(),
+                ultimo: e.ultimo.clone(),
+                pela_internet: e.pela_internet,
+            })
+        })
+        .collect()
+}
+
+/// Termina a sessão de uma ligação: o aparelho volta ao ecrã de entrada no pedido seguinte. Devolve quem estava.
+pub fn terminar_ligacao(id: &str) -> Option<i64> {
+    let l = ligacoes().lock().unwrap();
+    let (_, e) = l.iter().find(|(t, _)| id_ligacao(t) == id)?;
+    let antes = e.sessao.lock().unwrap().take();
+    antes.map(|s| s.id)
+}
+
+/// Para os testes: um posto ou browser ligado, com ou sem sessão.
+#[cfg(test)]
+pub(crate) fn ligar_para_teste(token: &str, sessao: Option<crate::state::Sessao>, user_agent: Option<&str>, posto: &str, local: &str, pela_internet: bool) {
+    let mut l = ligacoes().lock().unwrap();
+    l.insert(
+        token.to_string(),
+        Ligacao {
+            utilizador_id: sessao.as_ref().map(|s| s.id),
+            utilizador: sessao.as_ref().map(|s| s.nome.clone()),
+            sessao: Arc::new(Mutex::new(sessao)),
+            posto_id: 1,
+            posto: posto.to_string(),
+            entrada: Some(crate::db::agora()),
+            aparelho: descrever_aparelho(user_agent, posto),
+            local: local.to_string(),
+            pela_internet,
+            endereco: "192.0.2.10".into(),
+            ultimo: crate::db::agora(),
+            pedidos: 1,
+        },
+    );
 }
 
 /// Esquece os postos sem pedidos há mais de 12 horas (a sessão desse posto cai).
