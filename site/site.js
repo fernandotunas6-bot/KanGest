@@ -53,13 +53,34 @@
   $$("[data-com-contacto]").forEach((el) => (el.hidden = !(contacto.whatsapp || contacto.email)));
 
   const emailValido = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
-  async function enviarFormSubmit(dados) {
+  // Anti-robôs. O site não tem servidor próprio onde conferir um captcha, por isso: um campo escondido que só os
+  // programas preenchem (o FormSubmit descarta o envio pelo «_honey»; aqui nem chega a sair), um mínimo de 3 segundos
+  // entre abrir a página e enviar, e um envio por formulário a cada 60 segundos neste browser.
+  const ABERTO = Date.now();
+  const ESPERA_ENVIOS = 60_000;
+  document.querySelectorAll("form.formulario").forEach((f) => {
+    const mel = document.createElement("input");
+    Object.assign(mel, { type: "text", name: "_honey", tabIndex: -1, autocomplete: "off", className: "mel" });
+    mel.setAttribute("aria-hidden", "true");
+    f.prepend(mel);
+  });
+  const recusa = (texto) => Object.assign(new Error(texto), { paraMostrar: texto });
+  const chaveEnvio = (form) => "kg-enviado-" + (form.id || "download");
+
+  async function enviarFormSubmit(dados, form) {
+    const mel = form.querySelector("input[name=_honey]")?.value || "";
+    if (mel) return; // um programa preencheu o campo escondido: parece que enviou, mas nada sai
+    if (Date.now() - ABERTO < 3000) throw recusa("Espere um momento e carregue outra vez em enviar.");
+    let ultimo = 0;
+    try { ultimo = Number(localStorage.getItem(chaveEnvio(form))) || 0; } catch { /* sem armazenamento */ }
+    if (Date.now() - ultimo < ESPERA_ENVIOS) throw recusa("Já recebemos o seu pedido há instantes. Se precisar de mudar alguma coisa, espere um minuto.");
     const r = await fetch(`https://formsubmit.co/ajax/${contacto.email}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(dados),
+      body: JSON.stringify({ ...dados, _honey: "" }),
     });
     if (!r.ok) throw new Error("envio");
+    try { localStorage.setItem(chaveEnvio(form), String(Date.now())); } catch { /* sem armazenamento */ }
   }
 
   // pedido do link de download: com email de vendas configurado, a pessoa recebe os links por email (FormSubmit)
@@ -85,7 +106,7 @@
           _template: "table",
           _captcha: "false",
           _autoresponse: `Olá ${dados.nome}, obrigado pelo interesse no KanGest!\n\nPode baixar o instalador aqui:\n${links}\n\nNo Mac, na primeira vez abra com o botão direito → Abrir.\nQualquer dúvida, responda a este email.`,
-        });
+        }, form);
         mostrar(`Enviámos o link para ${dados.email}. Se preferir, pode baixar já aqui:`);
       } catch {
         mostrar("Não foi possível enviar o email agora, mas pode baixar já aqui:");
@@ -197,13 +218,13 @@
         botao.disabled = true;
         botao.textContent = "A enviar…";
         try {
-          await enviarFormSubmit({ ...d, _subject: `Pedido: ${d.assunto} — ${d.nome}`, _template: "table", _captcha: "false" });
+          await enviarFormSubmit({ ...d, _subject: `Pedido: ${d.assunto} — ${d.nome}`, _template: "table", _captcha: "false" }, fc);
           fc.hidden = true;
           $("#contactoEnviado").hidden = false;
-        } catch {
+        } catch (e) {
           botao.disabled = false;
           botao.textContent = "Enviar pedido";
-          erro.textContent = "Não foi possível enviar agora. Tente de novo dentro de momentos.";
+          erro.textContent = e.paraMostrar || "Não foi possível enviar agora. Tente de novo dentro de momentos.";
         }
       } else if (contacto.whatsapp) {
         location.href = urlWhatsapp(texto);
@@ -318,12 +339,12 @@
             email: d.email || "",
             tambem_precisa: extras.join(", "),
             mensagem: d.mensagem || "",
-          });
+          }, fa);
           enviado(null, false);
-        } catch {
+        } catch (e) {
           botao.disabled = false;
           botao.textContent = "Enviar pedido de adesão";
-          erro.textContent = contacto.whatsapp ? "Não foi possível enviar agora. Tente de novo, ou envie pelo WhatsApp." : "Não foi possível enviar agora. Tente de novo dentro de momentos.";
+          erro.textContent = e.paraMostrar ? e.paraMostrar : contacto.whatsapp ? "Não foi possível enviar agora. Tente de novo, ou envie pelo WhatsApp." : "Não foi possível enviar agora. Tente de novo dentro de momentos.";
         }
       } else if (contacto.whatsapp) {
         textoWhatsapp = urlWhatsapp(texto);
