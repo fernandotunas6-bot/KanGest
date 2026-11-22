@@ -5,7 +5,9 @@
   "scripts": {
     "preparar": "node preparar.mjs",
     "testar": "node teste/consultas.mjs && node teste/funcao.mjs && node teste/copia.mjs && KANGEST_BD=postgres node ../servidor-licencas/teste/contas.mjs",
-    "copiar-d1": "node copiar-d1.mjs"
+    "copiar-d1": "node copiar-d1.mjs",
+    "fumo": "node teste/fumo.mjs",
+    "copia": "node copia-supabase.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.15",

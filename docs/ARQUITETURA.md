@@ -98,6 +98,17 @@ As tabelas e as colunas têm os mesmos nomes na D1 e no Postgres. Uma tabela nov
   - cada computador: o seu segredo;
   - o registo e a conta: códigos de 6 algarismos.
 
+### Operação
+
+- **Prova de fumo** (`servidor-central/teste/fumo.mjs`) depois de cada publicação: o percurso de um cliente em
+  produção, com uma empresa de teste que se apaga no fim.
+- **Vigia** (`.github/workflows/vigia.yml`): de 6 em 6 horas confirma que a função, o Worker antigo e o site
+  respondem; avisa por email se falharem.
+- **Plano gratuito do Supabase:** o projecto pára ao fim de 7 dias sem actividade (o vigia evita-o) e não há cópias
+  que se possam descarregar. As cópias fazem-se com `servidor-central/copia-supabase.mjs`, no computador do produtor.
+
+Os comandos estão no [LEIA-ME do servidor-central](../servidor-central/LEIA-ME.md).
+
 ### Segredos da função
 
 Os mesmos nomes no Worker (`wrangler secret put`) e na função (`supabase secrets set`), nunca no repositório:
