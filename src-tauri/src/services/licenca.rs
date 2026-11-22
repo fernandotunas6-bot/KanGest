@@ -716,6 +716,35 @@ pub(crate) async fn estado_instalacao(st: &AppState, lic: &Estado) -> AppResult<
             "ultima_externa": cfg("copias.ultima_externa").await?,
             "erro_externa": cfg("copias.erro_externa").await?.is_some(),
         },
+        "equipa": equipa(st).await?,
+    }))
+}
+
+/// A equipa, as lojas e os postos, para o painel da conta da empresa no site (e, a seguir, para os gerir de lá). Só o que o
+/// painel mostra: login, nome, perfil, loja, se está activo, se tem dois passos e o último acesso. Nunca senhas, PIN,
+/// emails, telefones nem fotografias.
+async fn equipa(st: &AppState) -> AppResult<Value> {
+    let p = &st.pool;
+    let utilizadores = sqlx::query_as::<_, (String, String, String, i64, Option<String>, bool, Option<String>)>(
+        "SELECT u.login, u.nome, u.perfil, u.ativo, a.nome, u.totp_segredo IS NOT NULL, u.ultimo_acesso
+         FROM utilizadores u LEFT JOIN armazens a ON a.id = u.armazem_id ORDER BY u.ativo DESC, u.nome LIMIT 500",
+    )
+    .fetch_all(p)
+    .await?;
+    let perfis = sqlx::query_as::<_, (String, String)>("SELECT codigo, descricao FROM perfis ORDER BY codigo").fetch_all(p).await?;
+    let lojas = sqlx::query_as::<_, (String, i64)>("SELECT nome, ativo FROM armazens ORDER BY id LIMIT 200").fetch_all(p).await?;
+    let postos = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT po.descricao, a.nome FROM postos po LEFT JOIN armazens a ON a.id = po.armazem_id ORDER BY po.id LIMIT 200",
+    )
+    .fetch_all(p)
+    .await?;
+    Ok(json!({
+        "utilizadores": utilizadores.into_iter().map(|(login, nome, perfil, ativo, loja, dois_passos, ultimo)| json!({
+            "login": login, "nome": nome, "perfil": perfil, "ativo": ativo == 1, "loja": loja, "dois_passos": dois_passos, "ultimo_acesso": ultimo,
+        })).collect::<Vec<_>>(),
+        "perfis": perfis.into_iter().map(|(codigo, descricao)| json!({ "codigo": codigo, "descricao": descricao })).collect::<Vec<_>>(),
+        "lojas": lojas.into_iter().map(|(nome, ativo)| json!({ "nome": nome, "ativo": ativo == 1 })).collect::<Vec<_>>(),
+        "postos": postos.into_iter().map(|(descricao, loja)| json!({ "descricao": descricao, "loja": loja })).collect::<Vec<_>>(),
     }))
 }
 

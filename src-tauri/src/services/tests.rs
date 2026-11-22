@@ -4850,6 +4850,12 @@ async fn acesso_pela_internet_por_subdominio() {
     assert_eq!(renovar["estado"]["copias"]["ultima_externa"], Value::Null);
     assert_eq!(renovar["estado"]["copias"]["erro_externa"], true);
     assert!(!renovar["estado"].to_string().contains("/Volumes"), "o erro da cópia externa não leva o caminho: {}", renovar["estado"]);
+    // a equipa, as lojas e os postos vão para o painel da conta; nunca senhas, PIN nem segredos
+    let equipa = &renovar["estado"]["equipa"];
+    assert!(equipa["utilizadores"].as_array().unwrap().iter().any(|u| u["login"] == "admin" && u["perfil"] == "ADMIN" && u["ativo"] == true), "{equipa}");
+    assert!(!equipa["perfis"].as_array().unwrap().is_empty() && !equipa["lojas"].as_array().unwrap().is_empty() && !equipa["postos"].as_array().unwrap().is_empty());
+    let texto = equipa.to_string();
+    assert!(!texto.contains("senha") && !texto.contains("pin") && !texto.contains("$argon") && !texto.contains("totp_segredo"), "{texto}");
 
     // activar: pede o endereço com o segredo e a porta do servidor; o token fica cifrado e o túnel liga-se
     let e = rpc(&arc, "web.activar", json!({ "nome": " Kianda " })).await;
