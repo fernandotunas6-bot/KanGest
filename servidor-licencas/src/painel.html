@@ -159,6 +159,9 @@ const ROTULOS = { EXPERIENCIA: "Experiência", ACTIVA: "Activa", TOLERANCIA: "To
 const nomePlano = (c) => (dados?.planos.find((p) => p.codigo === c)?.nome) || (c === "EXPERIENCIA" ? "Experiência" : c || "—");
 const ORIGENS = { EXPERIENCIA: "Experiência", RENOVACAO: "Servidor", PAINEL: "Manual" };
 const selo = (e) => `<span class="selo s-${esc(e)}">${esc(ROTULOS[e] || e)}</span>`;
+// Endereço do servidor de licenças: vazio no próprio servidor; o gerador do site (scripts/gerar-site.py) põe aqui o
+// endereço público para a área do produtor em kangest.pages.dev/admin.html.
+const API = "" /* KG_API */;
 let token = "";
 try { token = sessionStorage.getItem("kg-admin") || ""; } catch {}
 let dados = null;
@@ -170,11 +173,18 @@ function avisar(texto, erro = false) {
 }
 
 async function api(caminho, corpo) {
-  const r = await fetch("/admin/api/" + caminho, {
-    method: corpo ? "POST" : "GET",
-    headers: { authorization: "Bearer " + token, ...(corpo ? { "content-type": "application/json" } : {}) },
-    body: corpo ? JSON.stringify(corpo) : undefined,
-  });
+  let r;
+  try {
+    r = await fetch(API + "/admin/api/" + caminho, {
+      method: corpo ? "POST" : "GET",
+      headers: { authorization: "Bearer " + token, ...(corpo ? { "content-type": "application/json" } : {}) },
+      body: corpo ? JSON.stringify(corpo) : undefined,
+    });
+  } catch {
+    throw new Error(API
+      ? "Sem ligação ao servidor de licenças. Confirme a internet e que o servidor está actualizado e aceita este site (ADMIN_ORIGENS)."
+      : "Sem ligação ao servidor de licenças. Confirme a internet.");
+  }
   const d = await r.json().catch(() => ({ erro: "Resposta inválida do servidor." }));
   if (r.status === 401) { sair(); throw new Error("Chave de administração errada."); }
   if (!r.ok || d.ok === false) throw new Error(d.erro || "Erro " + r.status);
@@ -196,6 +206,7 @@ async function carregar() {
   $("#numeros").innerHTML = [
     [c.length, "clientes"], [conta("ACTIVA") + conta("TOLERANCIA"), "assinaturas activas"], [conta("EXPERIENCIA"), "em experiência"],
     [dados.codigos.filter((x) => !x.expirado).length, "pedidos por confirmar"], [kz(receita), "recebido este mês"],
+    [dados.sem_copia ?? 0, "computadores sem cópia recente"],
   ].map(([n, t]) => `<div><b>${esc(n)}</b><span>${esc(t)}</span></div>`).join("");
   $$(".sel-planos").forEach((s) => (s.innerHTML = dados.planos.filter((p) => p.activo).map((p) => `<option value="${esc(p.codigo)}">${esc(p.nome)}</option>`).join("")));
   desenharClientes(); desenharPedidos(); desenharPagamentos(); desenharPlanos();
@@ -208,7 +219,7 @@ function desenharClientes() {
     <td><b>${esc(c.empresa)}</b></td><td class="mono">${esc(c.nif)}</td>
     <td>${esc(c.email || "")}<div class="fraco">${esc(c.telefone || "")}</div></td>
     <td>${selo(c.estado)}</td><td>${esc(c.plano ? nomePlano(c.plano) : "—")}</td><td>${dmy(c.pago_ate || c.experiencia_ate)}</td>
-    <td class="num">${esc(c.maquinas)}</td><td class="fraco">${quando(c.ultimo_contacto)}</td></tr>`).join("")
+    <td class="num">${esc(c.maquinas)}${c.sem_copia ? ' <span class="selo s-TOLERANCIA" title="Há computadores sem cópia de segurança recente">cópias</span>' : ""}</td><td class="fraco">${quando(c.ultimo_contacto)}</td></tr>`).join("")
     : `<tr><td colspan="8" class="vazio">${dados.clientes.length ? "Nenhum cliente corresponde à procura." : "Ainda não há clientes registados."}</td></tr>`;
 }
 
@@ -257,10 +268,15 @@ async function abrirFicha(nif) {
     </div><div class="accoes"><button class="primario">Registar e renovar</button></div></form>
     <p class="fraco">A licença nova fica pronta logo; o KanGest do cliente recebe-a sozinho na próxima ligação à internet (ou copie-a abaixo).</p>
     <h3>Computadores</h3>
-    <div class="tabela"><table><thead><tr><th>Computador</th><th>Versão</th><th>Registado</th><th>Último contacto</th><th></th></tr></thead><tbody>
-    ${d.maquinas.map((m) => `<tr><td class="mono">${esc(m.maquina)} ${m.bloqueada ? selo("BLOQUEADA") : ""}</td><td>${esc(m.versao || "—")}</td><td>${quando(m.primeiro_contacto)}</td><td>${quando(m.ultimo_contacto)}</td>
+    <div class="tabela"><table><thead><tr><th>Computador</th><th>Versão</th><th>Licença no computador</th><th>Cópia local</th><th>Cópia externa</th><th>Último contacto</th><th></th></tr></thead><tbody>
+    ${d.maquinas.map((m) => `<tr><td><span class="mono" style="white-space:nowrap">${esc(m.maquina)}</span> ${m.bloqueada ? selo("BLOQUEADA") : ""}${m.modo ? `<div class="fraco">${esc(m.modo === "escola" ? "Escola" : "Loja")}</div>` : ""}</td><td>${esc(m.versao || "—")}</td>
+      <td>${m.licenca_estado ? `${selo(m.licenca_estado)}<div class="fraco">até ${dmy(m.licenca_fim)}</div>` : '<span class="fraco">—</span>'}</td>
+      <td>${copia(m.copia_ultima, m.recebido_em)}</td>
+      <td>${m.copia_externa_erro ? selo("EXPIRADA").replace(">Expirada<", ">A falhar<") : m.copia_externa_ultima ? copia(m.copia_externa_ultima, m.recebido_em) : '<span class="fraco">não configurada</span>'}</td>
+      <td>${quando(m.ultimo_contacto)}</td>
       <td><button class="${m.bloqueada ? "" : "perigo"}" data-maquina="${esc(m.maquina)}" data-bloquear="${m.bloqueada ? 0 : 1}">${m.bloqueada ? "Desbloquear" : "Bloquear"}</button></td></tr>`).join("") || '<tr><td colspan="5" class="vazio">Nenhum computador.</td></tr>'}
     </tbody></table></div>
+    <p class="fraco">A licença e as cópias são as que o KanGest de cada computador comunicou na última verificação (de 12 em 12 horas, com internet). Versões anteriores à 1.4 não as comunicam.</p>
     <h3>Licenças emitidas</h3>
     <div class="tabela"><table><thead><tr><th>Licença</th><th>Plano</th><th class="num">Postos</th><th>Período</th><th>Computador</th><th>Origem</th><th></th></tr></thead><tbody>
     ${d.licencas.map((l) => `<tr><td class="mono">${esc(l.id)}</td><td>${esc(nomePlano(l.plano))}</td><td class="num">${l.postos || "∞"}</td><td>${dmy(l.inicio)} – ${dmy(l.fim)}</td><td class="mono">${esc(l.maquina || "qualquer")}</td><td class="fraco">${esc(ORIGENS[l.origem] || l.origem)}</td>
@@ -279,6 +295,14 @@ async function abrirFicha(nif) {
   $("#f-corpo").dataset.nif = c.nif;
   sugerirValor($("#form-pagamento"));
   if (!$("#ficha").open) $("#ficha").showModal();
+}
+
+/** Data da última cópia, a vermelho se tiver mais de 7 dias quando o computador a comunicou. */
+function copia(data, recebido) {
+  if (!recebido) return '<span class="fraco">—</span>';
+  if (!data) return selo("EXPIRADA").replace(">Expirada<", ">Nunca<");
+  const dias = (Date.parse(recebido) - Date.parse(data)) / 86_400_000;
+  return dias > 7 ? `<span class="selo s-EXPIRADA">${dmy(data.slice(0, 10))}</span>` : dmy(data.slice(0, 10));
 }
 
 /** Valor a partir da tabela de preços: anual quando são 12 meses (e há preço anual), senão mensal × meses. */
