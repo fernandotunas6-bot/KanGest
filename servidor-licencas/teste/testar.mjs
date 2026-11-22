@@ -99,6 +99,48 @@ assert.equal(r.estado, 401);
 r = await post("/v1/renovar", { nif: NIF, maquina: M1, versao: "1.0.1", segredo: SEGREDO_M1 });
 assert.equal(r.estado, 200); assert.equal(ler(r.corpo.licenca).id, idExperiencia);
 
+// estado da instalação na verificação (1.4+): licença e cópias aparecem na ficha; o que não é data é descartado
+{
+  const antiga = "2020-01-01T09:00:00";
+  r = await post("/v1/renovar", {
+    nif: NIF, maquina: M1, versao: "1.4.0", segredo: SEGREDO_M1,
+    estado: { modo: "escola", licenca: { estado: "EXPERIENCIA", fim: "2099-12-31" }, copias: { ultima: antiga, ultima_externa: "<script>", erro_externa: true } },
+  });
+  assert.equal(r.estado, 200);
+  const ficha = (await admin("cliente?nif=" + NIF)).corpo;
+  const m = ficha.maquinas.find((x) => x.maquina === M1);
+  assert.equal(m.modo, "escola"); assert.equal(m.licenca_estado, "EXPERIENCIA"); assert.equal(m.licenca_fim, "2099-12-31");
+  assert.equal(m.copia_ultima, antiga); assert.equal(m.copia_externa_ultima, null, "o que não é data não se guarda"); assert.equal(m.copia_externa_erro, 1);
+  const res = (await admin("resumo")).corpo;
+  assert.equal(res.sem_copia, 1, "cópia com mais de 7 dias conta no resumo");
+  assert.equal(res.clientes.find((c) => c.nif === NIF).sem_copia, true);
+  // uma verificação sem estado (versão antiga) não apaga o que havia
+  await post("/v1/renovar", { nif: NIF, maquina: M1, versao: "1.3.4", segredo: SEGREDO_M1 });
+  assert.equal((await admin("cliente?nif=" + NIF)).corpo.maquinas.find((x) => x.maquina === M1).licenca_estado, "EXPERIENCIA");
+}
+
+// área do produtor no site: CORS só para as origens autorizadas; o token continua obrigatório
+{
+  const pedirDe = (origem, metodo, token) => worker.fetch(new Request("https://licencas.teste/admin/api/resumo", {
+    method: metodo, headers: { origin: origem, ...(token ? { authorization: "Bearer " + token } : {}) },
+  }), env);
+  let x = await pedirDe("https://kangest.pages.dev", "OPTIONS");
+  assert.equal(x.status, 204); assert.equal(x.headers.get("access-control-allow-origin"), "https://kangest.pages.dev");
+  assert.match(x.headers.get("access-control-allow-headers"), /authorization/);
+  x = await pedirDe("https://kangest.pages.dev", "GET", ADMIN);
+  assert.equal(x.status, 200); assert.equal(x.headers.get("access-control-allow-origin"), "https://kangest.pages.dev");
+  x = await pedirDe("https://kangest.pages.dev", "GET");
+  assert.equal(x.status, 401, "sem token, nada");
+  x = await pedirDe("https://intruso.example", "OPTIONS");
+  assert.equal(x.status, 403); assert.equal(x.headers.get("access-control-allow-origin"), null);
+  x = await pedirDe("https://intruso.example", "GET", ADMIN);
+  assert.equal(x.headers.get("access-control-allow-origin"), null, "outra origem não recebe CORS");
+  env.ADMIN_ORIGENS = "https://kangest.ao, https://www.kangest.ao/";
+  assert.equal((await pedirDe("https://www.kangest.ao", "OPTIONS")).status, 204);
+  assert.equal((await pedirDe("https://kangest.pages.dev", "OPTIONS")).status, 403);
+  delete env.ADMIN_ORIGENS;
+}
+
 // segundo computador do mesmo NIF: a experiência NÃO recomeça
 // renovação com o segredo de cada computador (recebido ao confirmar o registo)
 const SEGREDOS = {};
@@ -371,6 +413,41 @@ assert.equal((await pedir("GET", "/nada")).estado, 404);
   await env.DB.prepare("UPDATE clientes SET pago_ate = NULL, experiencia_ate = ? WHERE nif = ?").bind(somar(HOJE, -60), NIF).run();
   assert.equal((await web("activar", { ...eu, nome: "kianda" })).estado, 402);
   globalThis.fetch = fetchOriginal;
+}
+
+// verificação de humano (Turnstile): sem configuração não se exige; com ela, o Cloudflare decide; sem resposta, passa
+{
+  let r = await pedir("GET", "/v1/web/humano");
+  assert.equal(r.corpo.site_key, null);
+  assert.equal((await post("/v1/web/humano", { token: "x" })).corpo.humano, true, "sem configuração não se exige");
+  Object.assign(env, { TURNSTILE_SITE_KEY: "0x4AAA-site", TURNSTILE_SECRET_KEY: "0x4AAA-segredo", WEB_DOMINIO: "kangest.ao" });
+  r = await pedir("GET", "/v1/web/humano");
+  assert.equal(r.corpo.site_key, "0x4AAA-site"); assert.equal(r.corpo.dominio, "kangest.ao");
+  assert.equal(JSON.stringify(r.corpo).includes("segredo"), false, "o segredo nunca sai");
+  const original = globalThis.fetch;
+  let enviado = null;
+  let resposta = { success: true };
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("siteverify")) {
+      enviado = Object.fromEntries(init.body);
+      if (resposta === "falha") throw new Error("rede");
+      return new Response(JSON.stringify(resposta), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return original(url, init);
+  };
+  r = await post("/v1/web/humano", { token: "tok-bom", ip: "203.0.113.7" });
+  assert.equal(r.corpo.humano, true);
+  assert.deepEqual(enviado, { secret: "0x4AAA-segredo", response: "tok-bom", remoteip: "203.0.113.7" });
+  resposta = { success: false, "error-codes": ["timeout-or-duplicate"] };
+  r = await post("/v1/web/humano", { token: "tok-repetido" });
+  assert.equal(r.corpo.humano, false); assert.equal(r.corpo.motivo, "timeout-or-duplicate");
+  assert.equal((await post("/v1/web/humano", { token: "" })).corpo.humano, false, "sem token, não");
+  resposta = { success: false, "error-codes": ["invalid-input-secret"] };
+  assert.deepEqual((await post("/v1/web/humano", { token: "t" })).corpo, { ok: true, humano: true, degradado: true }, "a nossa chave errada não tranca ninguém");
+  resposta = "falha";
+  assert.equal((await post("/v1/web/humano", { token: "t" })).corpo.degradado, true, "sem resposta do Cloudflare, passa");
+  globalThis.fetch = original;
+  for (const k of ["TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY", "WEB_DOMINIO"]) delete env[k];
 }
 
 console.log("Servidor de licenças: todos os testes passaram.");

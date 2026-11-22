@@ -75,7 +75,9 @@ pub async fn politica(st: &AppState) -> AppResult<Politica> {
 /// Política visível antes de entrar (o ecrã de entrada precisa de saber se há entrada por PIN).
 pub async fn politica_publica(st: &AppState) -> AppResult<Value> {
     let p = politica(st).await?;
-    Ok(json!({ "login_pin": p.login_pin, "senha_min": p.senha_min, "inatividade_min": p.inatividade_min }))
+    // pela Internet, num endereço do KanGest: a chave do widget «não sou um robô» (Cloudflare Turnstile)
+    let humano = super::humano::chave_site(st).await;
+    Ok(json!({ "login_pin": p.login_pin, "senha_min": p.senha_min, "inatividade_min": p.inatividade_min, "humano": humano }))
 }
 
 pub async fn seguranca_obter(st: &AppState) -> AppResult<Value> {
@@ -239,9 +241,17 @@ pub struct LoginIn {
     /// Código da verificação em dois passos (da aplicação ou de recuperação), na segunda volta.
     #[serde(default)]
     codigo: Option<String>,
+    /// «Sair e trocar de conta»: confirma a troca quando o aparelho tem a sessão de outra pessoa.
+    #[serde(default)]
+    trocar: bool,
+    /// O token do widget «não sou um robô» (Cloudflare Turnstile), na entrada pela Internet.
+    #[serde(default)]
+    humano: Option<String>,
 }
 
 pub async fn login(st: &AppState, i: LoginIn) -> AppResult<Value> {
+    // antes de tudo, como no Claude: pela Internet, primeiro a verificação de humano (trava as tentativas automáticas)
+    super::humano::confirmar(st, i.humano.as_deref()).await?;
     let pol = politica(st).await?;
     let login = i.login.trim();
     let Some(row) = sqlx::query("SELECT * FROM utilizadores WHERE login = ?").bind(login).fetch_optional(&st.pool).await? else {
@@ -260,6 +270,8 @@ pub async fn login(st: &AppState, i: LoginIn) -> AppResult<Value> {
         registar(st, Some(id), login, "FALHA", Some("conta desactivada".into())).await;
         return Err(AppError::msg("Esta conta está desactivada. Fale com o administrador."));
     }
+    // antes do código de dois passos, para não o gastar numa volta que vai ser recusada
+    conta_diferente(st, id, login, i.trocar).await?;
     match super::dois_passos::no_login(st, &row, i.codigo.as_deref()).await? {
         super::dois_passos::NoLogin::Seguir => {}
         // senha certa: o ecrã pede o código e volta a entrar com ele
@@ -276,6 +288,31 @@ static FALHAS_PIN: FalhasPin = std::sync::Mutex::new(None);
 #[derive(Deserialize)]
 pub struct PinIn {
     pin: String,
+    #[serde(default)]
+    trocar: bool,
+}
+
+/// O início da mensagem de «Conta diferente» (o ecrã de entrada reconhece-a e mostra «Sair e trocar de conta»).
+pub const CONTA_DIFERENTE: &str = "Conta diferente: este aparelho tem a sessão de ";
+
+/// «Incompatibilidade de conta», como no Claude: este aparelho já tem a sessão de outra pessoa (por exemplo, noutra aba
+/// do mesmo browser, que partilha a ligação). Entrar com outra conta substituía-a sem ninguém saber; agora a troca tem
+/// de ser confirmada e fica na auditoria.
+async fn conta_diferente(st: &AppState, novo: i64, login: &str, trocar: bool) -> AppResult<()> {
+    // só nos postos e browsers ligados ao servidor: o programa no próprio computador tem uma janela e só mostra a
+    // entrada sem sessão, por isso aí não há troca silenciosa a evitar
+    if crate::state::contexto().is_none() {
+        return Ok(());
+    }
+    let Some(actual) = st.sessao_opcional() else { return Ok(()) };
+    if actual.id == novo {
+        return Ok(());
+    }
+    if !trocar {
+        return Err(AppError::msg(format!("{CONTA_DIFERENTE}{}.", actual.nome)));
+    }
+    registar(st, Some(novo), login, "CONTA_TROCADA", Some(format!("saiu {} ({}) deste aparelho", actual.nome, actual.login))).await;
+    Ok(())
 }
 
 /// Entrada só com o PIN (terminais POS), se a política o permitir.
@@ -317,6 +354,7 @@ pub async fn login_pin(st: &AppState, i: PinIn) -> AppResult<Value> {
     if let Some(m) = FALHAS_PIN.lock().unwrap().as_mut() {
         m.remove(&posto);
     }
+    conta_diferente(st, row.get("id"), &row.get::<String, _>("login"), i.trocar).await?;
     entrar(st, &row, "PIN").await
 }
 
@@ -407,7 +445,9 @@ pub async fn alterar_senha(st: &AppState, i: SenhaIn) -> AppResult<Value> {
         .bind(s.id)
         .execute(&st.pool)
         .await?;
-    registar(st, Some(s.id), &s.login, "SENHA", Some("alterada pelo próprio".into())).await;
+    // como no Claude: mudar a senha termina as sessões nos outros aparelhos
+    let terminadas = terminar_do_utilizador(st, s.id, Some(&id_actual()));
+    registar(st, Some(s.id), &s.login, "SENHA", Some(format!("alterada pelo próprio; {terminadas} outra(s) sessão(ões) terminada(s)"))).await;
     s.mudar_senha = false;
     st.definir_sessao(Some(s.clone()));
     Ok(serde_json::to_value(s)?)
@@ -812,8 +852,111 @@ pub async fn redefinir_senha(st: &AppState, i: IdUtilizadorIn) -> AppResult<Valu
         .bind(i.id)
         .execute(&st.pool)
         .await?;
-    registar(st, Some(i.id), &login, "SENHA_REDEFINIDA", Some(format!("por {}", quem.nome))).await;
+    // a senha nova só vale a partir daqui: as sessões abertas dessa pessoa terminam (menos a de quem redefine)
+    let actual = id_actual();
+    let terminadas = terminar_do_utilizador(st, i.id, (i.id == quem.id).then_some(actual.as_str()));
+    registar(st, Some(i.id), &login, "SENHA_REDEFINIDA", Some(format!("por {}; {terminadas} sessão(ões) terminada(s)", quem.nome))).await;
     Ok(json!({ "senha": senha, "login": login }))
+}
+
+// ============================== aparelhos com sessão ==============================
+
+/// O aparelho que fez este pedido: a ligação do posto ou browser, ou «local» (o próprio computador).
+fn id_actual() -> String {
+    crate::state::contexto().and_then(|c| c.ligacao).unwrap_or_else(|| "local".into())
+}
+
+/// Termina as sessões de um utilizador em todos os aparelhos, menos `excepto`. Devolve quantas terminou.
+fn terminar_do_utilizador(st: &AppState, id: i64, excepto: Option<&str>) -> usize {
+    let mut n = 0;
+    for x in crate::rede::sessoes_ligadas() {
+        if x.utilizador_id == id && excepto != Some(x.id.as_str()) && crate::rede::terminar_ligacao(&x.id).is_some() {
+            n += 1;
+        }
+    }
+    if excepto != Some("local") {
+        let mut local = st.sessao.lock().unwrap();
+        if local.as_ref().is_some_and(|x| x.id == id) {
+            *local = None;
+            *st.entrada_local.lock().unwrap() = None;
+            n += 1;
+        }
+    }
+    n
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct SessoesIn {
+    /// as de toda a gente (precisa de «Utilizadores»)
+    todos: bool,
+}
+
+/// Onde há sessão iniciada, como em «Onde você fez login» do Claude: este computador e cada posto ou browser ligado
+/// ao servidor, com o aparelho, o local aproximado, a entrada e a última actividade. O aparelho de quem pede vem
+/// marcado como actual.
+pub async fn sessoes(st: &AppState, i: SessoesIn) -> AppResult<Value> {
+    let s = if i.todos { st.exigir_perm("sistema.utilizadores")? } else { st.sessao()? };
+    let actual = id_actual();
+    let mut lista: Vec<Value> = crate::rede::sessoes_ligadas()
+        .into_iter()
+        .filter(|x| i.todos || x.utilizador_id == s.id)
+        .map(|x| {
+            let eu = x.id == actual;
+            let mut v = serde_json::to_value(x).unwrap_or_default();
+            v["actual"] = json!(eu);
+            v
+        })
+        .collect();
+    let local = st.sessao.lock().unwrap().clone();
+    if let Some(local) = local.filter(|l| i.todos || l.id == s.id) {
+        lista.push(json!({
+            "id": "local", "utilizador_id": local.id, "utilizador": local.nome, "aparelho": "Este computador (servidor)",
+            "posto": "", "local": "No próprio computador", "endereco": "", "entrada": st.entrada_local.lock().unwrap().clone(),
+            "ultimo": Value::Null, "pela_internet": false, "actual": actual == "local",
+        }));
+    }
+    lista.sort_by(|a, b| {
+        b["actual"].as_bool().cmp(&a["actual"].as_bool()).then_with(|| b["ultimo"].as_str().cmp(&a["ultimo"].as_str()))
+    });
+    Ok(json!({ "sessoes": lista }))
+}
+
+#[derive(Deserialize)]
+pub struct TerminarSessaoIn {
+    id: String,
+}
+
+/// Termina a sessão de um aparelho: a do próprio ou, com «Utilizadores», a de qualquer pessoa.
+pub async fn terminar_sessao(st: &AppState, i: TerminarSessaoIn) -> AppResult<Value> {
+    let s = st.sessao()?;
+    let dono = if i.id == "local" {
+        st.sessao.lock().unwrap().as_ref().map(|x| x.id)
+    } else {
+        crate::rede::sessoes_ligadas().into_iter().find(|x| x.id == i.id).map(|x| x.utilizador_id)
+    };
+    let dono = dono.ok_or_else(|| AppError::msg("Esta sessão já terminou."))?;
+    if dono != s.id {
+        st.exigir_perm("sistema.utilizadores")?;
+    }
+    if i.id == "local" {
+        *st.sessao.lock().unwrap() = None;
+        *st.entrada_local.lock().unwrap() = None;
+    } else {
+        crate::rede::terminar_ligacao(&i.id);
+    }
+    registar(st, Some(dono), &s.login, "SESSAO_TERMINADA", Some(format!("aparelho {} terminado por {}", i.id, s.nome))).await;
+    Ok(json!({ "actual": i.id == id_actual() }))
+}
+
+/// «Sair em todos os aparelhos»: termina as outras sessões do próprio; fica só a deste aparelho.
+pub async fn terminar_outras(st: &AppState) -> AppResult<Value> {
+    let s = st.sessao()?;
+    let n = terminar_do_utilizador(st, s.id, Some(&id_actual()));
+    if n > 0 {
+        registar(st, Some(s.id), &s.login, "SESSOES_TERMINADAS", Some(format!("{n} aparelho(s)"))).await;
+    }
+    Ok(json!({ "terminadas": n }))
 }
 
 /// Levanta o bloqueio por tentativas falhadas.

@@ -16,6 +16,7 @@ const env = {
     ? readFileSync(process.env.KANGEST_CHAVE_SERVIDOR, "utf8")
     : generateKeyPairSync("ed25519").privateKey.export({ format: "pem", type: "pkcs8" }),
   ADMIN_TOKEN: process.env.ADMIN_TOKEN ?? "teste-local-".padEnd(32, "x"),
+  ADMIN_ORIGENS: process.env.ADMIN_ORIGENS,
 };
 
 createServer(async (req, res) => {

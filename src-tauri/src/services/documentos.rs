@@ -794,6 +794,16 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     if tipo.conta_corrente == 1 && entidade_id == Some(1) {
         return Err(AppError::msg(format!("{} a crédito exige um cliente identificado (não Consumidor Final).", tipo.descricao)));
     }
+    // vendedor habitual do cliente: nas vendas que não indicam outro (POS, facturas, avenças, API)
+    let vendedor_id = match (vendedor_id, entidade_id) {
+        (None, Some(id)) if tipo.grupo == "VENDAS" && id != 1 => sqlx::query_scalar::<_, i64>(
+            "SELECT e.vendedor_id FROM entidades e JOIN funcionarios f ON f.id = e.vendedor_id AND f.ativo = 1 WHERE e.id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?,
+        (v, _) => v,
+    };
     if adiantamento && entidade_id == Some(1) {
         return Err(AppError::msg("Identifique o cliente do adiantamento (não Consumidor Final)."));
     }

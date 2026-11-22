@@ -192,6 +192,8 @@ export interface Entidade {
   ativo?: number;
   /** retenção na fonte habitual (código da tabela de retenções): vem escolhida nas facturas e nos recibos */
   retencao?: string | null;
+  /** vendedor habitual (funcionário): entra nas vendas que não indicam outro */
+  vendedor_id?: number | null;
   /** dados pessoais e de contacto */
   pessoa_contacto?: string | null;
   telefone2?: string | null;
@@ -421,7 +423,7 @@ export interface CaixaResumo {
   total_vendido: number | null;
   entradas: number;
   saidas: number;
-  movimentos: { id: number; data_hora: string; tipo: string; valor: number; descricao: string; rubrica: string | null; modo_codigo: string | null }[];
+  movimentos: { id: number; data_hora: string; tipo: string; valor: number; descricao: string; rubrica: string | null; modo_codigo: string | null; beneficiario?: string | null }[];
   artigos: { referencia: string; descricao: string; quantidade: number; total: number }[];
   numerario_esperado: number | null;
   /** numerário recebido noutras moedas (fica na gaveta nessas moedas): valor em cêntimos da moeda, kz = equivalente */

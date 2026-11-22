@@ -18,6 +18,8 @@ const OBRIGATORIO = "Este campo é obrigatório";
 
 export interface PoliticaPublica {
   login_pin: boolean;
+  /** pela Internet, num endereço do KanGest: a chave do widget «não sou um robô» (Cloudflare Turnstile) */
+  humano?: string | null;
   senha_min: number;
   inatividade_min: number;
 }

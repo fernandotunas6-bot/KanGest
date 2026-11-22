@@ -17,7 +17,7 @@ site-fonte/
 Marcadores: {{config.a.b}} (valor do config.json), {{icone:nome}}, {{url_pagina:nome}}.
 A pasta site/ é apagada e gerada de novo (fica o .nojekyll); é essa que se publica (Cloudflare e GitHub Pages).
 """
-import datetime, hashlib, json, re, shutil
+import datetime, hashlib, json, re, shutil, sys
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -179,7 +179,17 @@ def main():
     hoje = datetime.date.today().isoformat()
     urls = "\n".join(f"  <url><loc>{url_de(cfg, p)}</loc><lastmod>{hoje}</lastmod></url>" for p in paginas)
     (SAIDA / "sitemap.xml").write_text(f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}\n</urlset>\n')
-    (SAIDA / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {cfg['site']}/sitemap.xml\n")
+    # Área do produtor (admin.html): o painel do servidor de licenças (servidor-licencas/src/painel.html), a falar com ele
+    # pela internet. A chave de administração escreve-se na página e fica só na sessão do browser; o servidor só aceita
+    # o site nas origens de ADMIN_ORIGENS. Fora do sitemap e dos motores de busca.
+    painel = (RAIZ / "servidor-licencas" / "src" / "painel.html").read_text()
+    marca = 'const API = "" /* KG_API */;'
+    if marca not in painel:
+        sys.exit("servidor-licencas/src/painel.html: falta a marca do endereço da API (const API = \"\" /* KG_API */;)")
+    admin = painel.replace(marca, f"const API = {json.dumps(cfg['web']['licencas'].rstrip('/'))};")
+    (SAIDA / "admin.html").write_text(admin)
+    scripts_em_linha.update(re.findall(r"<script>(.*?)</script>", admin, flags=re.S))
+    (SAIDA / "robots.txt").write_text(f"User-agent: *\nAllow: /\nDisallow: /admin.html\nSitemap: {cfg['site']}/sitemap.xml\n")
     (SAIDA / "_headers").write_text(cabecalhos(scripts_em_linha, cfg["site"], cfg["web"]["licencas"]))
     print(f"Site gerado em {SAIDA.relative_to(RAIZ)}/: {len(paginas)} páginas + 404, sitemap e robots ({versao_ficheiros}).")
 

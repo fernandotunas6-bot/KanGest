@@ -15,6 +15,8 @@ mod contas;
 mod documentos;
 mod entidades;
 mod escola;
+mod humano;
+mod tv;
 pub mod fe;
 pub(crate) mod impressao;
 pub mod importar;
@@ -120,6 +122,9 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
     if let Some(resto) = metodo.strip_prefix("escola.") {
         return Box::pin(escola::despachar(st, resto, params)).await;
     }
+    if let Some(resto) = metodo.strip_prefix("tv.") {
+        return Box::pin(tv::despachar(st, resto, params)).await;
+    }
     if let Some(resto) = metodo.strip_prefix("fotos.") {
         return Box::pin(async move {
             match resto {
@@ -166,6 +171,9 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "auditoria.historico" => auditoria::historico(st, p(params)?).await,
         "auditoria.verificar" => auditoria::verificar(st).await,
         "auth.alterarSenha" => auth::alterar_senha(st, p(params)?).await,
+        "auth.sessoes" => auth::sessoes(st, if params.is_null() { auth::SessoesIn::default() } else { p(params)? }).await,
+        "auth.terminarSessao" => auth::terminar_sessao(st, p(params)?).await,
+        "auth.terminarOutras" => auth::terminar_outras(st).await,
         "auth.autorizar" => auth::autorizar(st, p(params)?).await,
         "empresa.obter" => setup::empresa_obter(st).await,
         "empresa.guardar" => setup::empresa_guardar(st, p(params)?).await,
@@ -349,6 +357,7 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "caixa.sessoes" => caixa::sessoes(st).await,
         "caixa.abrir" => caixa::abrir(st, p(params)?).await,
         "caixa.movimento" => caixa::movimento(st, p(params)?).await,
+        "caixa.movimentoObter" => caixa::movimento_obter(st, p(params)?).await,
         "caixa.fechar" => caixa::fechar(st, p(params)?).await,
 
         // ---- recursos humanos ----

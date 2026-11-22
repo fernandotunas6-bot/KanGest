@@ -555,6 +555,20 @@ pub(crate) async fn credenciais(st: &AppState) -> AppResult<Value> {
 }
 
 /// POST ao servidor de licenças. Os erros que o servidor explica passam ao utilizador tal como vêm.
+/// GET ao servidor de licenças (ex.: a chave pública da verificação de humano). Nos testes não se vai à rede.
+#[cfg_attr(test, allow(dead_code))]
+pub(crate) async fn obter_servidor(caminho: &str) -> AppResult<Value> {
+    let url = format!("{}{caminho}", servidor());
+    let r = tokio::task::spawn_blocking(move || http::pedido("GET", &url, &[("Accept", "application/json".into())], None, std::time::Duration::from_secs(10)))
+        .await
+        .map_err(|e| AppError::msg(e.to_string()))?
+        .map_err(|_| AppError::msg("Sem ligação ao servidor de licenças."))?;
+    if r.estado >= 400 {
+        return Err(AppError::msg(format!("O servidor de licenças respondeu {}.", r.estado)));
+    }
+    serde_json::from_slice(&r.corpo).map_err(|_| AppError::msg("O servidor de licenças deu uma resposta inesperada."))
+}
+
 pub(crate) async fn chamar_servidor(caminho: &str, corpo: Value) -> AppResult<Value> {
     let url = format!("{}{caminho}", servidor());
     let dados = serde_json::to_vec(&corpo)?;
@@ -682,10 +696,27 @@ pub async fn sincronizar(st: &AppState, i: SincronizarIn) -> AppResult<Value> {
     }
     let (_, nif) = dados_empresa(st).await?;
     let segredo = segredo_maquina(st).await;
-    let v = chamar_servidor("/v1/renovar", json!({ "nif": nif, "maquina": id_maquina(), "versao": env!("CARGO_PKG_VERSION"), "segredo": segredo })).await?;
+    let estado = estado_instalacao(st, &antes).await?;
+    let v = chamar_servidor("/v1/renovar", json!({ "nif": nif, "maquina": id_maquina(), "versao": env!("CARGO_PKG_VERSION"), "segredo": segredo, "estado": estado })).await?;
     cfg_gravar(&st.pool, "licenca.sincronizada_em", &db::agora()).await?;
     let mudou = aplicar(st, &v, Some(s.id)).await?;
     Ok(json!({ "mudou": mudou, "mensagem": v.get("mensagem"), "estado": calcular(st).await? }))
+}
+
+/// O que vai ao servidor de licenças em cada verificação, para a área do produtor: modo de gestão, licença como este
+/// computador a vê e a data das cópias de segurança. Só datas e indicadores; nunca caminhos, nomes de ficheiros nem dados
+/// da empresa.
+pub(crate) async fn estado_instalacao(st: &AppState, lic: &Estado) -> AppResult<Value> {
+    let cfg = |k: &'static str| async move { cfg_ler(&st.pool, k).await.map(|v| v.filter(|x| !x.trim().is_empty())) };
+    Ok(json!({
+        "modo": super::modos::modo(&st.pool).await?,
+        "licenca": { "estado": lic.modo, "fim": lic.fim },
+        "copias": {
+            "ultima": cfg("copias.ultima").await?,
+            "ultima_externa": cfg("copias.ultima_externa").await?,
+            "erro_externa": cfg("copias.erro_externa").await?.is_some(),
+        },
+    }))
 }
 
 #[derive(Deserialize)]

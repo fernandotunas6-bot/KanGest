@@ -210,7 +210,8 @@ export function Interruptor({ ligado, onChange, rotulo, dica }: { ligado: boolea
     <button type="button" role="switch" aria-checked={ligado} onClick={() => onChange(!ligado)} title={dica} className="inline-flex items-center gap-2.5 text-[14px] text-ink">
       {rotulo}
       <span className={cn("relative h-5 w-9 rounded-full transition-colors", ligado ? "bg-brand" : "bg-line-strong")}>
-        <span className={cn("absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform", ligado ? "translate-x-[18px]" : "translate-x-0.5")} />
+        {/* `left-0` fixo: sem ele a bolinha ficava na posição «estática» (18 px para dentro) e, ligada, saía da pista */}
+        <span className={cn("absolute left-0 top-0.5 size-4 rounded-full bg-white shadow transition-transform", ligado ? "translate-x-[18px]" : "translate-x-0.5")} />
       </span>
     </button>
   );

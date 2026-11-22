@@ -4836,8 +4836,20 @@ async fn acesso_pela_internet_por_subdominio() {
     rpc(&arc, "licenca.confirmar", json!({ "codigo": "123456" })).await;
     let guardado: String = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'licenca.segredo'").fetch_one(&arc.pool).await.unwrap();
     assert!(guardado.starts_with("kgs1:") && !guardado.contains("segredo-do-computador"), "{guardado}");
+    sqlx::query("INSERT INTO config (chave, valor) VALUES ('copias.ultima', '2026-11-20T18:02:11'), ('copias.erro_externa', '2026-11-21T09:00:00 — a pasta externa /Volumes/PEN não está acessível')")
+        .execute(&arc.pool)
+        .await
+        .unwrap();
     rpc(&arc, "licenca.sincronizar", json!({ "forcar": true })).await;
-    assert_eq!(corpo("/v1/renovar").unwrap()["segredo"], "segredo-do-computador-1234");
+    let renovar = corpo("/v1/renovar").unwrap();
+    assert_eq!(renovar["segredo"], "segredo-do-computador-1234");
+    // o estado da instalação vai para a área do produtor: só datas e indicadores, nunca caminhos
+    assert_eq!(renovar["estado"]["modo"], "loja");
+    assert!(renovar["estado"]["licenca"]["estado"].is_string());
+    assert_eq!(renovar["estado"]["copias"]["ultima"], "2026-11-20T18:02:11");
+    assert_eq!(renovar["estado"]["copias"]["ultima_externa"], Value::Null);
+    assert_eq!(renovar["estado"]["copias"]["erro_externa"], true);
+    assert!(!renovar["estado"].to_string().contains("/Volumes"), "o erro da cópia externa não leva o caminho: {}", renovar["estado"]);
 
     // activar: pede o endereço com o segredo e a porta do servidor; o token fica cifrado e o túnel liga-se
     let e = rpc(&arc, "web.activar", json!({ "nome": " Kianda " })).await;
@@ -4957,7 +4969,7 @@ async fn verificacao_em_dois_passos() {
     nova["login_pin"] = json!(true);
     rpc(&st, "seguranca.guardar", nova).await;
     let pela_internet = |metodo: &'static str, params: Value| {
-        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true };
+        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true, ligacao: None };
         CONTEXTO.scope(ctx, super::dispatch(&st, metodo, params))
     };
     let e = pela_internet("auth.login", json!({ "login": "ana", "senha": "ana12345" })).await.unwrap_err().to_string();
@@ -5043,7 +5055,7 @@ async fn recuperar_a_senha_com_dois_passos() {
 
     // pela Internet (túnel) não se recupera
     let pela_internet = |metodo: &'static str, params: Value| {
-        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true };
+        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true, ligacao: None };
         CONTEXTO.scope(ctx, super::dispatch(&st, metodo, params))
     };
     let e = pela_internet("auth.recuperarVerificar", verificar("admin", &recuperacao[2])).await.unwrap_err().to_string();
@@ -5649,6 +5661,202 @@ async fn tops_do_painel() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// «A sua atenção» avisa quando uma integração deixa de sincronizar: uma chave usada com regularidade sem contacto
+/// há mais de 3 horas, ou um webhook com 3 falhas seguidas. Uma chave nova (poucos pedidos) ou revogada não conta.
+#[tokio::test]
+async fn aviso_de_integracao_parada() {
+    let (st, pasta) = base_com_admin("integracao-parada").await;
+    let st_ = &st;
+    let paradas = move || async move { rpc(st_, "dashboard", json!({})).await["alertas"]["integracoes_paradas"].as_i64().unwrap() };
+    assert_eq!(paradas().await, 0);
+    let chave = |nome: &'static str, prefixo: &'static str, pedidos: i64, horas: i64, revogada: bool| {
+        let pool = st.pool.clone();
+        async move {
+            sqlx::query(
+                "INSERT INTO api_chaves (nome, prefixo, hash, utilizador_id, pedidos, ultimo_uso, revogada_em)
+                 VALUES (?, ?, 'x', 1, ?, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', ? || ' hours'), ?)",
+            )
+            .bind(nome).bind(prefixo).bind(pedidos).bind(format!("-{horas}")).bind(revogada.then_some("2026-01-01"))
+            .execute(&pool).await.unwrap();
+        }
+    };
+    chave("Loja online", "kg_a", 500, 1, false).await; // a sincronizar
+    chave("Teste", "kg_b", 3, 48, false).await; // poucos pedidos: não é uma ligação regular
+    chave("Antiga", "kg_c", 900, 48, true).await; // revogada
+    assert_eq!(paradas().await, 0);
+    chave("Contabilidade", "kg_d", 120, 5, false).await; // parada há 5 horas
+    assert_eq!(paradas().await, 1);
+    sqlx::query("INSERT INTO api_webhooks (nome, url, segredo, falhas_seguidas) VALUES ('Livraria', 'https://x.invalid', 's', 3)")
+        .execute(&st.pool).await.unwrap();
+    assert_eq!(paradas().await, 2);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// «Aparelhos com sessão» (como no Claude): este computador e os postos ou browsers ligados, com o aparelho e o local;
+/// terminar uma, «sair em todos os aparelhos» e mudar a senha (que termina as outras). O token nunca sai.
+#[tokio::test]
+async fn aparelhos_com_sessao() {
+    use crate::rede::{descrever_aparelho, id_ligacao, ligar_para_teste, sessoes_ligadas, terminar_ligacao};
+    let mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
+    assert_eq!(descrever_aparelho(Some(mac), ""), "Chrome (Mac OS X)");
+    assert_eq!(
+        descrever_aparelho(Some("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"), ""),
+        "Safari (iPhone)"
+    );
+    assert_eq!(descrever_aparelho(Some("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 Edg/131.0"), ""), "Edge (Windows)");
+    assert_eq!(descrever_aparelho(None, "Caixa 2"), "Programa KanGest (Caixa 2)");
+
+    let (st, pasta) = base_com_admin("aparelhos").await;
+    let admin = st.sessao().unwrap();
+    let mut outro = admin.clone();
+    outro.id = 999_001;
+    outro.nome = "Outra Pessoa".into();
+    let pref = format!("teste-aparelhos-{}", std::process::id());
+    let (ta, tb, tc) = (format!("{pref}-a"), format!("{pref}-b"), format!("{pref}-c"));
+    ligar_para_teste(&ta, Some(admin.clone()), Some(mac), "", "Lubango, Huíla, AO", true);
+    ligar_para_teste(&tb, Some(admin.clone()), None, "Caixa 2", "Rede da loja", false);
+    ligar_para_teste(&tc, Some(outro), None, "Caixa 3", "Rede da loja", false);
+    let lista = |v: Value| v["sessoes"].as_array().unwrap().clone();
+    let ids = |l: &[Value]| l.iter().filter_map(|x| x["id"].as_str().map(String::from)).collect::<Vec<_>>();
+
+    let minhas = lista(rpc(&st, "auth.sessoes", json!({})).await);
+    let ver = ids(&minhas);
+    assert!(ver.contains(&"local".to_string()) && ver.contains(&id_ligacao(&ta)) && ver.contains(&id_ligacao(&tb)), "{ver:?}");
+    assert!(!ver.contains(&id_ligacao(&tc)), "as sessões de outra pessoa não aparecem");
+    assert_eq!((minhas[0]["id"].as_str(), minhas[0]["actual"].as_bool()), (Some("local"), Some(true)), "este aparelho vem primeiro");
+    assert!(minhas[0]["entrada"].is_string(), "a hora de entrada deste computador");
+    let a = minhas.iter().find(|x| x["id"] == id_ligacao(&ta)).unwrap();
+    assert_eq!((a["aparelho"].as_str(), a["local"].as_str(), a["pela_internet"].as_bool()), (Some("Chrome (Mac OS X)"), Some("Lubango, Huíla, AO"), Some(true)));
+    assert!(!serde_json::to_string(&minhas).unwrap().contains(&pref), "o token das ligações nunca sai");
+    assert!(ids(&lista(rpc(&st, "auth.sessoes", json!({ "todos": true })).await)).contains(&id_ligacao(&tc)), "com «Utilizadores», as de toda a gente");
+
+    // terminar uma
+    rpc(&st, "auth.terminarSessao", json!({ "id": id_ligacao(&ta) })).await;
+    assert!(!ids(&lista(rpc(&st, "auth.sessoes", json!({})).await)).contains(&id_ligacao(&ta)));
+    assert!(rpc_err(&st, "auth.terminarSessao", json!({ "id": id_ligacao(&ta) })).await.contains("já terminou"));
+
+    // sair em todos os aparelhos: fica só este computador; a sessão de outra pessoa não se mexe
+    assert_eq!(rpc(&st, "auth.terminarOutras", json!({})).await["terminadas"], 1);
+    assert_eq!(lista(rpc(&st, "auth.sessoes", json!({})).await).len(), 1);
+    assert!(sessoes_ligadas().iter().any(|x| x.id == id_ligacao(&tc)));
+
+    // mudar a senha termina as sessões nos outros aparelhos
+    ligar_para_teste(&tb, Some(admin.clone()), None, "Caixa 2", "Rede da loja", false);
+    rpc(&st, "auth.alterarSenha", json!({ "atual": "1234", "nova": "Nova-senha-2026" })).await;
+    assert!(!sessoes_ligadas().iter().any(|x| x.id == id_ligacao(&tb)), "a senha mudou: o Caixa 2 volta ao ecrã de entrada");
+    assert!(st.sessao().is_ok(), "este aparelho continua com sessão");
+
+    terminar_ligacao(&id_ligacao(&tc));
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// «Conta diferente» (como no Claude): com a sessão de uma pessoa no aparelho, entrar com outra conta pede a troca
+/// explícita, antes do código de dois passos; confirmada, fica na auditoria. A mesma pessoa entra sem perguntas.
+#[tokio::test]
+async fn conta_diferente_pede_troca() {
+    use crate::state::{Contexto, CONTEXTO};
+    let (st, pasta) = base_com_admin("conta-diferente").await;
+    rpc(&st, "utilizadores.guardar", json!({ "nome": "Maria Caixa", "login": "maria", "perfil": "CAIXA", "senha": "Maria-2026", "mudar_senha": false })).await;
+    // um browser ligado ao servidor com a sessão do admin (as abas partilham-na); a Maria tenta entrar noutra aba
+    let sessao = std::sync::Arc::new(std::sync::Mutex::new(Some(st.sessao().unwrap())));
+    let no_browser = |metodo: &'static str, params: Value| {
+        let ctx = Contexto { sessao: sessao.clone(), posto: st.posto(), api_chave: None, pela_internet: false, ligacao: Some("browser-1".into()) };
+        CONTEXTO.scope(ctx, super::dispatch(&st, metodo, params))
+    };
+    let erro = no_browser("auth.login", json!({ "login": "maria", "senha": "Maria-2026" })).await.unwrap_err().to_string();
+    assert!(erro.starts_with("Conta diferente: este aparelho tem a sessão de Admin"), "{erro}");
+    assert_eq!(sessao.lock().unwrap().as_ref().unwrap().login, "admin", "sem confirmar, nada muda");
+    // senha errada não revela a sessão de ninguém
+    assert!(!no_browser("auth.login", json!({ "login": "maria", "senha": "errada" })).await.unwrap_err().to_string().contains("Conta diferente"));
+    // confirmada a troca
+    no_browser("auth.login", json!({ "login": "maria", "senha": "Maria-2026", "trocar": true })).await.unwrap();
+    assert_eq!(sessao.lock().unwrap().as_ref().unwrap().login, "maria");
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM acessos WHERE evento = 'CONTA_TROCADA'").fetch_one(&st.pool).await.unwrap();
+    assert_eq!(n, 1, "a troca fica registada");
+    // a mesma pessoa volta a entrar sem perguntas; no próprio computador (sem ligação) não se pergunta
+    no_browser("auth.login", json!({ "login": "maria", "senha": "Maria-2026" })).await.unwrap();
+    rpc(&st, "auth.login", json!({ "login": "maria", "senha": "Maria-2026" })).await;
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Verificação de humano (como no Claude): pela Internet, num endereço do KanGest, a entrada pede o widget do Cloudflare
+/// antes da senha; na loja não. Confirmado, o aparelho não volta a pedir durante 10 minutos (o token só se usa uma vez).
+#[tokio::test]
+async fn verificacao_de_humano_pela_internet() {
+    use crate::state::{Contexto, CONTEXTO};
+    let (st, pasta) = base_com_admin("humano").await;
+    sqlx::query("UPDATE empresa SET nome = 'Humano Teste, Lda' WHERE id = 1").execute(&st.pool).await.unwrap();
+    let definir = |resposta: bool| super::humano::TESTE.lock().unwrap().get_or_insert_with(Default::default).insert("Humano Teste, Lda".into(), (Some("0x4AAA-site".into()), resposta));
+    definir(false);
+    let pela_internet = |aparelho: &'static str, metodo: &'static str, params: Value| {
+        let ctx = Contexto { sessao: std::sync::Arc::new(std::sync::Mutex::new(None)), posto: st.posto(), api_chave: None, pela_internet: true, ligacao: Some(aparelho.into()) };
+        CONTEXTO.scope(ctx, super::dispatch(&st, metodo, params))
+    };
+    // na loja não se pede
+    assert_eq!(rpc(&st, "seguranca.politica", json!({})).await["humano"], Value::Null);
+    // pela Internet: a chave vai para o ecrã; sem token, ou com um que não vale, a entrada não chega à senha
+    assert_eq!(pela_internet("h-1", "seguranca.politica", json!({})).await.unwrap()["humano"], "0x4AAA-site");
+    let e = pela_internet("h-1", "auth.login", json!({ "login": "admin", "senha": "1234" })).await.unwrap_err().to_string();
+    assert!(e.contains("não é um robô"), "{e}");
+    let e = pela_internet("h-1", "auth.login", json!({ "login": "admin", "senha": "errada", "humano": "tok-mau" })).await.unwrap_err().to_string();
+    assert!(e.contains("não é um robô"), "recusado antes da senha: {e}");
+    // com o token certo entra; o mesmo aparelho, logo a seguir, não precisa de outro
+    definir(true);
+    let e = pela_internet("h-1", "auth.login", json!({ "login": "admin", "senha": "errada", "humano": "tok-bom" })).await.unwrap_err().to_string();
+    assert!(e.contains("incorrect"), "passou a verificação e chegou à senha: {e}");
+    definir(false);
+    pela_internet("h-1", "auth.login", json!({ "login": "admin", "senha": "1234" })).await.unwrap();
+    // outro aparelho precisa da sua
+    let e = pela_internet("h-2", "auth.login", json!({ "login": "admin", "senha": "1234" })).await.unwrap_err().to_string();
+    assert!(e.contains("não é um robô"), "{e}");
+    super::humano::TESTE.lock().unwrap().as_mut().unwrap().remove("Humano Teste, Lda");
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Modo TV: vendas de hoje e do mês, hora a hora, a loja contra a meta, as últimas vendas sem nomes de clientes e os
+/// artigos mais vendidos; as metas só se guardam com «Empresa e rede» e para lojas que existem.
+#[tokio::test]
+async fn modo_tv() {
+    let (st, pasta) = base_com_admin("tv").await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let agua = rpc(&st, "artigos.guardar", json!({ "descricao": "Água", "taxa_iva_id": 1, "preco1": 10000, "tipo": "S" })).await["id"].as_i64().unwrap();
+    let mesa = rpc(&st, "artigos.guardar", json!({ "descricao": "Mesa", "taxa_iva_id": 1, "preco1": 500000, "tipo": "S" })).await["id"].as_i64().unwrap();
+    let cli = rpc(&st, "entidades.guardar", json!({ "nome": "Escola Kianda", "nif": "5417000123" })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": agua, "quantidade": 10 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": mesa, "quantidade": 1 }] })).await;
+    let loja: i64 = sqlx::query_scalar("SELECT MIN(id) FROM armazens").fetch_one(&st.pool).await.unwrap();
+
+    // metas: só lojas que existem e valores válidos
+    assert!(rpc_err(&st, "tv.metasGuardar", json!({ "metas": { "999": 100 } })).await.contains("Loja inválida"));
+    assert!(rpc_err(&st, "tv.metasGuardar", json!({ "metas": { loja.to_string(): -5 } })).await.contains("meta"));
+    rpc(&st, "tv.metasGuardar", json!({ "metas": { loja.to_string(): 6_840_000 } })).await;
+    assert_eq!(rpc(&st, "tv.metas", json!({})).await["lojas"][0]["meta"], 6_840_000);
+
+    let t = rpc(&st, "tv.painel", json!({})).await;
+    let total = 114000 + 570000;
+    assert_eq!(t["hoje"]["total"], total);
+    assert_eq!(t["mes"]["total"], total);
+    assert_eq!(t["mes"]["meta"], 6_840_000);
+    assert_eq!(t["mes"]["percentagem"], 10.0);
+    let horas: i64 = t["horas"].as_array().unwrap().iter().map(|h| h["hoje"].as_i64().unwrap()).sum();
+    assert_eq!(horas, total, "hora a hora soma o dia");
+    let l = &t["lojas"][0];
+    assert_eq!((l["id"].as_i64(), l["mes"].as_i64(), l["percentagem"].as_f64()), (Some(loja), Some(total), Some(10.0)));
+    assert_eq!(t["ultimas"].as_array().unwrap().len(), 2);
+    assert_eq!(t["ultimas"][0]["artigo"], "Mesa");
+    assert!(!t["ultimas"].to_string().contains("Kianda"), "na TV não aparecem nomes de clientes");
+    assert_eq!(t["top"][0]["descricao"], "Mesa");
+    // tirar a meta (0) deixa a loja sem percentagem
+    rpc(&st, "tv.metasGuardar", json!({ "metas": { loja.to_string(): 0 } })).await;
+    assert_eq!(rpc(&st, "tv.painel", json!({})).await["lojas"][0]["percentagem"], Value::Null);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 /// referência, tipo, motivo de isenção, % IVA, preço, PVP, controla stock, unidade
 type ArtigoBaseLido = (String, String, Option<String>, f64, i64, i64, i64, String);
 
@@ -5854,6 +6062,79 @@ async fn escola_propinas_e_devedores() {
     rpc(&st, "escola.turmaApagar", json!({ "id": t9 })).await;
     let audit: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auditoria WHERE acao = 'ESCOLA'").fetch_one(&st.pool).await.unwrap();
     assert!(audit >= 8);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Vale de caixa: saída com várias linhas, a quem se entregou e quem registou; o caixa desconta o total.
+#[tokio::test]
+async fn vale_de_caixa_com_linhas() {
+    let (st, pasta) = base_com_admin("vale-caixa").await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 2000000 })).await;
+    // à moda antiga (uma linha) continua a funcionar
+    let r = rpc(&st, "caixa.movimento", json!({ "tipo": "ENTRADA", "valor": 500000, "descricao": "Reforço de trocos" })).await;
+    assert!(r["movimento_id"].as_i64().is_some());
+    // vale com linhas: o total é a soma; a rubrica comum fica no movimento
+    let r = rpc(&st, "caixa.movimento", json!({ "tipo": "SAIDA", "modo": "NU", "beneficiario": "João Motorista", "linhas": [
+        { "descricao": "Combustível", "rubrica": "Viatura", "valor": 1500000 },
+        { "descricao": "Portagem", "rubrica": "Viatura", "valor": 200000 },
+    ] })).await;
+    let id = r["movimento_id"].as_i64().unwrap();
+    assert_eq!((r["entradas"].as_i64(), r["saidas"].as_i64()), (Some(500000), Some(1700000)));
+    assert_eq!(r["numerario_esperado"], 2000000 + 500000 - 1700000);
+    let v = rpc(&st, "caixa.movimentoObter", json!({ "id": id })).await;
+    assert_eq!((v["valor"].as_i64(), v["descricao"].as_str(), v["rubrica"].as_str()), (Some(1700000), Some("Combustível e mais 1"), Some("Viatura")));
+    assert_eq!((v["beneficiario"].as_str(), v["utilizador"].as_str(), v["modo"].as_str()), (Some("João Motorista"), Some("Admin"), Some("Numerário")));
+    assert_eq!(v["linhas"].as_array().unwrap().len(), 2);
+    assert_eq!(v["linhas"][1]["valor"], 200000);
+    // rubricas diferentes: sem rubrica comum
+    let r = rpc(&st, "caixa.movimento", json!({ "tipo": "SAIDA", "descricao": "Despesas do dia", "linhas": [
+        { "descricao": "Água", "rubrica": "Limpeza", "valor": 100000 }, { "descricao": "Pão", "valor": 50000 } ] })).await;
+    let v = rpc(&st, "caixa.movimentoObter", json!({ "id": r["movimento_id"] })).await;
+    assert_eq!((v["descricao"].as_str(), v["rubrica"].is_null()), (Some("Despesas do dia"), true));
+    // recusas
+    assert!(rpc_err(&st, "caixa.movimento", json!({ "tipo": "SAIDA", "linhas": [{ "descricao": "Sem valor", "valor": 0 }] })).await.contains("descrição e de um valor"));
+    let muitas: Vec<Value> = (0..31).map(|i| json!({ "descricao": format!("L{i}"), "valor": 100 })).collect();
+    assert!(rpc_err(&st, "caixa.movimento", json!({ "tipo": "SAIDA", "linhas": muitas })).await.contains("30 linhas"));
+    assert!(rpc_err(&st, "caixa.movimento", json!({ "tipo": "SAIDA", "valor": 0, "descricao": "x" })).await.contains("valor"));
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Vendedor habitual do cliente: entra nas vendas que não indicam outro; o indicado prevalece; 0 tira.
+#[tokio::test]
+async fn vendedor_habitual_do_cliente() {
+    let (st, pasta) = base_com_admin("vendedor-habitual").await;
+    let ana = rpc(&st, "rh.funcionarioGuardar", json!({ "nome": "Ana Vendedora", "salario_base": 20000000 })).await["id"].as_i64().unwrap();
+    let rui = rpc(&st, "rh.funcionarioGuardar", json!({ "nome": "Rui Vendedor", "salario_base": 20000000 })).await["id"].as_i64().unwrap();
+    assert!(rpc_err(&st, "entidades.guardar", json!({ "nome": "Cliente X", "vendedor_id": 999 })).await.contains("funcionário activo"));
+    let cli = rpc(&st, "entidades.guardar", json!({ "nome": "Hotel Baía", "nif": "5417002211", "vendedor_id": ana })).await["id"].as_i64().unwrap();
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": cli })).await["vendedor_id"], ana);
+    let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Serviço", "tipo": "S", "taxa_iva_id": 1, "preco1": 100000 })).await["id"].as_i64().unwrap();
+    let vendedor_do = |doc: &Value| doc["documento"]["id"].as_i64().unwrap();
+    let ft = |vendedor: Option<i64>| {
+        let st = &st;
+        async move {
+            let mut p = json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 1 }] });
+            if let Some(v) = vendedor {
+                p["vendedor_id"] = json!(v);
+            }
+            rpc(st, "documentos.emitir", p).await
+        }
+    };
+    let ler = |id: i64| {
+        let st = &st;
+        async move { sqlx::query_scalar::<_, Option<i64>>("SELECT vendedor_id FROM documentos WHERE id = ?").bind(id).fetch_one(&st.pool).await.unwrap() }
+    };
+    // sem vendedor no documento: o habitual; com outro indicado: esse
+    assert_eq!(ler(vendedor_do(&ft(None).await)).await, Some(ana));
+    assert_eq!(ler(vendedor_do(&ft(Some(rui)).await)).await, Some(rui));
+    // guardar a ficha sem dizer nada mantém; 0 tira
+    rpc(&st, "entidades.guardar", json!({ "id": cli, "nome": "Hotel Baía", "nif": "5417002211" })).await;
+    assert_eq!(rpc(&st, "entidades.obter", json!({ "id": cli })).await["vendedor_id"], ana);
+    rpc(&st, "entidades.guardar", json!({ "id": cli, "nome": "Hotel Baía", "nif": "5417002211", "vendedor_id": 0 })).await;
+    assert!(rpc(&st, "entidades.obter", json!({ "id": cli })).await["vendedor_id"].is_null());
+    assert_eq!(ler(vendedor_do(&ft(None).await)).await, None);
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }

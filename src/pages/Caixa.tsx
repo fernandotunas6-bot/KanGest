@@ -1,18 +1,18 @@
 // KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
 // © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 
-import { useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowDownLeft, ArrowUpRight, History, Lock, Printer, ShoppingCart, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, History, Lock, Plus, Printer, ShoppingCart, Trash2, Wallet } from "lucide-react";
 import { call } from "@/lib/api";
 import { useTabelas, useTalao58 } from "@/lib/hooks";
-import { dataHora, kz, kzNum, parseKz, qtd } from "@/lib/format";
+import { dataHora, extenso, kz, kzNum, parseKz, qtd } from "@/lib/format";
 import { imprimir } from "@/lib/print";
 import type { CaixaResumo } from "@/lib/types";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Stat, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Stat, Table, Td, Th, cn } from "@/components/ui";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { useEmpresa } from "@/components/PrintCabecalho";
 
@@ -35,6 +35,8 @@ export default function Caixa() {
   const tem = useSession((s) => s.tem);
   const { data: c, refetch } = useQuery({ queryKey: ["caixa"], queryFn: () => call<CaixaResumo | null>("caixa.estado") });
   const [mov, setMov] = useState(false);
+  // talão de um movimento (vale de caixa): logo a seguir a registar ou para reimprimir
+  const [vale, setVale] = useState<{ id: number; imprimir: boolean } | null>(null);
   const [fechar, setFechar] = useState(false);
   const [relatorio, setRelatorio] = useState<CaixaResumo | null>(null);
   const [historico, setHistorico] = useState(false);
@@ -145,10 +147,16 @@ export default function Caixa() {
                           {m.descricao}
                         </span>
                         {m.rubrica && <span className="ml-2 text-[12px] text-ink-3">{m.rubrica}</span>}
+                        {m.beneficiario && <span className="block text-[12px] text-ink-3">{m.tipo === "ENTRADA" ? "Recebido de" : "Entregue a"} {m.beneficiario}</span>}
                       </Td>
                       <Td className={cn("num text-right", m.tipo === "ENTRADA" ? "text-ok" : "text-danger")}>
                         {m.tipo === "ENTRADA" ? "+" : "−"}
                         {kz(m.valor)}
+                      </Td>
+                      <Td className="w-8 text-right">
+                        <button title="Imprimir o talão (vale de caixa)" onClick={() => setVale({ id: m.id, imprimir: false })} className="rounded-md p-1.5 text-ink-3 hover:bg-sunken hover:text-ink">
+                          <Printer className="size-4" />
+                        </button>
                       </Td>
                     </tr>
                   ))}
@@ -160,7 +168,17 @@ export default function Caixa() {
         </>
       )}
 
-      {mov && <Movimento onClose={() => setMov(false)} onDone={() => { setMov(false); refetch(); }} />}
+      {mov && (
+        <Movimento
+          onClose={() => setMov(false)}
+          onDone={(id, comTalao) => {
+            setMov(false);
+            refetch();
+            if (id && comTalao) setVale({ id, imprimir: true });
+          }}
+        />
+      )}
+      {vale && <TalaoVale id={vale.id} imprimirLogo={vale.imprimir} onClose={() => setVale(null)} />}
       {fechar && c && (
         <Fechar
           resumo={c}
@@ -189,50 +207,212 @@ export default function Caixa() {
   );
 }
 
-function Movimento({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+interface LinhaVale {
+  chave: number;
+  descricao: string;
+  rubrica: string;
+  valor: string;
+}
+
+/** Entrada ou saída de dinheiro: uma ou várias linhas (ex.: combustível, água), a quem se entregou e o talão. */
+function Movimento({ onClose, onDone }: { onClose: () => void; onDone: (movimentoId: number | null, comTalao: boolean) => void }) {
   const modos = useTabelas().data?.modos_pagamento ?? [];
-  const [tipo, setTipo] = useState("SAIDA");
-  const [valor, setValor] = useState("");
-  const [desc, setDesc] = useState("");
-  const [rubrica, setRubrica] = useState("");
+  const [tipo, setTipo] = useState<"SAIDA" | "ENTRADA">("SAIDA");
   const [modo, setModo] = useState("NU");
-  async function guardar() {
+  const [beneficiario, setBeneficiario] = useState("");
+  const [linhas, setLinhas] = useState<LinhaVale[]>([{ chave: 1, descricao: "", rubrica: "", valor: "" }]);
+  const [comTalao, setComTalao] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const total = linhas.reduce((t, l) => t + parseKz(l.valor || "0"), 0);
+  const mudar = (chave: number, m: Partial<LinhaVale>) => setLinhas((ls) => ls.map((l) => (l.chave === chave ? { ...l, ...m } : l)));
+
+  async function guardar(e: FormEvent) {
+    e.preventDefault();
+    const usadas = linhas.filter((l) => l.descricao.trim() || l.valor.trim());
+    if (!usadas.length) return toast.error("Indique a descrição e o valor.");
+    setBusy(true);
     try {
-      await call("caixa.movimento", { tipo, valor: parseKz(valor), descricao: desc, rubrica, modo });
-      toast.success("Movimento registado.");
-      onDone();
-    } catch (e) {
-      toast.error((e as Error).message);
+      const r = await call<{ movimento_id?: number }>("caixa.movimento", {
+        tipo,
+        modo,
+        beneficiario,
+        linhas: usadas.map((l) => ({ descricao: l.descricao, rubrica: l.rubrica, valor: parseKz(l.valor || "0") })),
+      });
+      toast.success(tipo === "SAIDA" ? `Saída de ${kz(total)} registada.` : `Entrada de ${kz(total)} registada.`);
+      onDone(r.movimento_id ?? null, comTalao);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
     }
   }
+
   return (
-    <Modal open onClose={onClose} title="Movimento de caixa" width="max-w-md" footer={<Button onClick={guardar}>Registar</Button>}>
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Tipo" className="col-span-2">
-          <Select value={tipo} onChange={(e) => setTipo(e.target.value)}>
-            <option value="SAIDA">Saída (sangria, pagamento, regularização)</option>
-            <option value="ENTRADA">Entrada (inserir dinheiro / reforço)</option>
-          </Select>
-        </Field>
-        <Field label="Valor (Kz)">
-          <Input autoFocus className="num text-right" value={valor} onChange={(e) => setValor(e.target.value)} />
-        </Field>
-        <Field label="Método">
-          <Select value={modo} onChange={(e) => setModo(e.target.value)}>
-            {modos.map((m) => (
-              <option key={m.codigo} value={m.codigo}>
-                {m.descricao}
-              </option>
+    <Modal open onClose={onClose} title="Entrada / saída de dinheiro" width="max-w-xl">
+      <form onSubmit={guardar} className="space-y-4">
+        <Segmentado
+          valor={tipo}
+          onChange={setTipo}
+          opcoes={[
+            { id: "SAIDA", label: "Saída (pagamento, sangria)", icon: ArrowUpRight },
+            { id: "ENTRADA", label: "Entrada (reforço)", icon: ArrowDownLeft },
+          ]}
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Método">
+            <Select value={modo} onChange={(e) => setModo(e.target.value)}>
+              {modos.map((m) => (
+                <option key={m.codigo} value={m.codigo}>
+                  {m.descricao}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label={tipo === "SAIDA" ? "Entregue a" : "Recebido de"}>
+            <Input value={beneficiario} placeholder="Nome (opcional)" onChange={(e) => setBeneficiario(e.target.value)} />
+          </Field>
+        </div>
+        <div>
+          <div className="mb-1.5 grid grid-cols-[minmax(0,1fr)_76px_92px_28px] sm:grid-cols-[minmax(0,1fr)_120px_120px_32px] gap-2 text-[12px] font-medium text-ink-3">
+            <span>Descrição</span>
+            <span>Rubrica</span>
+            <span className="text-right">Valor (Kz)</span>
+            <span />
+          </div>
+          <div className="space-y-2">
+            {linhas.map((l, n) => (
+              <div key={l.chave} className="grid grid-cols-[minmax(0,1fr)_76px_92px_28px] sm:grid-cols-[minmax(0,1fr)_120px_120px_32px] items-center gap-2">
+                <Input
+                  autoFocus={n === 0}
+                  aria-label="Descrição"
+                  required={n === 0}
+                  placeholder={n === 0 ? "Ex.: Combustível" : "Outra despesa"}
+                  value={l.descricao}
+                  onChange={(e) => mudar(l.chave, { descricao: e.target.value })}
+                />
+                <Input aria-label="Rubrica" placeholder="Opcional" value={l.rubrica} onChange={(e) => mudar(l.chave, { rubrica: e.target.value })} />
+                <Input aria-label="Valor" required={n === 0} className="num text-right" inputMode="decimal" value={l.valor} onChange={(e) => mudar(l.chave, { valor: e.target.value })} />
+                {linhas.length > 1 ? (
+                  <button type="button" title="Tirar esta linha" onClick={() => setLinhas((ls) => ls.filter((x) => x.chave !== l.chave))} className="grid size-8 place-items-center rounded-md text-ink-3 hover:bg-sunken hover:text-danger">
+                    <Trash2 className="size-4" />
+                  </button>
+                ) : (
+                  <span />
+                )}
+              </div>
             ))}
-          </Select>
-        </Field>
-        <Field label="Descrição" className="col-span-2">
-          <Input value={desc} onChange={(e) => setDesc(e.target.value)} />
-        </Field>
-        <Field label="Rubrica" hint="Ex.: Combustível, Água, Reforço de trocos" className="col-span-2">
-          <Input value={rubrica} onChange={(e) => setRubrica(e.target.value)} />
-        </Field>
+          </div>
+          <div className="mt-2 flex items-center justify-between">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={linhas.length >= 30}
+              onClick={() => setLinhas((ls) => [...ls, { chave: Math.max(...ls.map((x) => x.chave)) + 1, descricao: "", rubrica: "", valor: "" }])}
+            >
+              <Plus className="size-4" /> Acrescentar linha
+            </Button>
+            <span className="text-[14px]">
+              Total <b className="num">{kz(total)}</b>
+            </span>
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-[13.5px]">
+          <input type="checkbox" checked={comTalao} onChange={(e) => setComTalao(e.target.checked)} /> Imprimir o talão (vale de caixa) para assinar
+        </label>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button loading={busy}>Registar</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+interface Vale {
+  id: number;
+  tipo: "ENTRADA" | "SAIDA";
+  data_hora: string;
+  valor: number;
+  descricao: string;
+  rubrica: string | null;
+  beneficiario: string | null;
+  utilizador: string | null;
+  posto: string | null;
+  modo: string | null;
+  linhas: { descricao: string; rubrica: string | null; valor: number }[];
+}
+
+/** Talão do movimento (vale de caixa): o que saiu ou entrou, linha a linha, com assinaturas. */
+function TalaoVale({ id, imprimirLogo, onClose }: { id: number; imprimirLogo: boolean; onClose: () => void }) {
+  const v = useQuery({ queryKey: ["caixa-vale", id], queryFn: () => call<Vale>("caixa.movimentoObter", { id }) }).data;
+  const t58 = useTalao58();
+  const e = useEmpresa();
+  const impresso = useRef(false);
+  // logo a seguir a registar: imprime sozinho, uma vez, quando já há os dados
+  useEffect(() => {
+    if (imprimirLogo && v && e && !impresso.current) {
+      impresso.current = true;
+      imprimir();
+    }
+  }, [imprimirLogo, v, e]);
+  const linha = (k: string, val: string, forte = false) => (
+    <div className={cn("flex justify-between gap-2", forte && "font-bold")}>
+      <span>{k}</span>
+      <span className="text-right">{val}</span>
+    </div>
+  );
+  const saida = v?.tipo === "SAIDA";
+  const linhas = v ? (v.linhas.length ? v.linhas : [{ descricao: v.descricao, rubrica: v.rubrica, valor: v.valor }]) : [];
+  const conteudo = v && (
+    <div
+      className={cn("print-ticket mx-auto bg-white text-black", t58 ? "talao-58 w-[220px] p-2 text-[9.5px] leading-[1.3]" : "w-[300px] p-3 text-[11px] leading-[1.35]")}
+      style={{ fontFamily: "Arial, Helvetica, sans-serif" }}
+    >
+      {e && (
+        <div className="text-center">
+          <div className="text-[13px] font-bold">{e.nome}</div>
+          {e.endereco && <div>{e.endereco}</div>}
+          {e.nif && <div>NIF: {e.nif}</div>}
+        </div>
+      )}
+      <div className="mt-2 text-center text-[12.5px] font-bold">
+        VALE DE CAIXA — {saida ? "SAÍDA" : "ENTRADA"} Nº {v.id}
       </div>
+      {linha("Data:", dataHora(v.data_hora))}
+      {v.posto && linha("Posto:", v.posto)}
+      {v.utilizador && linha("Operador:", v.utilizador)}
+      {v.beneficiario && linha(saida ? "Entregue a:" : "Recebido de:", v.beneficiario)}
+      <div className="mt-2 flex justify-between border-y border-black py-0.5 font-bold">
+        <span>Descrição</span>
+        <span>Valor</span>
+      </div>
+      {linhas.map((l, n) => (
+        <div key={n} className="flex justify-between gap-2">
+          <span className="min-w-0">
+            {l.descricao}
+            {l.rubrica && <span> ({l.rubrica})</span>}
+          </span>
+          <span className="shrink-0">{kz(l.valor)}</span>
+        </div>
+      ))}
+      <div className="mt-1 border-t border-black pt-1">
+        {linha("TOTAL:", kz(v.valor), true)}
+        {v.modo && linha("Método:", v.modo)}
+      </div>
+      <div className="mt-1">São: {extenso(v.valor)}</div>
+      <div className="mt-6 grid grid-cols-2 gap-3 text-center">
+        <div className="border-t border-black pt-0.5">O responsável</div>
+        <div className="border-t border-black pt-0.5">{saida ? "Recebi" : "Entreguei"}</div>
+      </div>
+    </div>
+  );
+  return (
+    <Modal open onClose={onClose} title="Talão do movimento de caixa" width="max-w-md" footer={<Button onClick={imprimir} disabled={!v}><Printer className="size-4" /> Imprimir</Button>}>
+      <div className="flex max-h-[60vh] justify-center overflow-y-auto rounded-xl bg-sunken p-4">{conteudo ?? <span className="text-ink-3">A carregar…</span>}</div>
+      {conteudo && <PrintPortal>{conteudo}</PrintPortal>}
     </Modal>
   );
 }

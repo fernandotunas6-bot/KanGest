@@ -14,7 +14,8 @@
 //
 // Variáveis: DB (D1), CHAVE_PRIVADA (secreto, PEM pkcs8 Ed25519), ADMIN_TOKEN (secreto),
 //            RESEND_API_KEY + EMAIL_REMETENTE (opcionais: sem eles, o código aparece no painel),
-//            ACCESS_EQUIPA + ACCESS_AUD (opcionais: o painel só responde a quem passou pelo Cloudflare Access).
+//            ACCESS_EQUIPA + ACCESS_AUD (opcionais: o painel só responde a quem passou pelo Cloudflare Access),
+//            ADMIN_ORIGENS (opcional: origens da área do produtor no site; por omissão https://kangest.pages.dev).
 // Protecção: limite de pedidos por IP e por hora (tabela «limites»), Cloudflare Access à frente do painel,
 //            cabeçalhos de segurança em todas as respostas.
 // As licenças têm o mesmo formato do scripts/licencas/kangest-licencas.mjs: «KG1.<json base64url>.<assinatura>».
@@ -411,8 +412,29 @@ async function renovar(env, c) {
   const { nif, maquina } = await autenticarMaquina(env, c, false);
   await env.DB.prepare("UPDATE maquinas SET ultimo_contacto = ?, versao = COALESCE(?, versao) WHERE nif = ? AND maquina = ?")
     .bind(agora(), texto(c.versao, 20) || null, nif, maquina).run();
+  await guardarEstado(env, nif, maquina, c);
   const cliente = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(nif).first();
   return { ok: true, ...(await licencaActual(env, cliente, maquina)) };
+}
+
+const dataOuNull = (v) => (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$/.test(String(v ?? "")) ? String(v) : null);
+
+/** O estado que o KanGest manda na verificação (versões antigas não mandam nada: fica o que havia). */
+export async function guardarEstado(env, nif, maquina, c) {
+  const e = c?.estado;
+  if (!e || typeof e !== "object" || Array.isArray(e)) return;
+  const lic = e.licenca && typeof e.licenca === "object" ? e.licenca : {};
+  const cop = e.copias && typeof e.copias === "object" ? e.copias : {};
+  await env.DB.prepare(
+    `INSERT INTO instalacoes (nif, maquina, recebido_em, versao, modo, licenca_estado, licenca_fim, copia_ultima, copia_externa_ultima, copia_externa_erro)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (nif, maquina) DO UPDATE SET recebido_em = excluded.recebido_em, versao = excluded.versao, modo = excluded.modo,
+       licenca_estado = excluded.licenca_estado, licenca_fim = excluded.licenca_fim, copia_ultima = excluded.copia_ultima,
+       copia_externa_ultima = excluded.copia_externa_ultima, copia_externa_erro = excluded.copia_externa_erro`,
+  )
+    .bind(nif, maquina, agora(), texto(c.versao, 20) || null, texto(e.modo, 12) || null, texto(lic.estado, 20) || null,
+      dataOuNull(lic.fim), dataOuNull(cop.ultima), dataOuNull(cop.ultima_externa), cop.erro_externa ? 1 : 0)
+    .run();
 }
 
 async function planosPublicos(env) {
@@ -440,6 +462,49 @@ function validarNome(v) {
 }
 
 const webConfigurado = (env) => Boolean(env.WEB_DOMINIO && env.CF_CONTA && env.CF_ZONA && env.CF_API_TOKEN);
+
+// ------------------------------------------------------------------ verificação de humano (Cloudflare Turnstile)
+//
+// Na entrada pela Internet dos KanGest com endereço <nome>.<WEB_DOMINIO>, como no Claude: o widget no browser e a
+// confirmação aqui, porque o segredo não vai para os computadores das lojas. Segredos TURNSTILE_SITE_KEY (público) e
+// TURNSTILE_SECRET_KEY, de um widget do Cloudflare com o domínio WEB_DOMINIO. Sem eles, nada se exige.
+
+const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+const humanoConfigurado = (env) => Boolean(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY && env.WEB_DOMINIO);
+
+/** A chave pública do widget, para o KanGest a pôr no ecrã de entrada (null = não se exige). */
+function humanoChave(env) {
+  return { ok: true, site_key: humanoConfigurado(env) ? env.TURNSTILE_SITE_KEY : null, dominio: env.WEB_DOMINIO || null };
+}
+
+/**
+ * Confere o token do widget com o Cloudflare. `humano: false` só quando o Cloudflare diz que o token não vale (ou não
+ * veio); sem resposta do Cloudflare, ou com a nossa chave recusada, deixa passar e diz `degradado` (uma loja que não
+ * entra porque o serviço de outra empresa caiu é pior do que um robô a mais durante esse tempo).
+ */
+export async function humanoVerificar(env, c) {
+  if (!humanoConfigurado(env)) return { ok: true, humano: true, degradado: true };
+  const token = String(c?.token ?? "").trim();
+  if (!token || token.length > 2048) return { ok: true, humano: false, motivo: "missing-input-response" };
+  const corpo = new URLSearchParams({ secret: env.TURNSTILE_SECRET_KEY, response: token });
+  const ip = String(c?.ip ?? "").trim();
+  if (/^[0-9a-f.:]{3,45}$/i.test(ip)) corpo.set("remoteip", ip);
+  try {
+    const r = await fetch(SITEVERIFY, { method: "POST", body: corpo, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return { ok: true, humano: true, degradado: true };
+    const d = await r.json().catch(() => null);
+    if (!d) return { ok: true, humano: true, degradado: true };
+    if (d.success === true) return { ok: true, humano: true };
+    const codigos = Array.isArray(d["error-codes"]) ? d["error-codes"] : [];
+    if (codigos.some((x) => x === "invalid-input-secret" || x === "missing-input-secret")) {
+      console.error("Turnstile: a chave secreta foi recusada", codigos.join(","));
+      return { ok: true, humano: true, degradado: true };
+    }
+    return { ok: true, humano: false, motivo: codigos.join(",") || "rejeitado" };
+  } catch {
+    return { ok: true, humano: true, degradado: true };
+  }
+}
 
 /** Pedido à API da Cloudflare com o token do produtor. Devolve o `result`; os erros passam a Falha 502. */
 async function cf(env, metodo, caminho, corpo) {
@@ -560,7 +625,7 @@ const estadoCliente = (c, dia = hoje()) =>
     : c.experiencia_ate && c.experiencia_ate >= dia ? "EXPERIENCIA" : "EXPIRADA";
 
 async function resumo(env) {
-  const [planos, clientes, codigos, pagamentos] = await env.DB.batch([
+  const [planos, clientes, codigos, pagamentos, semCopia] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM planos ORDER BY ordem"),
     env.DB.prepare(
       `SELECT c.*, (SELECT COUNT(*) FROM maquinas m WHERE m.nif = c.nif AND m.bloqueada = 0) AS maquinas,
@@ -569,6 +634,11 @@ async function resumo(env) {
     ),
     env.DB.prepare("SELECT nif, maquina, empresa, email, telefone, codigo_aberto, expira_em, tentativas, criado_em FROM codigos ORDER BY criado_em DESC LIMIT 100"),
     env.DB.prepare("SELECT p.*, c.empresa FROM pagamentos p LEFT JOIN clientes c ON c.nif = p.nif ORDER BY p.id DESC LIMIT 50"),
+    // computadores activos (contacto nos últimos 30 dias) sem cópia local há mais de 7 dias, ou com a cópia externa a falhar
+    env.DB.prepare(
+      `SELECT i.nif FROM instalacoes i JOIN maquinas m ON m.nif = i.nif AND m.maquina = i.maquina
+       WHERE m.bloqueada = 0 AND m.ultimo_contacto >= ? AND (i.copia_ultima IS NULL OR i.copia_ultima < ? OR i.copia_externa_erro = 1)`,
+    ).bind(somarDias(hoje(), -30), somarDias(hoje(), -7)),
   ]);
   const dia = hoje();
   return {
@@ -576,7 +646,8 @@ async function resumo(env) {
     hoje: dia,
     email_configurado: !!(env.RESEND_API_KEY && env.EMAIL_REMETENTE),
     planos: planos.results,
-    clientes: clientes.results.map((c) => ({ ...c, estado: estadoCliente(c, dia) })),
+    clientes: clientes.results.map((c) => ({ ...c, estado: estadoCliente(c, dia), sem_copia: semCopia.results.some((x) => x.nif === c.nif) })),
+    sem_copia: semCopia.results.length,
     codigos: codigos.results.map((c) => ({ ...c, expirado: Date.parse(c.expira_em) < Date.now() })),
     pagamentos: pagamentos.results,
   };
@@ -587,7 +658,11 @@ async function fichaCliente(env, nif) {
   const cliente = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(nif).first();
   if (!cliente) throw new Falha("Cliente não encontrado.", 404);
   const [maquinas, licencas, pagamentos] = await env.DB.batch([
-    env.DB.prepare("SELECT * FROM maquinas WHERE nif = ? ORDER BY ultimo_contacto DESC").bind(nif),
+    env.DB.prepare(
+      `SELECT m.*, i.recebido_em, i.modo, i.licenca_estado, i.licenca_fim, i.copia_ultima, i.copia_externa_ultima, i.copia_externa_erro
+       FROM maquinas m LEFT JOIN instalacoes i ON i.nif = m.nif AND i.maquina = m.maquina
+       WHERE m.nif = ? ORDER BY m.ultimo_contacto DESC`,
+    ).bind(nif),
     env.DB.prepare("SELECT id, maquina, plano, postos, inicio, fim, tolerancia, emitida_em, origem, chave FROM licencas WHERE nif = ? ORDER BY emitida_em DESC LIMIT 50").bind(nif),
     env.DB.prepare("SELECT * FROM pagamentos WHERE nif = ? ORDER BY id DESC").bind(nif),
   ]);
@@ -705,6 +780,11 @@ async function tratar(req, env) {
   const caminho = url.pathname.replace(/\/+$/, "") || "/";
   const m = req.method;
 
+  // a área do produtor no site (kangest.pages.dev/admin.html) usa a mesma API: o pedido prévio do browser não leva o token
+  if (m === "OPTIONS" && caminho.startsWith("/admin/api/")) {
+    const corsAdmin = origemAdmin(env, req);
+    return corsAdmin ? new Response(null, { status: 204, headers: corsAdmin }) : erro("Origem não autorizada.", 403);
+  }
   if (m === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (caminho === "/" && m === "GET") return json({ servico: "Licenças do KanGest", versao: VERSAO });
   if (caminho === "/v1/planos" && m === "GET") return json(await planosPublicos(env), 200, { ...CORS, "cache-control": "public, max-age=300" });
@@ -720,6 +800,7 @@ async function tratar(req, env) {
     await limitar(env, req, "renovar");
     return json(await renovar(env, await corpoJson(req)));
   }
+  if (m === "GET" && caminho === "/v1/web/humano") return json(humanoChave(env));
   if (m === "GET" && caminho === "/v1/web/endereco") {
     const cabec = { ...CORS, "cache-control": "no-store" };
     try {
@@ -731,7 +812,7 @@ async function tratar(req, env) {
     }
   }
   if (m === "POST" && caminho.startsWith("/v1/web/")) {
-    const f = { estado: webEstado, activar: webActivar, desactivar: webDesactivar }[caminho.slice("/v1/web/".length)];
+    const f = { estado: webEstado, activar: webActivar, desactivar: webDesactivar, humano: humanoVerificar }[caminho.slice("/v1/web/".length)];
     if (f) {
       await limitar(env, req, "web");
       return json(await f(env, await corpoJson(req)));
@@ -774,6 +855,24 @@ async function tratar(req, env) {
   return erro("Não encontrado.", 404);
 }
 
+/**
+ * Cabeçalhos CORS para a área do produtor no site, se o pedido vier de uma origem autorizada (ADMIN_ORIGENS, por omissão
+ * o site do KanGest). O token continua a ser exigido em cada pedido; isto só deixa o browser fazê-lo a partir do site.
+ */
+export function origemAdmin(env, req) {
+  const origem = req.headers.get("origin");
+  if (!origem) return null;
+  const permitidas = String(env.ADMIN_ORIGENS || "https://kangest.pages.dev").split(",").map((o) => o.trim().replace(/\/$/, "")).filter(Boolean);
+  if (!permitidas.includes(origem)) return null;
+  return {
+    "access-control-allow-origin": origem,
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "authorization, content-type",
+    "access-control-max-age": "600",
+    vary: "origin",
+  };
+}
+
 async function responder(req, env) {
   try {
     return await tratar(req, env);
@@ -788,6 +887,8 @@ export default {
   async fetch(req, env) {
     const r = await responder(req, env);
     const h = new Headers(r.headers);
+    const cors = new URL(req.url).pathname.startsWith("/admin/api/") ? origemAdmin(env, req) : null;
+    if (cors) for (const [k, v] of Object.entries(cors)) h.set(k, v);
     for (const [k, v] of Object.entries(SEGURANCA)) if (!h.has(k)) h.set(k, v);
     return new Response(r.body, { status: r.status, statusText: r.statusText, headers: h });
   },
