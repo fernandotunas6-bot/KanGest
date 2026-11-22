@@ -647,7 +647,22 @@ async function assinarSessao(env, texto) {
   return b64url(await crypto.subtle.sign("HMAC", k, enc.encode(texto)));
 }
 
-export async function entrarPainel(env, c) {
+/** Como no Claude: «Chrome (Mac OS X)», «Safari (iPhone)». */
+export function descreverAparelho(ua) {
+  const u = String(ua ?? "");
+  if (!u) return "Aparelho desconhecido";
+  const nav = /Edg\//.test(u) ? "Edge" : /OPR\//.test(u) ? "Opera" : /Firefox\/|FxiOS/.test(u) ? "Firefox" : /Chrome\/|CriOS/.test(u) ? "Chrome" : /Safari\//.test(u) ? "Safari" : "Browser";
+  const so = /iPhone/.test(u) ? "iPhone" : /iPad/.test(u) ? "iPad" : /Android/.test(u) ? "Android" : /Windows/.test(u) ? "Windows" : /Mac OS X|Macintosh/.test(u) ? "Mac OS X" : /Linux/.test(u) ? "Linux" : "";
+  return so ? `${nav} (${so})` : nav;
+}
+
+/** Local aproximado dito pela Cloudflare (cidade, região, país). */
+function localDe(req) {
+  const cf = req?.cf ?? {};
+  return [cf.city, cf.region, cf.country].filter(Boolean).join(", ") || "Desconhecido";
+}
+
+export async function entrarPainel(env, c, req) {
   const certo = String(env.ADMIN_EMAIL ?? "").trim().toLowerCase();
   if (!certo || !env.ADMIN_SENHA || (env.ADMIN_TOKEN ?? "").length < 24) {
     throw new Falha("A entrada com email e senha ainda não está configurada neste servidor: use a chave de administração.", 503);
@@ -658,7 +673,12 @@ export async function entrarPainel(env, c) {
   const senhaOk = senha.length > 0 && senha.length <= 256 && (await senhaCerta(env, senha));
   if (!senhaOk || !iguaisBytes(enc.encode(email), enc.encode(certo))) throw new Falha("Email ou senha incorrectos.", 401);
   const expira = Date.now() + SESSAO_HORAS * 3_600_000;
-  const dados = b64url(enc.encode(JSON.stringify({ e: certo, exp: expira })));
+  // cada entrada fica registada, para «Onde fez login» e para a poder terminar
+  const sid = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  await env.DB.prepare("INSERT INTO sessoes_painel (id, email, criada_em, ultima_em, aparelho, local) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(sid, certo, agora(), agora(), descreverAparelho(req?.headers.get("user-agent")).slice(0, 60), localDe(req).slice(0, 80))
+    .run();
+  const dados = b64url(enc.encode(JSON.stringify({ e: certo, exp: expira, s: sid })));
   return { ok: true, token: `s1.${dados}.${await assinarSessao(env, dados)}`, email: certo, expira: new Date(expira).toISOString() };
 }
 
@@ -669,10 +689,26 @@ async function sessaoPainel(env, token) {
   if (!iguaisBytes(enc.encode(await assinarSessao(env, dados)), enc.encode(ass))) return null;
   try {
     const d = JSON.parse(new TextDecoder().decode(deB64url(dados)));
-    return typeof d.exp === "number" && d.exp > Date.now() && d.e === String(env.ADMIN_EMAIL ?? "").trim().toLowerCase() ? d : null;
+    if (!(typeof d.exp === "number" && d.exp > Date.now() && d.e === String(env.ADMIN_EMAIL ?? "").trim().toLowerCase())) return null;
+    // a sessão tem de continuar registada e não terminada («Sair em todos os aparelhos»)
+    const s = await env.DB.prepare("SELECT ultima_em, terminada_em FROM sessoes_painel WHERE id = ?").bind(String(d.s ?? "")).first();
+    if (!s || s.terminada_em) return null;
+    if (Date.parse(s.ultima_em) < Date.now() - 5 * 60_000) {
+      await env.DB.prepare("UPDATE sessoes_painel SET ultima_em = ? WHERE id = ?").bind(agora(), d.s).run();
+    }
+    return d;
   } catch {
     return null;
   }
+}
+
+/** «Onde fez login»: as sessões do painel ainda abertas (a actual primeiro). */
+async function sessoesPainel(env, actual) {
+  const limite = new Date(Date.now() - SESSAO_HORAS * 3_600_000).toISOString().slice(0, 19) + "Z";
+  const { results } = await env.DB.prepare(
+    "SELECT id, aparelho, local, criada_em, ultima_em FROM sessoes_painel WHERE terminada_em IS NULL AND criada_em >= ? ORDER BY ultima_em DESC LIMIT 50",
+  ).bind(limite).all();
+  return { ok: true, sessoes: results.map((s) => ({ ...s, actual: s.id === actual })).sort((a, b) => b.actual - a.actual) };
 }
 
 async function autorizado(env, req) {
@@ -907,7 +943,7 @@ async function tratar(req, env) {
   // entrada com email e senha (antes da autorização: é ela que a dá); as falhas contam para o bloqueio por IP
   if (caminho === "/admin/api/entrar" && m === "POST") {
     try {
-      return json(await entrarPainel(env, await corpoJson(req)));
+      return json(await entrarPainel(env, await corpoJson(req), req));
     } catch (e) {
       if (e instanceof Falha && e.estado === 401) await contar(env, req, "admin");
       throw e;
@@ -920,9 +956,18 @@ async function tratar(req, env) {
     }
     const accao = caminho.slice("/admin/api/".length);
     if (m === "GET" && accao === "resumo") return json(await resumo(env));
+    const sessaoActual = await sessaoPainel(env, (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, ""));
     if (m === "GET" && accao === "sessao") {
-      const s = await sessaoPainel(env, (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, ""));
-      return json({ ok: true, email: s?.e ?? null, expira: s ? new Date(s.exp).toISOString() : null, chave: !s });
+      return json({ ok: true, email: sessaoActual?.e ?? null, expira: sessaoActual ? new Date(sessaoActual.exp).toISOString() : null, chave: !sessaoActual });
+    }
+    if (m === "GET" && accao === "sessoes") return json(await sessoesPainel(env, sessaoActual?.s));
+    if (m === "POST" && (accao === "sessoes/terminar" || accao === "sessoes/terminar-outras")) {
+      const c = await corpoJson(req);
+      const r = accao === "sessoes/terminar"
+        ? await env.DB.prepare("UPDATE sessoes_painel SET terminada_em = ? WHERE id = ? AND terminada_em IS NULL").bind(agora(), String(c.id ?? "")).run()
+        : await env.DB.prepare("UPDATE sessoes_painel SET terminada_em = ? WHERE terminada_em IS NULL AND id <> ?").bind(agora(), String(sessaoActual?.s ?? "")).run();
+      const n = r.meta?.changes ?? 0;
+      return json({ ok: true, terminadas: n, mensagem: n ? `${n} ${n === 1 ? "sessão terminada" : "sessões terminadas"}.` : "Não havia sessões para terminar." });
     }
     if (m === "GET" && accao === "cliente") return json(await fichaCliente(env, url.searchParams.get("nif")));
     if (m === "POST") {

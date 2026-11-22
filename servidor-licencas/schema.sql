@@ -134,3 +134,15 @@ CREATE TABLE IF NOT EXISTS instalacoes (
     copia_externa_erro INTEGER NOT NULL DEFAULT 0,  -- 1 = a última cópia externa falhou
     PRIMARY KEY (nif, maquina)
 );
+
+-- Sessões do painel do produtor (entrada com email e senha), para «Onde fez login» e «Sair em todos os aparelhos».
+-- O aparelho vem do User-Agent e o local aproximado da Cloudflare; o IP não se guarda.
+CREATE TABLE IF NOT EXISTS sessoes_painel (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    criada_em TEXT NOT NULL,
+    ultima_em TEXT NOT NULL,
+    aparelho TEXT,
+    local TEXT,
+    terminada_em TEXT
+);
