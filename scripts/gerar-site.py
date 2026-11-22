@@ -94,6 +94,11 @@ def cabecalhos(scripts_em_linha, site, licencas):
     hashes = " ".join(sorted(f"'sha256-{base64.b64encode(hashlib.sha256(s.encode()).digest()).decode()}'" for s in scripts_em_linha))
     # o endereço público do site também conta como «próprio»: a página 404 carrega por ele (<base href>)
     proprio = f"'self' {site.rstrip('/')}"
+    # só a origem do servidor de licenças: na CSP, um endereço com caminho (…/functions/v1/kangest) só deixaria esse
+    # caminho exacto, e a API está por baixo dele (…/kangest/v1/planos)
+    from urllib.parse import urlsplit
+    u = urlsplit(licencas)
+    licencas = f"{u.scheme}://{u.netloc}" if u.scheme and u.netloc else ""
     csp = "; ".join([
         "default-src 'self'",
         f"script-src {proprio} {hashes} https://static.cloudflareinsights.com",

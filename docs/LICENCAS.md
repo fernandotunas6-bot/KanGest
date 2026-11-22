@@ -35,8 +35,10 @@ Envia o código do pedido, paga e recebe a licença (`KG1.…`) por email ou Wha
 
 ### Servidor de licenças e painel
 
-- Servidor: `https://kangest-licencas.valentinocanguele.workers.dev` (Cloudflare Workers + D1, código em `servidor-licencas/`).
-- Painel: `https://kangest-licencas.valentinocanguele.workers.dev/admin`, com a chave de
+- Servidor: `https://fissktkxilseymadzppn.supabase.co/functions/v1/kangest` (a função `kangest` do backend central no
+  Supabase, com a base em Postgres; código em `servidor-licencas/`). As versões até 1.3.4 falam com o endereço antigo,
+  `https://kangest-licencas.valentinocanguele.workers.dev` (Cloudflare Workers + D1), que passa a encaminhar para a função.
+- Painel: o `/admin` do servidor abre a área do produtor no site, com a chave de
   `~/.kangest-licencas/servidor/admin-token.txt`. O mesmo painel está no site, na **área do produtor**
   (`https://kangest.pages.dev/admin.html`, fora dos motores de busca): a página fala com o servidor pela internet e a
   chave escreve-se nela e fica só na sessão do browser. O servidor só aceita o site nas origens de `ADMIN_ORIGENS`
