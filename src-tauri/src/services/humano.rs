@@ -26,7 +26,9 @@ pub const MENSAGEM: &str = "Confirme que não é um robô (a caixa da Cloudflare
 
 /// Nos testes: por empresa, (chave pública, resposta da verificação). Os testes nunca vão à rede.
 #[cfg(test)]
-pub(crate) static TESTE: Mutex<Option<HashMap<String, (Option<String>, bool)>>> = Mutex::new(None);
+pub(crate) type RespostasTeste = HashMap<String, (Option<String>, bool)>;
+#[cfg(test)]
+pub(crate) static TESTE: Mutex<Option<RespostasTeste>> = Mutex::new(None);
 
 /// A entrada deste pedido pede a verificação: veio pela Internet e o endereço é do produtor (não um domínio próprio).
 async fn exigida(st: &AppState) -> bool {

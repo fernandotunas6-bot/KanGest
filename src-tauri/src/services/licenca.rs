@@ -555,7 +555,8 @@ pub(crate) async fn credenciais(st: &AppState) -> AppResult<Value> {
 }
 
 /// POST ao servidor de licenças. Os erros que o servidor explica passam ao utilizador tal como vêm.
-/// GET ao servidor de licenças (ex.: a chave pública da verificação de humano).
+/// GET ao servidor de licenças (ex.: a chave pública da verificação de humano). Nos testes não se vai à rede.
+#[cfg_attr(test, allow(dead_code))]
 pub(crate) async fn obter_servidor(caminho: &str) -> AppResult<Value> {
     let url = format!("{}{caminho}", servidor());
     let r = tokio::task::spawn_blocking(move || http::pedido("GET", &url, &[("Accept", "application/json".into())], None, std::time::Duration::from_secs(10)))

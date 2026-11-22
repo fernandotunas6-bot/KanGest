@@ -1,7 +1,7 @@
 // KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
 // © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import { call } from "@/lib/api";
@@ -42,6 +42,11 @@ export default function Login({ empresa }: { empresa: string | null }) {
   const chaveHumano = politica.data?.humano ?? null;
   const [humano, setHumano] = useState("");
   const [reiniciarHumano, setReiniciarHumano] = useState(0);
+  // confirmado no widget: o aviso «Confirme que não é um robô» deixa de fazer sentido
+  const aoToken = useCallback((t: string) => {
+    setHumano(t);
+    if (t) setErro((e) => (e.startsWith("Confirme que não é um robô") ? "" : e));
+  }, []);
 
   async function entrar(metodo: "auth.login" | "auth.loginPin", params: object) {
     setBusy(true);
@@ -217,7 +222,7 @@ export default function Login({ empresa }: { empresa: string | null }) {
                 Esqueci-me da senha
               </button>
             </div>
-            {chaveHumano && <VerificacaoHumano chave={chaveHumano} onToken={setHumano} reiniciar={reiniciarHumano} />}
+            {chaveHumano && <VerificacaoHumano chave={chaveHumano} onToken={aoToken} reiniciar={reiniciarHumano} />}
             <Button variant="accent" size="lg" className="h-12 w-full text-[15px]" loading={busy}>
               Entrar <ArrowRight className="size-4" />
             </Button>
