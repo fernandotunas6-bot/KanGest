@@ -173,7 +173,7 @@ assert.equal(r.corpo.licenca, null); assert.equal(r.corpo.estado, "EXPIRADA"); a
 assert.equal((await pedir("GET", "/admin/api/resumo")).estado, 401);
 assert.equal((await pedir("GET", "/admin/api/resumo", null, "b".repeat(40))).estado, 401);
 r = await pedir("GET", "/admin");
-assert.equal(r.estado, 200); assert.match(r.corpo, /Painel do produtor/);
+assert.equal(r.estado, 200); assert.match(r.corpo, /Área do produtor/);
 
 // preços
 r = await admin("plano", { codigo: "COMERCIO", nome: "Comércio", postos: 3, preco_mes: "15000", preco_ano: 150000, activo: true, ordem: 2 });
