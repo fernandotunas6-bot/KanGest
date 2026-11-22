@@ -5643,6 +5643,38 @@ async fn tops_do_painel() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// «A sua atenção» avisa quando uma integração deixa de sincronizar: uma chave usada com regularidade sem contacto
+/// há mais de 3 horas, ou um webhook com 3 falhas seguidas. Uma chave nova (poucos pedidos) ou revogada não conta.
+#[tokio::test]
+async fn aviso_de_integracao_parada() {
+    let (st, pasta) = base_com_admin("integracao-parada").await;
+    let st_ = &st;
+    let paradas = move || async move { rpc(st_, "dashboard", json!({})).await["alertas"]["integracoes_paradas"].as_i64().unwrap() };
+    assert_eq!(paradas().await, 0);
+    let chave = |nome: &'static str, prefixo: &'static str, pedidos: i64, horas: i64, revogada: bool| {
+        let pool = st.pool.clone();
+        async move {
+            sqlx::query(
+                "INSERT INTO api_chaves (nome, prefixo, hash, utilizador_id, pedidos, ultimo_uso, revogada_em)
+                 VALUES (?, ?, 'x', 1, ?, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', ? || ' hours'), ?)",
+            )
+            .bind(nome).bind(prefixo).bind(pedidos).bind(format!("-{horas}")).bind(revogada.then_some("2026-01-01"))
+            .execute(&pool).await.unwrap();
+        }
+    };
+    chave("Loja online", "kg_a", 500, 1, false).await; // a sincronizar
+    chave("Teste", "kg_b", 3, 48, false).await; // poucos pedidos: não é uma ligação regular
+    chave("Antiga", "kg_c", 900, 48, true).await; // revogada
+    assert_eq!(paradas().await, 0);
+    chave("Contabilidade", "kg_d", 120, 5, false).await; // parada há 5 horas
+    assert_eq!(paradas().await, 1);
+    sqlx::query("INSERT INTO api_webhooks (nome, url, segredo, falhas_seguidas) VALUES ('Livraria', 'https://x.invalid', 's', 3)")
+        .execute(&st.pool).await.unwrap();
+    assert_eq!(paradas().await, 2);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 /// referência, tipo, motivo de isenção, % IVA, preço, PVP, controla stock, unidade
 type ArtigoBaseLido = (String, String, Option<String>, f64, i64, i64, i64, String);
 

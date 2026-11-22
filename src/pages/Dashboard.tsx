@@ -4,7 +4,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { CalendarClock, CalendarX2, CheckCircle2, ChevronRight, CircleDollarSign, Eye, EyeOff, FileClock, FilePlus2, GraduationCap, HandCoins, Hourglass, PackageMinus, Receipt, Repeat, Send, ShieldAlert, ShoppingCart, Table2, TrendingUp, Truck, type LucideIcon } from "lucide-react";
+import { CalendarClock, CalendarX2, CheckCircle2, ChevronRight, CircleDollarSign, Eye, EyeOff, FileClock, FilePlus2, GraduationCap, HandCoins, Hourglass, PackageMinus, Receipt, Repeat, Send, ShieldAlert, ShoppingCart, Table2, TrendingUp, Truck, Unplug, type LucideIcon } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, dataHora, hojeISO, qtd } from "@/lib/format";
 import { useKz, useOcultarValores } from "@/lib/privacidade";
@@ -32,6 +32,8 @@ interface Alertas {
   avencas_por_facturar?: number;
   /** alunos com propinas por facturar (modo escola) */
   propinas_por_facturar?: number;
+  /** chaves da API sem contacto há mais de 3 horas e webhooks com 3 falhas seguidas (a loja online parou?) */
+  integracoes_paradas?: number;
 }
 
 interface Dash {
@@ -88,6 +90,7 @@ export default function Dashboard() {
         [
           { n: ant?.docs_vencidos ?? 0, texto: ["documento de cliente vencido", "documentos de clientes vencidos"], valor: vencido, to: "/avisos", tom: "danger", icon: CalendarClock },
           { n: al?.compras_vencidas ?? 0, texto: ["pagamento a fornecedor em atraso", "pagamentos a fornecedores em atraso"], valor: al?.valor_compras_vencidas, to: "/contas/pagar", tom: "danger", icon: Truck },
+          { n: al?.integracoes_paradas ?? 0, texto: ["integração sem sincronizar há mais de 3 horas", "integrações sem sincronizar há mais de 3 horas"], to: "/integracoes", tom: "danger", icon: Unplug },
           { n: al?.fe_rejeitadas ?? 0, texto: ["factura rejeitada pela AGT", "facturas rejeitadas pela AGT"], to: "/facturacao-electronica", tom: "danger", icon: ShieldAlert },
           { n: al?.lotes_expirados ?? 0, texto: ["lote expirado ainda com stock", "lotes expirados ainda com stock"], to: "/relatorios/stock?situacao=validade", tom: "danger", icon: CalendarX2 },
           { n: al?.fe_pendentes ?? 0, texto: ["factura por validar na AGT", "facturas por validar na AGT"], to: "/facturacao-electronica", tom: "accent", icon: Send },

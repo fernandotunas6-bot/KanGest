@@ -150,6 +150,19 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
     let avencas_por_facturar = super::avencas::por_facturar(p).await?;
     let propinas_por_facturar = super::escola::por_facturar(p).await?;
 
+    // Integrações paradas: uma chave da API usada com regularidade (20 pedidos ou mais) que não fala há mais de
+    // 3 horas — a loja online sincroniza o stock e as vendas pelo menos de hora a hora — ou um webhook com 3 falhas
+    // seguidas. Foi assim que a ligação da Livraria esteve parada dias sem ninguém dar por isso.
+    let integracoes_paradas: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM api_chaves
+                  WHERE ativa = 1 AND revogada_em IS NULL AND (IFNULL(expira_em, '') = '' OR expira_em >= date('now', 'localtime'))
+                    AND pedidos >= 20 AND ultimo_uso IS NOT NULL
+                    AND ultimo_uso < strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', '-3 hours'))
+              + (SELECT COUNT(*) FROM api_webhooks WHERE ativo = 1 AND falhas_seguidas >= 3)",
+    )
+    .fetch_one(p)
+    .await?;
+
     // Recebimentos do mês por meio de pagamento (facturas/recibo, recibos e adiantamentos)
     let por_modo = sqlx::query(
         "SELECT m.descricao, SUM(dp.valor) AS total FROM documento_pagamentos dp
@@ -174,6 +187,7 @@ pub async fn dashboard(st: &AppState) -> AppResult<Value> {
             "compras_vencidas": compras_vencidas, "valor_compras_vencidas": valor_compras_vencidas,
             "avencas_por_facturar": avencas_por_facturar,
             "propinas_por_facturar": propinas_por_facturar,
+            "integracoes_paradas": integracoes_paradas,
         },
         "por_modo": db::rows_json(&por_modo),
         "serie": db::rows_json(&serie), "top_artigos": db::rows_json(&top), "ultimos": db::rows_json(&ultimos),
