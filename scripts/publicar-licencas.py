@@ -6,6 +6,7 @@
     CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… python3 scripts/publicar-licencas.py [--segredos] [--email-api CHAVE --remetente "KanGest <licencas@dominio>"]
         [--access-equipa empresa.cloudflareaccess.com --access-aud <AUD>]   (Cloudflare Access à frente do painel; docs/CLOUDFLARE.md)
         [--web-dominio kangest.ao --web-token <TOKEN>]   (acesso pela Internet por subdomínios; docs/CLOUDFLARE.md)
+        [--email-cloudflare "KanGest <codigos@kangest.livrariaadventista.com>"]   (emails pela Cloudflare Email Service)
 
 Na primeira vez: cria a base D1 «kangest-licencas», aplica o schema.sql, envia o Worker com os segredos e liga o
 endereço *.workers.dev. Nas seguintes: aplica o schema (só cria o que falta) e envia o código, mantendo os segredos.
@@ -16,6 +17,11 @@ Segredos (nunca no repositório):
   ~/.kangest-licencas/servidor/admin-token.txt  chave do painel /admin (criada aqui se não existir)
   ~/.kangest-licencas/servidor/admin-email.txt e admin-senha.txt  entrada no painel com email e senha (resumo PBKDF2)
 O token precisa de «Workers Scripts · Edit» e «D1 · Edit».
+
+Emails (códigos, aviso ao produtor, boas-vindas) pela Cloudflare Email Service: com o plano Workers pago e o domínio do
+remetente ligado em Email Service → Email Sending, --email-cloudflare "KanGest <endereço>" define o remetente e grava-o
+em ~/.kangest-licencas/servidor/email-remetente.txt; enquanto esse ficheiro existir, cada publicação liga o Worker ao
+envio (ligação «EMAIL»). Sem ele, os emails podem ir pelo Resend (--email-api e --remetente) ou não ir.
 """
 import json, os, secrets, ssl, subprocess, sys, urllib.error, urllib.request, uuid
 from pathlib import Path
@@ -94,8 +100,19 @@ def main():
 
     # 3. código (os segredos já definidos mantêm-se)
     existe = any(s["id"] == NOME for s in api("GET", f"/accounts/{conta}/workers/scripts", token))
+    ligacoes = [{"type": "d1", "name": "DB", "id": bid}]
+    # emails pela Cloudflare Email Service: o remetente fica guardado para as publicações seguintes manterem a ligação
+    fr = PASTA / "email-remetente.txt"
+    if opc("--email-cloudflare"):
+        rem = opc("--email-cloudflare").strip()
+        if "@" not in rem:
+            sys.exit('--email-cloudflare precisa do remetente: "KanGest <codigos@dominio>".')
+        PASTA.mkdir(parents=True, exist_ok=True)
+        fr.write_text(rem + "\n")
+    if fr.exists():
+        ligacoes.append({"type": "send_email", "name": "EMAIL"})
     metadados = {"main_module": "worker.js", "compatibility_date": DATA_COMPAT,
-                 "bindings": [{"type": "d1", "name": "DB", "id": bid}], "keep_bindings": ["secret_text"]}
+                 "bindings": ligacoes, "keep_bindings": ["secret_text"]}
     corpo, tipo = multipart([
         ("metadata", None, "application/json", json.dumps(metadados).encode()),
         ("worker.js", "worker.js", "application/javascript+module", (RAIZ / "src/worker.js").read_bytes()),
@@ -126,6 +143,8 @@ def main():
         segredos["RESEND_API_KEY"] = opc("--email-api")
     if opc("--remetente"):
         segredos["EMAIL_REMETENTE"] = opc("--remetente")
+    if opc("--email-cloudflare"):
+        segredos["EMAIL_REMETENTE"] = fr.read_text().strip()
     # Cloudflare Access à frente do painel /admin (docs/CLOUDFLARE.md): domínio da equipa e AUD da aplicação
     if opc("--access-equipa") is not None or opc("--access-aud") is not None:
         equipa, aud = (opc("--access-equipa") or "").strip(), (opc("--access-aud") or "").strip()

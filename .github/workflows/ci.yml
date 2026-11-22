@@ -77,6 +77,7 @@ jobs:
           node servidor-licencas/teste/testar.mjs
           node servidor-licencas/teste/contas.mjs
           node servidor-licencas/teste/copia.mjs
+          node servidor-licencas/teste/emails.mjs
           node servidor-licencas/teste/encaminhamento.mjs
 
       - uses: denoland/setup-deno@v2

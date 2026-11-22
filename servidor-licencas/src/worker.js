@@ -13,7 +13,8 @@
 //   POST /admin/api/pagamento · emitir · plano · cliente · maquina · codigo
 //
 // Variáveis: DB (D1), CHAVE_PRIVADA (secreto, PEM pkcs8 Ed25519), ADMIN_TOKEN (secreto),
-//            RESEND_API_KEY + EMAIL_REMETENTE (opcionais: sem eles, o código aparece no painel),
+//            EMAIL (ligação send_email da Cloudflare Email Service) ou RESEND_API_KEY, com EMAIL_REMETENTE
+//            (opcionais: sem eles, nenhum email sai e o código aparece no painel),
 //            ACCESS_EQUIPA + ACCESS_AUD (opcionais: o painel só responde a quem passou pelo Cloudflare Access),
 //            ADMIN_ORIGENS (opcional: origens da área do produtor no site; por omissão https://kangest.pages.dev),
 //            ADMIN_EMAIL + ADMIN_SENHA (opcionais: entrada no painel com email e senha; a senha só como resumo PBKDF2,
@@ -266,25 +267,157 @@ async function licencaActual(env, cliente, maquina) {
 
 // ------------------------------------------------------------------ email
 
-async function enviarCodigo(env, { email, empresa, codigo }) {
-  if (!env.RESEND_API_KEY || !env.EMAIL_REMETENTE || !email) return false;
-  const corpo = {
-    from: env.EMAIL_REMETENTE,
-    to: [email],
-    subject: `KanGest: código de confirmação ${codigo}`,
-    text: `Olá,\n\nO código para confirmar o registo de ${empresa} no KanGest é:\n\n    ${codigo}\n\nEscreva-o no KanGest, em Sistema → Licença e Assinatura. É válido durante ${CODIGO_MINUTOS} minutos.\n\nSe não pediu este código, ignore esta mensagem.\n\nKanGest`,
-  };
-  try {
-    const r = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify(corpo),
-    });
-    return r.ok;
-  } catch {
-    return false;
-  }
+// Os emails do KanGest: os códigos (registo e conta), o aviso ao produtor e as boas-vindas. Cada um vai em HTML, com o
+// visual do site, e em texto. Envia-se pela Cloudflare Email Service (ligação EMAIL, a partir de EMAIL_REMETENTE, ex.:
+// «KanGest <codigos@kangest.livrariaadventista.com>») ou, sem ela, pelo Resend (RESEND_API_KEY). Sem nenhum, nada se
+// envia: os códigos ficam na área do produtor.
+
+/** Domínios reservados para testes (RFC 2606 e 6761): nunca se lhes envia nada (a prova de fumo usa-os). */
+const DOMINIO_DE_TESTE = /\.(invalid|test|example|localhost)$/i;
+
+/** «KanGest <codigos@…>» ou só o endereço → { email, name }. */
+function remetente(env) {
+  const r = String(env.EMAIL_REMETENTE ?? "").trim();
+  const m = r.match(/^"?([^"<]*?)"?\s*<([^<>\s]+@[^<>\s]+)>$/);
+  if (m) return { email: m[2], name: m[1].trim() || "KanGest" };
+  return /^[^\s@<>]+@[^\s@<>]+$/.test(r) ? { email: r, name: "KanGest" } : null;
 }
+
+/** Envia um email e diz se foi aceite. As falhas ficam no registo do Worker; quem pediu recebe a resposta de sempre. */
+async function enviarEmail(env, para, { assunto, html, texto }) {
+  const de = remetente(env);
+  const dominio = String(para ?? "").split("@")[1] ?? "";
+  if (!de || !dominio || DOMINIO_DE_TESTE.test(dominio)) return false;
+  try {
+    if (typeof env.EMAIL?.send === "function") {
+      await env.EMAIL.send({ from: de, to: para, subject: assunto, html, text: texto });
+      return true;
+    }
+    if (env.RESEND_API_KEY) {
+      const r = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
+        body: JSON.stringify({ from: `${de.name} <${de.email}>`, to: [para], subject: assunto, html, text: texto }),
+        signal: AbortSignal.timeout(8000),
+      });
+      return r.ok;
+    }
+  } catch (e) {
+    console.error("Email não enviado:", e?.code ?? "", e?.message ?? e);
+  }
+  return false;
+}
+
+/** Trabalho para depois da resposta (o aviso ao produtor, as boas-vindas): o Worker espera por ele (ctx.waitUntil). */
+function depois(env, trabalho) {
+  const p = Promise.resolve(trabalho).catch((e) => console.error("Trabalho em segundo plano falhou:", e?.message ?? e));
+  if (typeof env.esperar === "function") env.esperar(p);
+}
+
+/** O endereço do site (a primeira origem autorizada), para as ligações nos emails. */
+const siteDe = (env) => String(env.ADMIN_ORIGENS || "https://kangest.pages.dev").split(",")[0].trim().replace(/\/$/, "");
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+/**
+ * Um email com o visual do site: { assunto, html, texto }. Os textos vêm sem HTML (escapam-se aqui).
+ * previa: a linha que o programa de email mostra antes de abrir; paragrafos: cada um um texto ou [texto, forte, texto…];
+ * codigo: em destaque; dados: [rótulo, valor]; botao: { texto, url }; nota: letra pequena no fim.
+ */
+export function modeloEmail(env, { assunto, previa, titulo, paragrafos = [], codigo, dados = [], botao, nota }) {
+  const site = siteDe(env);
+  const c = { fundo: "#f6f4ef", cartao: "#ffffff", linha: "#e3dfd6", tinta: "#1d2422", tinta2: "#4b5552", tinta3: "#6f7875", marca: "#146b63", marca50: "#e6f2f0", marca700: "#0c4a44" };
+  const f = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+  const partes = (x) => (Array.isArray(x) ? x.map((s, i) => (i % 2 ? `<strong style="color:${c.tinta};font-weight:600">${esc(s)}</strong>` : esc(s))).join("") : esc(x));
+  const html = [
+    `<!doctype html><html lang="pt"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`,
+    `<meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><title>${esc(assunto)}</title></head>`,
+    `<body style="margin:0;padding:0;background:${c.fundo}">`,
+    `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:${c.fundo}">${esc(previa)}</div>`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${c.fundo}"><tr><td align="center" style="padding:32px 16px">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px">`,
+    // o logótipo (o ícone do programa, em PNG no site: os programas de email não mostram SVG) e o nome, como no site
+    `<tr><td style="padding:0 4px 20px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>`,
+    `<td style="vertical-align:middle"><img src="${esc(site)}/assets/kangest-email.png" width="36" height="36" alt="" style="display:block;border:0;outline:none;text-decoration:none"></td>`,
+    `<td style="vertical-align:middle;padding-left:10px;font:700 20px/1 ${f};color:${c.tinta};letter-spacing:-0.01em">KanGest</td>`,
+    `</tr></table></td></tr>`,
+    `<tr><td style="background:${c.cartao};border:1px solid ${c.linha};border-radius:16px;padding:32px 28px">`,
+    `<h1 style="margin:0 0 16px;font:700 22px/1.3 ${f};color:${c.tinta}">${esc(titulo)}</h1>`,
+    ...paragrafos.map((x) => `<p style="margin:0 0 16px;font:400 15px/1.6 ${f};color:${c.tinta2}">${partes(x)}</p>`),
+    codigo
+      ? `<div style="margin:8px 0 24px;padding:18px 12px 18px 20px;border-radius:12px;background:${c.marca50};text-align:center;font:700 32px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:8px;color:${c.marca700}">${esc(codigo)}</div>`
+      : "",
+    dados.length
+      ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;border-top:1px solid ${c.linha}">` +
+        dados.map(([r, v]) => `<tr><td style="padding:10px 16px 10px 0;border-bottom:1px solid ${c.linha};font:400 14px/1.4 ${f};color:${c.tinta3};white-space:nowrap;vertical-align:top">${esc(r)}</td><td style="padding:10px 0;border-bottom:1px solid ${c.linha};font:500 14px/1.4 ${f};color:${c.tinta};word-break:break-word">${esc(v)}</td></tr>`).join("") +
+        `</table>`
+      : "",
+    botao
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px"><tr><td style="border-radius:10px;background:${c.marca}"><a href="${esc(botao.url)}" style="display:inline-block;padding:12px 20px;font:600 15px/1 ${f};color:#ffffff;text-decoration:none;border-radius:10px">${esc(botao.texto)}</a></td></tr></table>`
+      : "",
+    nota ? `<p style="margin:0;font:400 13px/1.6 ${f};color:${c.tinta3}">${esc(nota)}</p>` : "",
+    `</td></tr>`,
+    `<tr><td style="padding:20px 4px 0;font:400 12px/1.6 ${f};color:${c.tinta3}">KanGest · gestão comercial e facturação · <a href="${esc(site)}" style="color:${c.tinta3}">${esc(site.replace(/^https?:\/\//, ""))}</a></td></tr>`,
+    `</table></td></tr></table></body></html>`,
+  ].filter(Boolean).join("\n");
+  const texto = [
+    titulo,
+    "",
+    ...paragrafos.flatMap((x) => [Array.isArray(x) ? x.join("") : x, ""]),
+    ...(codigo ? [`    ${codigo}`, ""] : []),
+    ...(dados.length ? [...dados.map(([r, v]) => `${r}: ${v}`), ""] : []),
+    ...(botao ? [`${botao.texto}: ${botao.url}`, ""] : []),
+    ...(nota ? [nota, ""] : []),
+    "KanGest",
+    site,
+  ].join("\n");
+  return { assunto, html, texto };
+}
+
+export const emailCodigoRegisto = (env, { empresa, codigo }) => modeloEmail(env, {
+  assunto: `KanGest: código de confirmação ${codigo}`,
+  previa: `O código para confirmar o registo de ${empresa} é ${codigo}.`,
+  titulo: "Confirme o registo do KanGest",
+  paragrafos: [["Para confirmar o registo de ", empresa, " no KanGest, escreva este código em Sistema → Licença e Assinatura:"]],
+  codigo,
+  nota: `O código é válido durante ${CODIGO_MINUTOS} minutos. Se não pediu este código, ignore esta mensagem.`,
+});
+
+export const emailCodigoConta = (env, { empresa, codigo }) => modeloEmail(env, {
+  assunto: `KanGest: código ${codigo} para a conta de ${empresa}`,
+  previa: `O código para definir a senha da conta de ${empresa} é ${codigo}.`,
+  titulo: "Defina a senha da conta da empresa",
+  paragrafos: [["Use este código para definir a senha da conta de ", empresa, " no site do KanGest:"]],
+  codigo,
+  botao: { texto: "Abrir a conta da empresa", url: `${siteDe(env)}/conta.html` },
+  nota: `O código é válido durante ${CODIGO_MINUTOS} minutos. Se não pediu este código, ignore esta mensagem: a conta continua como estava.`,
+});
+
+export const emailAvisoProdutor = (env, { nif, empresa, email, telefone, maquina, versao, enviado, codigo }) => modeloEmail(env, {
+  assunto: `KanGest: pedido de registo de ${empresa}`,
+  previa: `${empresa} (NIF ${nif}) pediu o registo de um computador.`,
+  titulo: "Novo pedido de registo",
+  paragrafos: [
+    enviado
+      ? "Uma empresa pediu o registo de um computador. O código foi enviado para o email dela."
+      : ["Uma empresa pediu o registo de um computador, mas o código ", "não foi enviado", " para o email dela. Dê-lho por telefone ou WhatsApp:"],
+  ],
+  codigo: enviado ? undefined : codigo,
+  dados: [["Empresa", empresa], ["NIF", nif], ["Email", email], ["Telefone", telefone || "—"], ["Computador", maquina], ["Versão", versao || "—"]],
+  botao: { texto: "Abrir a área do produtor", url: `${siteDe(env)}/admin.html` },
+  nota: "Recebe este aviso porque é o produtor do KanGest.",
+});
+
+export const emailBoasVindas = (env, { empresa, maquina, experienciaAte }) => modeloEmail(env, {
+  assunto: `KanGest: registo de ${empresa} confirmado`,
+  previa: `O KanGest está registado. A experiência vai até ${dmy(experienciaAte)}.`,
+  titulo: "O KanGest está registado",
+  paragrafos: [
+    ["O computador ", maquina, " ficou registado para ", empresa, ". A experiência vai até ", dmy(experienciaAte), "."],
+    "Na conta da empresa, no site, vê a licença, os pagamentos e os computadores, e gere a equipa. Entre com este email; na primeira vez, peça um código para definir a senha.",
+  ],
+  botao: { texto: "Abrir a conta da empresa", url: `${siteDe(env)}/conta.html` },
+  nota: `Precisa de ajuda? Fale com o suporte do KanGest em ${siteDe(env).replace(/^https?:\/\//, "")}/contacto.`,
+});
 
 // ------------------------------------------------------------------ API pública
 
@@ -315,7 +448,7 @@ async function registo(env, c) {
 
   const n = crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000;
   const codigo = String(n).padStart(6, "0");
-  const enviado = await enviarCodigo(env, { email, empresa, codigo });
+  const enviado = await enviarEmail(env, email, emailCodigoRegisto(env, { empresa, codigo }));
   await env.DB.prepare(
     `INSERT INTO codigos (nif, maquina, empresa, email, telefone, codigo_hash, codigo_aberto, expira_em, tentativas, pedidos, criado_em)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, 1, ?9)
@@ -330,6 +463,12 @@ async function registo(env, c) {
     recente ? antes.pedidos + 1 : 1,
     recente ? antes.criado_em : agora(),
   ).run();
+
+  // o produtor fica a saber (com o código, se não chegou à empresa; os pedidos repetidos só avisam se o código mudou sem envio)
+  if (env.ADMIN_EMAIL && !DOMINIO_DE_TESTE.test(email.split("@")[1] ?? "") && (!enviado || !recente)) {
+    const aviso = emailAvisoProdutor(env, { nif, empresa, email, telefone, maquina, versao: texto(c.versao, 20), enviado, codigo });
+    depois(env, enviarEmail(env, String(env.ADMIN_EMAIL).trim().toLowerCase(), aviso));
+  }
 
   return {
     ok: true,
@@ -357,9 +496,12 @@ async function confirmar(env, c) {
 
   const t = agora();
   let cliente = await env.DB.prepare("SELECT * FROM clientes WHERE nif = ?").bind(nif).first();
-  if (!cliente) {
+  const novo = !cliente;
+  if (novo) {
+    const experienciaAte = somarDias(hoje(), DIAS_EXPERIENCIA - 1);
     await env.DB.prepare("INSERT INTO clientes (nif, empresa, email, telefone, criado_em, experiencia_ate) VALUES (?,?,?,?,?,?)")
-      .bind(nif, p.empresa, p.email, p.telefone, t, somarDias(hoje(), DIAS_EXPERIENCIA - 1)).run();
+      .bind(nif, p.empresa, p.email, p.telefone, t, experienciaAte).run();
+    if (p.email) depois(env, enviarEmail(env, p.email, emailBoasVindas(env, { empresa: p.empresa, maquina, experienciaAte })));
   } else {
     await env.DB.prepare("UPDATE clientes SET empresa = ?, email = ?, telefone = COALESCE(NULLIF(?, ''), telefone) WHERE nif = ?")
       .bind(p.empresa, p.email, p.telefone, nif).run();
@@ -764,23 +906,6 @@ function validarSenhaNova(senha) {
   return s;
 }
 
-async function enviarCodigoConta(env, { email, empresa, codigo }) {
-  if (!env.RESEND_API_KEY || !env.EMAIL_REMETENTE) return false;
-  try {
-    const r = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        from: env.EMAIL_REMETENTE, to: [email], subject: `KanGest: código ${codigo} para a conta de ${empresa}`,
-        text: `Olá,\n\nO código para definir a senha da conta de ${empresa} no site do KanGest é:\n\n    ${codigo}\n\nÉ válido durante ${CODIGO_MINUTOS} minutos.\n\nSe não pediu este código, ignore esta mensagem: a sua conta continua como estava.\n\nKanGest`,
-      }),
-    });
-    return r.ok;
-  } catch {
-    return false;
-  }
-}
-
 /** Criar a conta ou repor a senha: um código para o email do registo. A resposta é sempre a mesma. */
 export async function contaPedirCodigo(env, c) {
   const email = String(c?.email ?? "").trim().toLowerCase();
@@ -790,7 +915,7 @@ export async function contaPedirCodigo(env, c) {
   const antes = await env.DB.prepare("SELECT criado_em FROM codigos_conta WHERE email = ?").bind(email).first();
   if (antes && Date.parse(antes.criado_em) > Date.now() - 60_000) return { ok: true, mensagem: MSG_CODIGO };
   const codigo = String(100_000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900_000));
-  const enviado = await enviarCodigoConta(env, { email, empresa: cli.empresa, codigo });
+  const enviado = await enviarEmail(env, email, emailCodigoConta(env, { empresa: cli.empresa, codigo }));
   const expira = new Date(Date.now() + CODIGO_MINUTOS * 60_000).toISOString().slice(0, 19) + "Z";
   await env.DB.prepare(
     `INSERT INTO codigos_conta (email, nif, codigo_hash, codigo_aberto, expira_em, tentativas, criado_em) VALUES (?, ?, ?, ?, ?, 0, ?)
@@ -1421,8 +1546,10 @@ async function responder(req, env) {
 }
 
 export default {
-  async fetch(req, env) {
-    const r = await responder(req, env);
+  async fetch(req, env, ctx) {
+    // o que se faz depois da resposta (emails ao produtor, boas-vindas) fica com o Worker até acabar
+    const e = typeof ctx?.waitUntil === "function" ? { ...env, esperar: (p) => ctx.waitUntil(p) } : env;
+    const r = await responder(req, e);
     const h = new Headers(r.headers);
     const p = new URL(req.url).pathname;
     const cors = p.startsWith("/admin/api/") || p.startsWith("/v1/conta/") ? origemAdmin(env, req) : null;
