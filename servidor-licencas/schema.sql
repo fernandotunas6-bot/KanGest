@@ -208,6 +208,20 @@ CREATE TABLE IF NOT EXISTS sessoes_conta (
 );
 CREATE INDEX IF NOT EXISTS idx_sessoes_conta_nif ON sessoes_conta (nif, terminada_em);
 
+-- Contas novas pedidas no site, antes de instalar o KanGest: esperam pelo código enviado para o email (só o resumo
+-- SHA-256). Ao confirmar, nascem a empresa (sem experiência: começa no primeiro registo do programa) e a conta.
+CREATE TABLE IF NOT EXISTS pedidos_conta (
+    email TEXT PRIMARY KEY,
+    nif TEXT NOT NULL,
+    empresa TEXT NOT NULL,
+    telefone TEXT,
+    codigo_hash TEXT NOT NULL,
+    codigo_aberto TEXT,               -- só enquanto o envio de email não funcionar (o produtor dá-o)
+    expira_em TEXT NOT NULL,
+    tentativas INTEGER NOT NULL DEFAULT 0,
+    criado_em TEXT NOT NULL
+);
+
 -- Códigos de 6 algarismos para criar ou repor a senha da conta da empresa (só o resumo SHA-256).
 CREATE TABLE IF NOT EXISTS codigos_conta (
     email TEXT PRIMARY KEY,

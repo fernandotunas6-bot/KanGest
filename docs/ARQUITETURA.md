@@ -50,7 +50,7 @@ A D1 é SQLite e não tem esquemas: as áreas são as secções do `schema.sql`.
 | empresas | `clientes`, `contas`, `planos` | a empresa (pelo NIF), a conta do dono no site, os planos à venda |
 | licenças | `maquinas`, `instalacoes`, `licencas`, `pagamentos`, `codigos` | computadores registados e o estado de cada um, licenças emitidas, pagamentos, códigos de registo |
 | equipa | `funcionarios`, `lojas_geridas`, `postos_geridos`, `equipa_versoes`, `equipas` | a equipa gerida no site e a que cada KanGest comunica |
-| segurança | `sessoes_painel`, `sessoes_conta`, `codigos_conta`, `segredos_maquina`, `limites` | sessões, códigos da conta, segredos dos computadores, limite de pedidos por IP |
+| segurança | `sessoes_painel`, `sessoes_conta`, `pedidos_conta`, `codigos_conta`, `segredos_maquina`, `limites` | sessões, contas novas à espera do código, códigos da conta, segredos dos computadores, limite de pedidos por IP |
 | web | `subdominios` | acesso pela Internet (um subdomínio por empresa) |
 
 ### Quem chega aos dados
