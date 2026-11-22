@@ -5799,6 +5799,46 @@ async fn verificacao_de_humano_pela_internet() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// Modo TV: vendas de hoje e do mês, hora a hora, a loja contra a meta, as últimas vendas sem nomes de clientes e os
+/// artigos mais vendidos; as metas só se guardam com «Empresa e rede» e para lojas que existem.
+#[tokio::test]
+async fn modo_tv() {
+    let (st, pasta) = base_com_admin("tv").await;
+    rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+    let agua = rpc(&st, "artigos.guardar", json!({ "descricao": "Água", "taxa_iva_id": 1, "preco1": 10000, "tipo": "S" })).await["id"].as_i64().unwrap();
+    let mesa = rpc(&st, "artigos.guardar", json!({ "descricao": "Mesa", "taxa_iva_id": 1, "preco1": 500000, "tipo": "S" })).await["id"].as_i64().unwrap();
+    let cli = rpc(&st, "entidades.guardar", json!({ "nome": "Escola Kianda", "nif": "5417000123" })).await["id"].as_i64().unwrap();
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": agua, "quantidade": 10 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+    rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": mesa, "quantidade": 1 }] })).await;
+    let loja: i64 = sqlx::query_scalar("SELECT MIN(id) FROM armazens").fetch_one(&st.pool).await.unwrap();
+
+    // metas: só lojas que existem e valores válidos
+    assert!(rpc_err(&st, "tv.metasGuardar", json!({ "metas": { "999": 100 } })).await.contains("Loja inválida"));
+    assert!(rpc_err(&st, "tv.metasGuardar", json!({ "metas": { loja.to_string(): -5 } })).await.contains("meta"));
+    rpc(&st, "tv.metasGuardar", json!({ "metas": { loja.to_string(): 6_840_000 } })).await;
+    assert_eq!(rpc(&st, "tv.metas", json!({})).await["lojas"][0]["meta"], 6_840_000);
+
+    let t = rpc(&st, "tv.painel", json!({})).await;
+    let total = 114000 + 570000;
+    assert_eq!(t["hoje"]["total"], total);
+    assert_eq!(t["mes"]["total"], total);
+    assert_eq!(t["mes"]["meta"], 6_840_000);
+    assert_eq!(t["mes"]["percentagem"], 10.0);
+    let horas: i64 = t["horas"].as_array().unwrap().iter().map(|h| h["hoje"].as_i64().unwrap()).sum();
+    assert_eq!(horas, total, "hora a hora soma o dia");
+    let l = &t["lojas"][0];
+    assert_eq!((l["id"].as_i64(), l["mes"].as_i64(), l["percentagem"].as_f64()), (Some(loja), Some(total), Some(10.0)));
+    assert_eq!(t["ultimas"].as_array().unwrap().len(), 2);
+    assert_eq!(t["ultimas"][0]["artigo"], "Mesa");
+    assert!(!t["ultimas"].to_string().contains("Kianda"), "na TV não aparecem nomes de clientes");
+    assert_eq!(t["top"][0]["descricao"], "Mesa");
+    // tirar a meta (0) deixa a loja sem percentagem
+    rpc(&st, "tv.metasGuardar", json!({ "metas": { loja.to_string(): 0 } })).await;
+    assert_eq!(rpc(&st, "tv.painel", json!({})).await["lojas"][0]["percentagem"], Value::Null);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
 /// referência, tipo, motivo de isenção, % IVA, preço, PVP, controla stock, unidade
 type ArtigoBaseLido = (String, String, Option<String>, f64, i64, i64, i64, String);
 
