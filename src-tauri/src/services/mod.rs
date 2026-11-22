@@ -7,6 +7,7 @@ mod auditoria;
 mod dois_passos;
 mod atualizacao;
 mod avencas;
+mod assistente;
 mod auth;
 mod caixa;
 mod comissoes;
@@ -419,6 +420,8 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "dashboard" => relatorios::dashboard(st).await,
         // KanGest inteligente (calculado aqui, nada sai para fora): resumo de ontem, previsões e alertas
         "inteligencia.painel" => inteligencia::painel(st).await,
+        // assistente de perguntas (Ctrl+K): «quanto vendi ontem?», «quem me deve mais?»
+        "inteligencia.perguntar" => assistente::perguntar(st, p(params)?).await,
         "relatorios.vendas" => relatorios::vendas(st, p(params)?).await,
         "relatorios.sintese" => relatorios::sintese(st, p(params)?).await,
         "relatorios.top" => relatorios::top(st, p(params)?).await,

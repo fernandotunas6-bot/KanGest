@@ -248,7 +248,7 @@ pub(crate) fn fecho_do_mes(h: &Historico, hoje: NaiveDate) -> Value {
 
 /// Os artigos que esgotam nos próximos 7 dias ao ritmo de venda (últimos 30 dias, ou desde a primeira venda),
 /// contando o que já está encomendado ao fornecedor.
-async fn ruptura(st: &AppState, hoje: NaiveDate, h: &Historico) -> AppResult<Value> {
+pub(crate) async fn ruptura(st: &AppState, hoje: NaiveDate, h: &Historico) -> AppResult<Value> {
     let Some(primeira) = h.primeira else { return Ok(json!({ "n": 0, "artigos": [] })) };
     let base = (hoje - primeira).num_days().clamp(7, 30);
     let rows = sqlx::query(

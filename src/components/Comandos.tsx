@@ -18,6 +18,7 @@ import {
   Rows3,
   Search,
   ShoppingCart,
+  Sparkles,
   Star,
   Sun,
   UserRound,
@@ -25,13 +26,29 @@ import {
 } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce } from "@/lib/hooks";
-import { data, kz, qtd } from "@/lib/format";
+import { data, kz, pct, qtd } from "@/lib/format";
+import { useKz } from "@/lib/privacidade";
 import { DESTINOS, PAINEL, destinoPorEndereco, normalizar, pontuar, useNavegacao, type Destino } from "@/lib/navegacao";
 import { useAparencia } from "@/lib/aparencia";
 import type { Artigo, DocResumo, Entidade } from "@/lib/types";
 import { useSession } from "@/store/session";
 import { bloquearSessao } from "@/components/Sessao";
 import { cn } from "@/components/ui";
+
+/** Uma parte da resposta do assistente: texto ou um valor que se formata aqui (respeita «Ocultar valores»). */
+type Parte = string | { kz: number } | { qtd: number } | { pct: number };
+
+/** Resposta do assistente de perguntas (services/assistente.rs): calculada neste computador, nada sai para fora. */
+interface Resposta {
+  entendi: string;
+  resposta: Parte[];
+  linhas: { rotulo: string; valor: Parte[] }[];
+  ligacao: string;
+  nota: string | null;
+}
+
+/** Exemplos do que se pode perguntar (aparecem com a barra vazia). */
+const EXEMPLOS = ["Quanto vendi ontem?", "Quem me deve mais?", "O que vai esgotar?"];
 
 interface Item {
   id: string;
@@ -40,6 +57,25 @@ interface Item {
   direita?: string;
   icone: LucideIcon;
   executar: () => void;
+  /** a resposta do assistente (mostra-se por inteiro, em vez de numa linha) */
+  resposta?: Resposta;
+}
+
+function Partes({ p }: { p: Parte[] }) {
+  const kzV = useKz();
+  return (
+    <>
+      {p.map((x, i) =>
+        typeof x === "string" ? (
+          <span key={i}>{x}</span>
+        ) : (
+          <span key={i} className="num font-semibold">
+            {"kz" in x ? kzV(x.kz) : "qtd" in x ? qtd(x.qtd) : pct(x.pct)}
+          </span>
+        ),
+      )}
+    </>
+  );
 }
 
 interface Seccao {
@@ -114,7 +150,16 @@ function Paleta({
     enabled: remota,
     staleTime: 30_000,
   });
-  const aCarregar = remota && (docs.isFetching || ents.isFetching || arts.isFetching);
+  // assistente de perguntas: «quanto vendi ontem?», «stock do arroz», «quem me deve mais?» (com a permissão de relatórios)
+  const podePerguntar = tem("relatorios.ver");
+  const pergunta = useQuery({
+    queryKey: ["paleta", "perguntar", dq],
+    queryFn: () => call<Resposta | null>("inteligencia.perguntar", { texto: dq }),
+    enabled: dq.length >= 3 && podePerguntar,
+    staleTime: 30_000,
+    retry: false,
+  });
+  const aCarregar = (remota && (docs.isFetching || ents.isFetching || arts.isFetching)) || (podePerguntar && dq.length >= 3 && pergunta.isFetching);
 
   const fechar = (f: () => void) => () => {
     onFechar();
@@ -160,12 +205,20 @@ function Paleta({
         .filter((d): d is Destino => !!d && podeVer(d) && !favoritos.includes(d.to))
         .slice(0, 5);
       if (rec.length) out.push({ titulo: "Abertos recentemente", itens: rec.map((d) => ({ ...ir(d), id: "rec:" + d.to, icone: Clock })) });
+      if (podePerguntar)
+        out.push({
+          titulo: "Pergunte ao KanGest",
+          itens: EXEMPLOS.map((e, i) => ({ id: "ex:" + e, titulo: e, detalhe: i === 0 ? "Responde com os dados deste computador; nada sai para fora" : undefined, icone: Sparkles, executar: () => setQ(e) })),
+        });
       out.push({ titulo: "Acções", itens: accoes.slice(0, 3) });
       return out;
     }
 
     const palavras = normalizar(q.trim()).split(/\s+/).filter(Boolean);
     const out: Seccao[] = [];
+    const r = pergunta.data;
+    if (r && dq === q.trim())
+      out.push({ titulo: "Resposta", itens: [{ id: "resposta", titulo: r.entendi, icone: Sparkles, resposta: r, executar: fechar(() => nav(r.ligacao)) }] });
     const ecras = [PAINEL, ...DESTINOS]
       .filter(podeVer)
       .map((d) => ({ d, p: pontuar(palavras, d.label) * 2 || pontuar(palavras, `${d.label} ${d.grupo?.titulo ?? ""}`) }))
@@ -214,7 +267,7 @@ function Paleta({
     if (ac.length) out.push({ titulo: "Acções", itens: ac });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, remota, docs.data, ents.data, arts.data, favoritos, recentes, temaEfectivo, densidade]);
+  }, [q, dq, remota, docs.data, ents.data, arts.data, pergunta.data, favoritos, recentes, temaEfectivo, densidade]);
 
   const itens = seccoes.flatMap((s) => s.itens);
   useEffect(() => setSel(0), [q]);
@@ -255,7 +308,7 @@ function Paleta({
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={tecla}
-            placeholder="Ir para um ecrã, documento (FT 2026/12), cliente, NIF ou artigo…"
+            placeholder={podePerguntar ? "Pesquise ou pergunte: «quanto vendi ontem?», «stock do arroz»…" : "Ir para um ecrã, documento (FT 2026/12), cliente, NIF ou artigo…"}
             className="h-14 min-w-0 flex-1 bg-transparent text-[15px] text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
             aria-controls="paleta-resultados"
           />
@@ -270,6 +323,45 @@ function Paleta({
                 indice += 1;
                 const i = indice;
                 const Icone = it.icone;
+                if (it.resposta) {
+                  const r = it.resposta;
+                  return (
+                    <button
+                      key={it.id}
+                      type="button"
+                      role="option"
+                      aria-selected={i === sel}
+                      data-indice={i}
+                      onMouseMove={() => sel !== i && setSel(i)}
+                      onClick={it.executar}
+                      className={cn("flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left", i === sel ? "bg-brand-50" : "")}
+                    >
+                      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-brand text-white">
+                        <Icone className="size-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[12px] text-ink-3">{it.titulo}</span>
+                        <span className="block text-[15px] leading-snug text-ink">
+                          <Partes p={r.resposta} />
+                        </span>
+                        {r.linhas.length > 0 && (
+                          <span className="mt-2 grid gap-1 text-[12.5px]">
+                            {r.linhas.map((l, k) => (
+                              <span key={k} className="flex items-baseline justify-between gap-3">
+                                <span className="min-w-0 truncate text-ink-3">{l.rotulo}</span>
+                                <span className="shrink-0 text-ink-2">
+                                  <Partes p={l.valor} />
+                                </span>
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                        {r.nota && <span className="mt-1.5 block text-[12px] text-ink-3">{r.nota}</span>}
+                      </span>
+                      {i === sel && <CornerDownLeft className="mt-1 size-4 shrink-0 text-ink-3" />}
+                    </button>
+                  );
+                }
                 return (
                   <button
                     key={it.id}
