@@ -1,23 +1,25 @@
-// Prova de fumo do servidor de licenças em produção: node servidor-central/teste/fumo.mjs [endereço]
+// Prova de fumo do servidor de licenças em produção: node servidor-licencas/teste/fumo.mjs [endereço]
 // Faz o que um cliente faz, com uma empresa de teste (NIF «FUMO…»), e no fim apaga tudo o que criou:
 //   registo → código → confirmação → licença assinada (verificada com a chave pública do KanGest) → renovação com o
 //   estado e a equipa → conta da empresa (código, senha, entrada, resumo) → equipa gerida (loja e funcionário) → a
 //   renovação leva a equipa ao KanGest → aplicada → ficha na área do produtor → entrada do produtor recusa senha errada.
-// Diz também se o Worker antigo já encaminha para o Supabase.
-// Precisa da chave do produtor (~/.kangest-licencas/servidor/admin-token.txt ou KANGEST_ADMIN_TOKEN) e, para apagar,
-// do token do Supabase (~/.kangest-licencas/supabase-token.txt ou SUPABASE_ACCESS_TOKEN). Só mostra resultados e tempos.
+// Diz também se o encaminhamento no Supabase (para os KanGest 1.4.0) chega a este servidor.
+// O endereço por omissão é o web.licencas do site-fonte/config.json. Precisa da chave do produtor
+// (~/.kangest-licencas/servidor/admin-token.txt ou KANGEST_ADMIN_TOKEN) e, para apagar a empresa de teste, do token da
+// Cloudflare (~/.kangest-licencas/cloudflare-token.txt ou CLOUDFLARE_API_TOKEN, com «D1 · Edit»). Só mostra resultados e tempos.
 import { createPublicKey, verify } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { ligarD1 } from "../copia-d1.mjs";
 
-const URL_BASE = (process.argv[2] ?? "https://fissktkxilseymadzppn.supabase.co/functions/v1/kangest").replace(/\/+$/, "");
-const WORKER_ANTIGO = "https://kangest-licencas.valentinocanguele.workers.dev";
+const CONFIG = JSON.parse(readFileSync(new URL("../../site-fonte/config.json", import.meta.url), "utf8"));
+const URL_BASE = (process.argv[2] ?? CONFIG.web.licencas).replace(/\/+$/, "");
+const ENCAMINHAMENTO_SUPABASE = "https://fissktkxilseymadzppn.supabase.co/functions/v1/kangest";
 const ler = (f) => (existsSync(f) ? readFileSync(f, "utf8").trim() : "");
 const ADMIN = process.env.KANGEST_ADMIN_TOKEN || ler(join(homedir(), ".kangest-licencas/servidor/admin-token.txt"));
-const SUPABASE = process.env.SUPABASE_ACCESS_TOKEN || ler(join(homedir(), ".kangest-licencas/supabase-token.txt"));
+const CLOUDFLARE = process.env.CLOUDFLARE_API_TOKEN || ler(join(homedir(), ".kangest-licencas/cloudflare-token.txt"));
 const EMAIL_PRODUTOR = ler(join(homedir(), ".kangest-licencas/servidor/admin-email.txt"));
-const PROJECTO = new URL(URL_BASE).hostname.split(".")[0];
 if (!ADMIN) {
   console.error("Falta a chave do produtor (~/.kangest-licencas/servidor/admin-token.txt ou KANGEST_ADMIN_TOKEN).");
   process.exit(2);
@@ -63,24 +65,22 @@ const codigoAberto = async (tipo) =>
   (await pedir("GET", "/admin/api/resumo", null, ADMIN)).corpo?.codigos?.find((c) => c.tipo === tipo && c.nif === NIF)?.codigo_aberto;
 
 async function apagar() {
-  if (!SUPABASE) {
-    console.log(`! Sem o token do Supabase: a empresa de teste ${NIF} fica na base. Apague-a à mão.`);
+  if (!CLOUDFLARE) {
+    console.log(`! Sem o token da Cloudflare: a empresa de teste ${NIF} fica na D1. Apague-a à mão.`);
     return;
   }
-  const s = (v) => `'${v.replace(/'/g, "''")}'`;
-  const tabelas = ["equipa.funcionarios", "equipa.lojas_geridas", "equipa.postos_geridos", "equipa.equipa_versoes", "equipa.equipas",
-    "seguranca.sessoes_conta", "seguranca.segredos_maquina", "empresas.contas", "licencas.licencas", "licencas.instalacoes",
-    "licencas.codigos", "licencas.pagamentos", "licencas.maquinas", "web.subdominios", "empresas.clientes"];
-  const sql = [`delete from seguranca.codigos_conta where nif = ${s(NIF)} or email = ${s(EMAIL)}`, ...tabelas.map((t) => `delete from ${t} where nif = ${s(NIF)}`)]
-    .join(";\n") + `;\nselect (select count(*) from empresas.clientes where nif = ${s(NIF)}) + (select count(*) from licencas.licencas where nif = ${s(NIF)}) + (select count(*) from seguranca.codigos_conta where email = ${s(EMAIL)}) as restam`;
-  const r = await fetch(`https://api.supabase.com/v1/projects/${PROJECTO}/database/query`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${SUPABASE}`, "content-type": "application/json" },
-    body: JSON.stringify({ query: sql }),
-  });
-  const j = await r.json().catch(() => null);
-  const restam = Array.isArray(j) ? Number(j.at(-1)?.restam ?? j[0]?.restam) : NaN;
-  passo(`empresa de teste ${NIF} apagada`, r.ok && restam === 0, null, r.ok ? "" : JSON.stringify(j).slice(0, 200));
+  try {
+    const d1 = await ligarD1({ token: CLOUDFLARE, conta: process.env.CLOUDFLARE_ACCOUNT_ID });
+    await d1.consultar("DELETE FROM codigos_conta WHERE nif = ? OR email = ?", [NIF, EMAIL]);
+    for (const t of ["funcionarios", "lojas_geridas", "postos_geridos", "equipa_versoes", "equipas", "sessoes_conta", "segredos_maquina",
+      "contas", "licencas", "instalacoes", "codigos", "pagamentos", "maquinas", "subdominios", "clientes"]) {
+      await d1.consultar(`DELETE FROM ${t} WHERE nif = ?`, [NIF]);
+    }
+    const [{ restam }] = await d1.consultar("SELECT (SELECT COUNT(*) FROM clientes WHERE nif = ?1) + (SELECT COUNT(*) FROM licencas WHERE nif = ?1) + (SELECT COUNT(*) FROM codigos_conta WHERE email = ?2) AS restam", [NIF, EMAIL]);
+    passo(`empresa de teste ${NIF} apagada`, restam === 0, null);
+  } catch (e) {
+    passo(`apagar a empresa de teste ${NIF}`, false, null, e.message);
+  }
 }
 
 console.log(`Prova de fumo em ${URL_BASE}\n`);
@@ -149,10 +149,12 @@ try {
   await apagar();
 }
 
-// o Worker antigo: ainda responde sozinho ou já encaminha para aqui?
-const antigo = await pedir("GET", "/v1/planos", null, null, WORKER_ANTIGO).catch(() => null);
-const encaminha = antigo?.cabecalhos?.get("sb-project-ref") === PROJECTO;
-console.log(`${encaminha ? "✓" : "!"} Worker antigo (${WORKER_ANTIGO}): ${antigo ? (encaminha ? "encaminha para o Supabase" : "ainda responde sozinho (com a D1); falta o publicar-licencas.py --encaminhar") : "não respondeu"}`);
+// o encaminhamento no Supabase (os KanGest 1.4.0 falam com ele): chega a este servidor?
+if (URL_BASE !== ENCAMINHAMENTO_SUPABASE) {
+  const [aqui, la] = await Promise.all([pedir("GET", "/v1/planos"), pedir("GET", "/v1/planos", null, null, ENCAMINHAMENTO_SUPABASE).catch(() => null)]);
+  const recusa = await pedir("POST", "/v1/registo", { nif: "12" }, null, ENCAMINHAMENTO_SUPABASE).catch(() => null);
+  passo("o encaminhamento no Supabase (KanGest 1.4.0) chega a este servidor", la?.estado === 200 && JSON.stringify(la.corpo) === JSON.stringify(aqui.corpo) && recusa?.corpo?.erro === "O NIF não é válido.", la);
+}
 
 console.log(falhas ? `\n${falhas} falha(s).` : "\nTudo a funcionar.");
 process.exitCode = falhas ? 1 : 0;

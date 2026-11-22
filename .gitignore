@@ -12,6 +12,6 @@ src-tauri/gen/
 scripts/selo/target/
 # instaladores juntados ao site pela GitHub Actions (site.yml): não se guardam no repositório
 site/actualizacoes/
-# cópias da D1 do servidor de licenças (servidor-central/copiar-d1.mjs): têm os dados dos clientes
+# cópias da D1 do servidor de licenças (servidor-licencas/copia-d1.mjs): têm os dados dos clientes
 d1-*.json
 d1-*.sql

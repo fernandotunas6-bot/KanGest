@@ -226,7 +226,7 @@ const ORIGENS = { EXPERIENCIA: "Experiência", RENOVACAO: "Servidor", PAINEL: "M
 const selo = (e) => `<span class="selo s-${esc(e)}">${esc(ROTULOS[e] || e)}</span>`;
 // Endereço do servidor de licenças: vazio no próprio servidor; o gerador do site (scripts/gerar-site.py) põe aqui o
 // endereço público para a área do produtor em kangest.pages.dev/admin.html.
-const API = "https://fissktkxilseymadzppn.supabase.co/functions/v1/kangest";
+const API = "https://kangest-licencas.valentinocanguele.workers.dev";
 let token = "";
 try { token = sessionStorage.getItem("kg-admin") || ""; } catch {}
 let dados = null;

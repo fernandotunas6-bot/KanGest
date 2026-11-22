@@ -1,0 +1,7 @@
+# Encaminhamento temporário no Supabase (servidor-licencas/encaminhamento-supabase/LEIA-ME.md).
+# Projecto remoto: fissktkxilseymadzppn.
+project_id = "kangest-encaminhamento"
+
+[functions.kangest]
+# os KanGest e o site não mandam o JWT do Supabase; a autenticação é a do servidor de licenças
+verify_jwt = false
