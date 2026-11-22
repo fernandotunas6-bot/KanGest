@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { d1Local } from "./d1-local.mjs";
-import worker from "../src/worker.js";
+import worker, { hoje as hojeEmLuanda } from "../src/worker.js";
 
 const ADMIN = "c".repeat(40);
 const enviados = [];
@@ -34,7 +34,7 @@ async function pedir(metodo, caminho, corpo, token) {
 }
 const post = (c, b, t) => pedir("POST", "/v1/conta/" + c, b, t);
 const codigoDe = (m) => m.subject.match(/(\d{6})/)?.[1];
-const hoje = new Date().toISOString().slice(0, 10);
+const hoje = hojeEmLuanda(); // o dia do servidor (Luanda, UTC+1): entre as 23h e a meia-noite UTC já é amanhã
 const somar = (d, n) => { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 
 const NIF = "5000000011";
