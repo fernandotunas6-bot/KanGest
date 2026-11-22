@@ -682,10 +682,27 @@ pub async fn sincronizar(st: &AppState, i: SincronizarIn) -> AppResult<Value> {
     }
     let (_, nif) = dados_empresa(st).await?;
     let segredo = segredo_maquina(st).await;
-    let v = chamar_servidor("/v1/renovar", json!({ "nif": nif, "maquina": id_maquina(), "versao": env!("CARGO_PKG_VERSION"), "segredo": segredo })).await?;
+    let estado = estado_instalacao(st, &antes).await?;
+    let v = chamar_servidor("/v1/renovar", json!({ "nif": nif, "maquina": id_maquina(), "versao": env!("CARGO_PKG_VERSION"), "segredo": segredo, "estado": estado })).await?;
     cfg_gravar(&st.pool, "licenca.sincronizada_em", &db::agora()).await?;
     let mudou = aplicar(st, &v, Some(s.id)).await?;
     Ok(json!({ "mudou": mudou, "mensagem": v.get("mensagem"), "estado": calcular(st).await? }))
+}
+
+/// O que vai ao servidor de licenças em cada verificação, para a área do produtor: modo de gestão, licença como este
+/// computador a vê e a data das cópias de segurança. Só datas e indicadores; nunca caminhos, nomes de ficheiros nem dados
+/// da empresa.
+pub(crate) async fn estado_instalacao(st: &AppState, lic: &Estado) -> AppResult<Value> {
+    let cfg = |k: &'static str| async move { cfg_ler(&st.pool, k).await.map(|v| v.filter(|x| !x.trim().is_empty())) };
+    Ok(json!({
+        "modo": super::modos::modo(&st.pool).await?,
+        "licenca": { "estado": lic.modo, "fim": lic.fim },
+        "copias": {
+            "ultima": cfg("copias.ultima").await?,
+            "ultima_externa": cfg("copias.ultima_externa").await?,
+            "erro_externa": cfg("copias.erro_externa").await?.is_some(),
+        },
+    }))
 }
 
 #[derive(Deserialize)]

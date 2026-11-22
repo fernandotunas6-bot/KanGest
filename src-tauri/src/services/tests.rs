@@ -4830,8 +4830,20 @@ async fn acesso_pela_internet_por_subdominio() {
     rpc(&arc, "licenca.confirmar", json!({ "codigo": "123456" })).await;
     let guardado: String = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'licenca.segredo'").fetch_one(&arc.pool).await.unwrap();
     assert!(guardado.starts_with("kgs1:") && !guardado.contains("segredo-do-computador"), "{guardado}");
+    sqlx::query("INSERT INTO config (chave, valor) VALUES ('copias.ultima', '2026-11-20T18:02:11'), ('copias.erro_externa', '2026-11-21T09:00:00 — a pasta externa /Volumes/PEN não está acessível')")
+        .execute(&arc.pool)
+        .await
+        .unwrap();
     rpc(&arc, "licenca.sincronizar", json!({ "forcar": true })).await;
-    assert_eq!(corpo("/v1/renovar").unwrap()["segredo"], "segredo-do-computador-1234");
+    let renovar = corpo("/v1/renovar").unwrap();
+    assert_eq!(renovar["segredo"], "segredo-do-computador-1234");
+    // o estado da instalação vai para a área do produtor: só datas e indicadores, nunca caminhos
+    assert_eq!(renovar["estado"]["modo"], "loja");
+    assert!(renovar["estado"]["licenca"]["estado"].is_string());
+    assert_eq!(renovar["estado"]["copias"]["ultima"], "2026-11-20T18:02:11");
+    assert_eq!(renovar["estado"]["copias"]["ultima_externa"], Value::Null);
+    assert_eq!(renovar["estado"]["copias"]["erro_externa"], true);
+    assert!(!renovar["estado"].to_string().contains("/Volumes"), "o erro da cópia externa não leva o caminho: {}", renovar["estado"]);
 
     // activar: pede o endereço com o segredo e a porta do servidor; o token fica cifrado e o túnel liga-se
     let e = rpc(&arc, "web.activar", json!({ "nome": " Kianda " })).await;
