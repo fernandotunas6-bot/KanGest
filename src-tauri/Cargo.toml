@@ -72,6 +72,9 @@ libsqlite3-sys = { version = "0.30", features = ["bundled-sqlcipher-vendored-ope
 # Apple; no Linux (CI, desenvolvimento) o libcrypto do sistema.
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 libsqlite3-sys = { version = "0.30", features = ["bundled-sqlcipher"] }
+# OpenSSL do SQLCipher sem a limpeza à saída (db::iniciar_cripto): já vinha pelas outras dependências.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+openssl-sys = "0.9"
 
 # Crypto e hashing ficam muito lentos sem optimizações em debug.
 [profile.dev.package.rsa]
