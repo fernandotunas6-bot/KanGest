@@ -158,6 +158,8 @@ pub fn run() {
             services::sistema::iniciar_agendamento(estado.clone());
             // Resumo diário ao dono por email (se estiver ligado no painel).
             services::resumo_email::iniciar(estado.clone());
+            // Licença e equipa gerida no site: verificadas sozinhas, mesmo sem ninguém com sessão aberta.
+            services::licenca::iniciar(estado.clone());
             app.manage(estado);
             Ok(())
         })
