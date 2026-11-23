@@ -13,7 +13,7 @@ import EmailConfig from "@/components/EmailConfig";
 import { ConfigLeitorAparelho } from "@/components/Leitor";
 import AparenciaConfig from "@/components/AparenciaConfig";
 import { imprimir } from "@/lib/print";
-import { call, descricaoDispositivo, esquecerLigacao, levarFicheiro, ligacaoWeb, MODO_WEB, reiniciar } from "@/lib/api";
+import { call, descricaoDispositivo, esquecerLigacao, levarFicheiro, ligacaoWeb, MODO_WEB, reiniciar, NA_APP } from "@/lib/api";
 import { instalarPwa, usePwa } from "@/lib/pwa";
 import { qrcode, qrSvgPath } from "@/lib/qrcode";
 import { ramoPorId } from "@/lib/ramos";
@@ -1665,6 +1665,45 @@ function RedeNoBrowser() {
 }
 
 /** Vários postos ligados ao mesmo servidor (substitui o SQL Server partilhado do KIGEST). */
+/** Abrir o KanGest ao ligar o computador (cada computador tem o seu; src-tauri/src/nativo.rs). */
+function ArranqueAutomatico() {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const { data: a } = useQuery({ queryKey: ["arranque"], queryFn: () => call<{ ativo: boolean; servidor: boolean }>("rede.arranque") });
+  if (!a) return null;
+  async function mudar(ativo: boolean) {
+    setBusy(true);
+    try {
+      qc.setQueryData(["arranque"], await call("rede.arranqueGuardar", { ativo }));
+      toast.success(ativo ? "O KanGest passa a abrir ao ligar este computador." : "O KanGest deixa de abrir ao ligar este computador.");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card className="p-5">
+      <label className="flex cursor-pointer items-start gap-3">
+        <input type="checkbox" className="mt-1 size-4" checked={a.ativo} disabled={busy} onChange={(e) => mudar(e.target.checked)} />
+        <span>
+          <span className="block font-medium">Abrir o KanGest ao ligar este computador</span>
+          <span className="mt-0.5 block text-[13px] text-ink-3">
+            {a.servidor
+              ? "Recomendado: este computador é o servidor da loja. Os postos em rede, o acesso pela Internet e as cópias de segurança dependem de o KanGest estar aberto nele, também depois de uma falha de luz."
+              : "O KanGest abre sozinho quando se liga o computador. É sobretudo útil no computador servidor da loja."}
+          </span>
+        </span>
+      </label>
+      {a.servidor && !a.ativo && (
+        <p className="mt-3 rounded-md bg-accent-50 px-3 py-2 text-[13px] text-accent-ink">
+          Desligado: se o computador reiniciar, os postos ficam sem servidor até alguém abrir o KanGest.
+        </p>
+      )}
+    </Card>
+  );
+}
+
 function Rede() {
   const [f, setF] = useState<Partial<EstadoRede> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1803,6 +1842,8 @@ function Rede() {
           </div>
         </div>
       </Card>
+
+      {NA_APP && <ArranqueAutomatico />}
 
       {r.modo === "servidor" && r.servidor_activo && r.web && <AcessoBrowser r={r} />}
       {r.modo === "servidor" && r.web && <AcessoInternet />}

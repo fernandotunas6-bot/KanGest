@@ -7,6 +7,7 @@ mod auditoria;
 mod db;
 mod enderecos;
 mod error;
+mod nativo;
 pub mod http;
 pub mod internet;
 mod produtor;
@@ -72,7 +73,19 @@ pub fn run() {
         Err(e) => eprintln!("Runtime assíncrono por omissão (não foi possível criar o próprio: {e})"),
     }
     tauri::Builder::default()
+        // tem de ser o primeiro plugin: abrir o KanGest outra vez traz a janela aberta para a frente, em vez de uma
+        // segunda cópia a escrever na mesma base (src/nativo.rs)
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(janela) = app.get_webview_window("main") {
+                let _ = janela.unminimize();
+                let _ = janela.show();
+                let _ = janela.set_focus();
+            }
+        }))
+        // abrir ao ligar o computador (Configurações → Rede): chave «Run» no Windows, LaunchAgent no macOS
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .setup(|app| {
+            nativo::definir(app.handle().clone());
             // selo de integridade do executável (só nas compilações oficiais; corre numa thread à parte)
             if let Ok(recursos) = app.path().resource_dir() {
                 selo::iniciar(recursos);
