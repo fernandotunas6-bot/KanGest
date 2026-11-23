@@ -10,7 +10,7 @@ import { call } from "@/lib/api";
 import { data, hojeISO, kz, parseKz, qtd, toInputKz } from "@/lib/format";
 import { dataXL, exportarExcel, kzXL } from "@/lib/csv";
 import { MESES, type Funcionario } from "@/lib/types";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, BlocoCarregando } from "@/components/ui";
 import { InputData } from "@/components/InputData";
 import { periodo } from "./Salarios";
 
@@ -437,7 +437,9 @@ function ListaPrestacoes({ ano }: { ano: number }) {
         </Button>
       </div>
       <Card>
-        {!lista.data?.length ? (
+        {!lista.data ? (
+          <BlocoCarregando />
+        ) : !lista.data.length ? (
           <Empty icon={<HeartPulse className="size-6" />} title={`Sem prestações em ${ano}`} text="Registe licenças de maternidade, doença, acidentes de trabalho e outras prestações." />
         ) : (
           <Table>

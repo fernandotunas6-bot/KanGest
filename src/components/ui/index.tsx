@@ -362,6 +362,17 @@ export function Td({ children, className, ...rest }: TdHTMLAttributes<HTMLTableC
   );
 }
 
+/** Um bloco a carregar (barras a pulsar), onde depois aparece uma lista ou o seu estado vazio. */
+export function BlocoCarregando({ linhas = 4 }: { linhas?: number }) {
+  return (
+    <div className="space-y-3 p-5" aria-label="A carregar" role="status">
+      {Array.from({ length: linhas }, (_, i) => (
+        <div key={i} className="h-3.5 animate-pulse rounded bg-sunken" style={{ width: `${88 - ((i * 17) % 40)}%` }} />
+      ))}
+    </div>
+  );
+}
+
 /** Linhas a carregar numa tabela: barras a pulsar enquanto os dados chegam (em vez de uma tabela vazia ou de «0»). */
 export function LinhasCarregando({ colunas, linhas = 6 }: { colunas: number; linhas?: number }) {
   return (

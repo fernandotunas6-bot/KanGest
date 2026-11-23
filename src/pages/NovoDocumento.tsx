@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Coins, FileSearch, KeyRound, NotebookPen, Plus, Trash2, Truck, Wrench } from "lucide-react";
+import { ArrowLeft, ChevronDown, Coins, FileSearch, KeyRound, NotebookPen, Plus, Trash2, Truck, Wrench } from "lucide-react";
 import { call } from "@/lib/api";
 import { useTabelas } from "@/lib/hooks";
 import { data, hojeISO, kz, kzNum, parseKz, qtd, toInputKz } from "@/lib/format";
@@ -116,6 +116,7 @@ export default function NovoDocumento() {
   const [obs, setObs] = useState("");
   const [descGlobal, setDescGlobal] = useState(0);
   const [retencoes, setRetencoes] = useState<string[]>([]);
+  const [verRetencao, setVerRetencao] = useState(false);
   const [transp, setTransp] = useState<Transporte>({});
   const [pagModo, setPagModo] = useState("NU");
   const [busy, setBusy] = useState(false);
@@ -466,7 +467,7 @@ export default function NovoDocumento() {
         <div className="space-y-4">
           {/* Cabeçalho do documento */}
           <Card className="p-5">
-            <div className="grid grid-cols-4 items-end gap-4">
+            <div className="grid grid-cols-[1.3fr_1fr_1fr_1fr] items-end gap-4">
               {!eStock && (
                 <div className="col-span-2">
                   <EntidadePicker
@@ -885,7 +886,7 @@ export default function NovoDocumento() {
             <>
               <div className="space-y-2 text-ink-2">
                 <Row k="Total Merc./Serviços" v={kz(tot.bruto)} />
-                <Row k="Descontos por linha" v={kz(tot.descLinha)} />
+                {tot.descLinha > 0 && <Row k="Descontos por linha" v={`− ${kz(tot.descLinha)}`} />}
                 {!eStock && (
                   <div className="flex items-center justify-between gap-3">
                     <span>Desconto global</span>
@@ -896,14 +897,24 @@ export default function NovoDocumento() {
                   </div>
                 )}
                 {tot.descGlobal > 0 && <Row k="" v={`− ${kz(tot.descGlobal)}`} />}
+                {/* pela ordem natural: o líquido (sem IVA), depois o IVA, e no fim o total */}
+                <Row k={eStock ? "Total líquido" : "Total sem IVA"} v={kz(tot.liq)} />
                 {!eStock && <Row k="Imposto (IVA)" v={kz(tot.iva)} />}
-                <Row k="Total líquido" v={kz(tot.liq)} />
               </div>
 
               {!eStock && !!aux?.retencoes.length && (
                 <div className="mt-4">
-                  <div className="mb-1.5 text-[12px] font-medium uppercase tracking-wide text-ink-2">Retenção na fonte</div>
-                  <div className="flex flex-wrap gap-1.5">
+                  {/* recolhida: quase nenhuma venda tem retenção; abre-se sozinha quando há alguma escolhida */}
+                  <button
+                    type="button"
+                    onClick={() => setVerRetencao((v) => !v)}
+                    aria-expanded={verRetencao || retencoes.length > 0}
+                    className="flex w-full items-center justify-between text-[12px] font-medium uppercase tracking-wide text-ink-2 hover:text-ink"
+                  >
+                    <span>Retenção na fonte{retencoes.length ? ` (${retencoes.length})` : ""}</span>
+                    <ChevronDown className={cn("size-4 transition", (verRetencao || retencoes.length > 0) && "rotate-180")} />
+                  </button>
+                  <div className={cn("mt-1.5 flex flex-wrap gap-1.5", !(verRetencao || retencoes.length > 0) && "hidden")}>
                     {aux.retencoes.map((r) => {
                       const on = retencoes.includes(r.codigo);
                       return (

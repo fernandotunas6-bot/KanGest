@@ -11,7 +11,7 @@ import { data, hojeISO, kz, parseKz, toInputKz } from "@/lib/format";
 import { imprimir } from "@/lib/print";
 import type { Entidade } from "@/lib/types";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Confirmar, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Stat, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Confirmar, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Stat, Table, Td, Th, cn, BlocoCarregando } from "@/components/ui";
 import { EntidadePicker } from "@/components/Pickers";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
@@ -206,7 +206,7 @@ function MapaPropinas({ ano, irTurmas }: { ano: Ano; irTurmas: () => void }) {
             title={p.data?.linhas.length ? "Nenhum aluno encontrado" : "Ainda não há alunos matriculados"}
             text={turmas.data?.length ? "Matricule os alunos: cada um passa a ter a propina de cada mês." : "Crie primeiro as turmas, com o valor da propina de cada uma."}
             action={
-              !turmas.data?.length && (
+              turmas.data && !turmas.data.length && (
                 <Button onClick={irTurmas}>
                   <Plus className="size-4" /> Criar turmas
                 </Button>
@@ -603,7 +603,10 @@ function Turmas({ ano, anos, onAno }: { ano: Ano | null; anos: Ano[]; onAno: (id
             <Plus className="size-4" /> Nova turma
           </Button>
         </div>
-        {!turmas.data?.length ? (
+        {/* sem ano lectivo a consulta não corre: aí é vazio, não «a carregar» */}
+        {ano && !turmas.data ? (
+          <BlocoCarregando />
+        ) : !turmas.data?.length ? (
           <Empty icon={<GraduationCap className="size-6" />} title="Sem turmas" text="Crie as turmas com o valor da propina mensal de cada uma." />
         ) : (
           <Table>

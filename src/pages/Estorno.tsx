@@ -9,7 +9,7 @@ import { call } from "@/lib/api";
 import { useDebounce } from "@/lib/hooks";
 import { data, kz } from "@/lib/format";
 import type { DocCompleto, DocResumo } from "@/lib/types";
-import { Button, Card, Empty, Field, Input, PageHeader, Table, Td, Th, cn } from "@/components/ui";
+import { Button, Card, Empty, Field, Input, PageHeader, Table, Td, Th, cn, BlocoCarregando } from "@/components/ui";
 
 /** Estorno de Recibo (Fr_EstornoRecibo) de cliente (RC) ou de fornecedor (VRC). */
 export default function Estorno({ tipo }: { tipo: "RC" | "VRC" }) {
@@ -53,7 +53,9 @@ export default function Estorno({ tipo }: { tipo: "RC" | "VRC" }) {
               <Input className="pl-9" placeholder="N.º do recibo ou entidade…" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
           </div>
-          {!lista.data?.length ? (
+          {!lista.data ? (
+          <BlocoCarregando />
+        ) : !lista.data.length ? (
             <Empty icon={<Undo2 className="size-6" />} title="Sem recibos válidos" />
           ) : (
             <Table className="max-h-[calc(100vh-324px)]">

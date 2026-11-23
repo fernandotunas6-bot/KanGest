@@ -33,7 +33,7 @@ export default function Caixa() {
   const qc = useQueryClient();
   const nav = useNavigate();
   const tem = useSession((s) => s.tem);
-  const { data: c, refetch } = useQuery({ queryKey: ["caixa"], queryFn: () => call<CaixaResumo | null>("caixa.estado") });
+  const { data: c, refetch, isSuccess } = useQuery({ queryKey: ["caixa"], queryFn: () => call<CaixaResumo | null>("caixa.estado") });
   const [mov, setMov] = useState(false);
   // talão de um movimento (vale de caixa): logo a seguir a registar ou para reimprimir
   const [vale, setVale] = useState<{ id: number; imprimir: boolean } | null>(null);
@@ -59,7 +59,17 @@ export default function Caixa() {
 
   return (
     <>
-      {!c ? (
+      {!isSuccess ? (
+        // ainda sem resposta: não se mostra «Caixa fechado» (levava a abrir o caixa outra vez)
+        <>
+          <PageHeader title="Caixa" subtitle="A ver o estado do caixa…" />
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="h-[118px] animate-pulse rounded-2xl bg-sunken/60" />
+            ))}
+          </div>
+        </>
+      ) : !c ? (
         <>
           <PageHeader title="Caixa" subtitle="Abertura, movimentos e fecho de caixa" actions={acoesTopo} />
           <Card className="mx-auto max-w-lg">
