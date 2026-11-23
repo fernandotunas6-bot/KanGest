@@ -45,6 +45,23 @@ CI=true npm run tauri build -- --bundles app,dmg
 
 `src-tauri/target/release/bundle/macos/KanGest.app` e `bundle/dmg/KanGest_1.0.0_x64.dmg`. Sem certificado de programador Apple, o macOS pede para abrir com o botão direito → «Abrir» na primeira vez.
 
+### Cores e degradés no macOS 12 e anteriores
+
+No macOS o KanGest usa o WebKit do sistema. Do macOS 12 para trás, esse WebKit é o do Safari 15, mais antigo do que o
+Safari 16.4 que o Tailwind v4 pede. Sem tratamento, ali o ecrã saía desajustado: os degradés **desapareciam** (o Tailwind
+escreve `in oklab`, que o Safari 15 não conhece, e deita fora a declaração inteira, por isso a camada escura dos cartões
+do ecrã de entrada sumia) e as cores com transparência (`bg-nav/95`…) saíam sempre na cor do jogo por omissão, mesmo com
+outro jogo de cores ou com o tema escuro.
+
+- `scripts/css-webkit15.mjs` é um plugin de PostCSS (ligado em `vite.config.ts`) que corre depois do Tailwind: devolve o
+  degradé sem `in oklab` (com `in oklab` só onde o motor o percebe) e dá às cores com transparência uma versão que
+  segue o tema, `rgb(var(--rgb-nav) / 95%)`. Cada `--color-x` do tema tem ao lado um canal `--rgb-x`; as cores
+  escolhidas em Configurações → Aparência também (`aplicarCores`, em `src/lib/cores.ts`).
+- `scripts/verificar-css.mjs` corre na CI depois de `vite build` e falha se o CSS compilado ainda tiver `color-mix` ou
+  `in oklab` fora de um `@supports`. Se uma actualização do Tailwind a fizer falhar, ajuste o plugin.
+- Não escreva `color-mix()` à mão no código (o Safari 15 não o tem): use `rgb(var(--rgb-…) / 0.14)`. Para ver o ecrã
+  no motor verdadeiro, use um macOS 12 ou mais antigo; o Chrome e o Windows (WebView2) não mostram o problema.
+
 ## Migração dos dados do KIGEST
 
 A base do KIGEST (`KigestGC`) está no SQL Server do computador **DESKTOP-G26LDJM** (ver `Conexao.ini`). Há dois caminhos; o primeiro funciona em qualquer caso.
