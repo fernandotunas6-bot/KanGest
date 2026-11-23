@@ -1070,8 +1070,16 @@ function ArtigoForm({
             <label className="flex h-10 items-center gap-2">
               <input type="checkbox" checked={!!a.controla_stock} onChange={(e) => set("controla_stock", e.target.checked ? 1 : 0)} /> Controla stock
             </label>
-            <label className="flex h-10 items-center gap-2">
-              <input type="checkbox" checked={!!a.permite_negativo} onChange={(e) => set("permite_negativo", e.target.checked ? 1 : 0)} /> Permite stock negativo
+            <label className="flex min-h-10 items-center gap-2">
+              <input type="checkbox" checked={!!a.permite_negativo} onChange={(e) => set("permite_negativo", e.target.checked ? 1 : 0)} />
+              <span>
+                Permite stock negativo
+                {(t?.sem_stock ?? "nao") !== "artigo" && (
+                  <span className="block text-[11.5px] text-ink-3">
+                    Sem efeito: «Vender sem stock» está em «{t?.sem_stock === "autorizar" ? "Só com autorização" : "Nunca"}» (Parametrização → Opções de venda).
+                  </span>
+                )}
+              </span>
             </label>
           </div>
         )}

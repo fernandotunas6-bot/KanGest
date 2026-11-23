@@ -80,8 +80,9 @@ type LinhaGuardada = { artigo_id: number; quantidade: number; preco: number; pvp
 const OPCOES_PADRAO: PostoOpcoes = {
   formato: "ticket",
   vias: 1,
-  imprimir_auto: false,
-  mostrar_opcoes_impressao: true,
+  // venda rápida: imprime sozinho e volta logo à venda seguinte
+  imprimir_auto: true,
+  mostrar_opcoes_impressao: false,
   valor_minimo_impressao: 0,
   repetir_linhas: false,
   confirmar_cliente: false,
@@ -202,6 +203,7 @@ export default function Pos() {
   const tabelas = useTabelas();
   const opcoes: PostoOpcoes = { ...OPCOES_PADRAO, ...(tabelas.data?.posto?.opcoes ?? {}) };
   const termica = !!opcoes.escpos?.ativo;
+  const politicaStock = tabelas.data?.sem_stock ?? "nao";
 
   const [busca, setBusca] = useState("");
   const [familia, setFamilia] = useState<number | null>(null);
@@ -304,7 +306,33 @@ export default function Pos() {
   );
 
   /** Lança o artigo com as regras do ramo: aviso de receita, n.º de série (uma linha por unidade) e garantia na descrição. */
-  function vender(a: Artigo, quantidade = 1) {
+  /** Juntar mais `quantidade` passa a existência deste posto? (artigos com stock; os kits confere-os o servidor) */
+  function faltaStock(a: Artigo, quantidade: number) {
+    if (a.controla_stock !== 1 || a.tipo !== "P" || a.composto === 1) return false;
+    const noCarrinho = linhas.filter((l) => l.artigo.id === a.id).reduce((s, l) => s + l.quantidade, 0);
+    return noCarrinho + quantidade > a.stock + 1e-9;
+  }
+
+  /** Junta o artigo à venda; sem stock, conforme a política da empresa: recusa, pede autorização ou segue a ficha. */
+  function vender(a: Artigo, quantidade = 1): boolean {
+    if (faltaStock(a, quantidade) && !(politicaStock === "artigo" && a.permite_negativo === 1)) {
+      const ha = qtd(Math.max(0, a.stock));
+      if (politicaStock !== "autorizar") {
+        bip(false);
+        toast.error(`Sem stock de «${a.descricao}»: há ${ha}.`, { description: "Registe primeiro a entrada (compra ou entrada de stock), ou acerte-o no inventário." });
+        return false;
+      }
+      if (!tem("stock.sem_stock")) {
+        comPermissao("stock.sem_stock", `Vender «${a.descricao}» sem stock (há ${ha})`, () => juntar(a, quantidade));
+        return true;
+      }
+      toast.warning(`«${a.descricao}» vendido sem stock (há ${ha}).`);
+    }
+    juntar(a, quantidade);
+    return true;
+  }
+
+  function juntar(a: Artigo, quantidade: number) {
     const at = atributosDe(a);
     if (at.receita) toast.warning(`${a.descricao}: sujeito a receita médica — confirme a receita.`, { duration: 7000 });
     if (at.pede_serie) {
@@ -342,8 +370,7 @@ export default function Pos() {
           return true;
         }
         // embalagem (ex.: pack de 12) ou etiqueta de balança: a quantidade vem no código
-        vender(a, a.quantidade_lida ? +(quantidade * a.quantidade_lida).toFixed(6) : quantidade);
-        bip(true);
+        if (vender(a, a.quantidade_lida ? +(quantidade * a.quantidade_lida).toFixed(6) : quantidade)) bip(true);
         if (a.etiqueta) toast.info(`${a.descricao}: ${a.etiqueta.tipo === "PESO" ? `${qtd(a.etiqueta.valor)} kg` : kz(a.etiqueta.valor)} (etiqueta da balança)`);
         if (a.gs1?.lote || validade) toast.info(`${a.descricao}: ${[a.gs1?.lote && `lote ${a.gs1.lote}`, validade && `validade ${dataPt(validade)}`].filter(Boolean).join(", ")}`);
         return true;
@@ -726,6 +753,9 @@ export default function Pos() {
     qc.invalidateQueries({ queryKey: ["caixa"] });
     qc.invalidateQueries({ queryKey: ["pos-artigos"] });
     qc.invalidateQueries({ queryKey: ["pontos"] });
+    // a existência mudou: o mapa de stock e a lista de artigos mostram-na já
+    qc.invalidateQueries({ queryKey: ["stock"] });
+    qc.invalidateQueries({ queryKey: ["artigos"] });
     const id = d.documento.id;
     const imprime = opcoes.imprimir_auto && d.documento.total >= (opcoes.valor_minimo_impressao || 0);
     if (opcoes.mostrar_opcoes_impressao) {
@@ -1076,7 +1106,9 @@ export default function Pos() {
             ) : (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(170px,1fr))]">
                 {artigos.data?.map((a) => {
-                  const semStock = a.controla_stock === 1 && a.stock <= 0 && a.permite_negativo !== 1;
+                  const semStock = a.controla_stock === 1 && a.tipo === "P" && a.composto !== 1 && a.stock <= 0;
+                  // com «só com autorização» o artigo continua a poder tocar-se (pede o PIN); com «nunca» não
+                  const bloqueado = semStock && (politicaStock === "nao" || (politicaStock === "artigo" && a.permite_negativo !== 1));
                   return (
                     <button
                       key={a.id}
@@ -1084,7 +1116,7 @@ export default function Pos() {
                         vender(a);
                         focar();
                       }}
-                      disabled={semStock}
+                      disabled={bloqueado}
                       className="group relative flex h-[104px] flex-col rounded-xl border border-line bg-surface p-2.5 text-left sm:h-[118px] sm:p-3 shadow-card transition hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:bg-sunken/60 disabled:hover:translate-y-0 disabled:hover:border-line disabled:hover:shadow-card"
                     >
                       {semStock && <span className="absolute right-2 top-2 z-[1] rounded-md bg-danger-50 px-1.5 py-0.5 text-[10.5px] font-medium text-danger">Sem stock</span>}
@@ -1591,7 +1623,7 @@ export default function Pos() {
         pedido={pedidoPin}
         onClose={() => { setPedidoPin(null); focar(); }}
         onOk={(p) => {
-          if (pedidoPin?.permissao === "pos.desconto" || pedidoPin?.permissao === "pos.alterar_preco") setPin(p);
+          if (pedidoPin && ["pos.desconto", "pos.alterar_preco", "stock.sem_stock"].includes(pedidoPin.permissao)) setPin(p);
           pedidoPin?.acao();
           setPedidoPin(null);
           focar();

@@ -42,6 +42,7 @@ pub async fn obter(st: &AppState) -> AppResult<Value> {
         "modos": db::query_json(p, "SELECT m.*, c.descricao AS conta FROM modos_pagamento m LEFT JOIN contas c ON c.id = m.conta_id WHERE m.codigo NOT IN ('CS', 'DE') ORDER BY m.ordem").await?,
         "contas": db::query_json(p, "SELECT id, descricao, tipo FROM contas WHERE ativo = 1 ORDER BY descricao").await?,
         "opcoes": opcoes(p).await?,
+        "sem_stock": super::documentos::politica_sem_stock(p).await?,
     }))
 }
 
@@ -145,6 +146,15 @@ pub async fn modo_guardar(st: &AppState, m: ModoIn) -> AppResult<Value> {
 pub async fn opcoes_guardar(st: &AppState, v: Value) -> AppResult<Value> {
     st.exigir_perm("sistema.parametrizacao")?;
     let mut tx = crate::db::transacao(&st.pool).await?;
+    if let Some(s) = v.get("sem_stock").and_then(Value::as_str) {
+        if !matches!(s, "nao" | "autorizar" | "artigo") {
+            return Err(AppError::msg("Escolha nunca, só com autorização, ou conforme a ficha do artigo."));
+        }
+        sqlx::query("INSERT INTO config (chave, valor) VALUES ('stock.sem_stock', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor")
+            .bind(s)
+            .execute(&mut *tx)
+            .await?;
+    }
     for (k, chave) in OPCOES {
         if let Some(b) = v.get(*k).and_then(|x| x.as_bool()) {
             sqlx::query("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor")

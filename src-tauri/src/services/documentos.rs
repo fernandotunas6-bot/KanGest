@@ -400,6 +400,30 @@ async fn carregar_tipo(tx: &mut Transaction<'_, Sqlite>, codigo: &str) -> AppRes
     })
 }
 
+/// O que fazer quando uma venda (ou saída) pede mais do que a existência: «nao» (por omissão: nunca), «autorizar»
+/// (quem tem a permissão `stock.sem_stock`, ou com o PIN de um supervisor que a tenha) ou «artigo» (o que diz a
+/// ficha de cada artigo em «Permite stock negativo», como no KIGEST).
+pub async fn politica_sem_stock<'e, E: sqlx::SqliteExecutor<'e>>(e: E) -> AppResult<&'static str> {
+    let v: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE chave = 'stock.sem_stock'").fetch_optional(e).await?;
+    Ok(match v.as_deref().map(str::trim) {
+        Some("autorizar") => "autorizar",
+        Some("artigo") => "artigo",
+        _ => "nao",
+    })
+}
+
+/// A mensagem de stock insuficiente com o que se pode fazer, conforme a política.
+fn sem_stock_explicado(e: AppError, politica: &str) -> AppError {
+    match e {
+        AppError::Msg(m) if m.starts_with("Stock insuficiente") => AppError::Msg(match politica {
+            "autorizar" => format!("{m} Para vender sem stock é necessária a autorização de um supervisor (PIN)."),
+            "nao" => format!("{m} Registe primeiro a entrada (compra ou entrada de stock), ou acerte-o no inventário."),
+            _ => m,
+        }),
+        e => e,
+    }
+}
+
 /// Aplica um movimento de stock e devolve a existência resultante.
 #[allow(clippy::too_many_arguments)]
 async fn mover_stock(
@@ -1201,6 +1225,29 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         }
     }
 
+    // ---------- vender sem stock: política da empresa e, se for o caso, a autorização ----------
+    let sem_stock = politica_sem_stock(&mut *tx).await?;
+    let sem_stock_autorizado = sem_stock == "autorizar"
+        && match st.sessao() {
+            Ok(s) if s.tem("stock.sem_stock") => true,
+            _ => match i.autorizacao_pin.as_deref().filter(|p| !p.trim().is_empty()) {
+                Some(pin) => match super::auth::supervisor_por_pin(st, pin, &["stock.sem_stock"], 0.0).await? {
+                    Some(sup) => {
+                        autorizado_por = autorizado_por.or(Some(sup.id));
+                        true
+                    }
+                    None => false,
+                },
+                None => false,
+            },
+        };
+    // o que cada saída pode fazer: com «artigo», o que diz a ficha; senão, a política (e a autorização)
+    let pode_negativo = |ficha: bool| match sem_stock {
+        "artigo" => ficha,
+        "autorizar" => sem_stock_autorizado,
+        _ => false,
+    };
+
     // ---------- liquidações (recibo de cliente / pagamento a fornecedor) ----------
     let mut liquidacoes: Vec<(i64, i64)> = Vec::new();
     // retenção na fonte feita no pagamento (o cliente retém ao pagar, ou a empresa ao pagar ao fornecedor): a base é a
@@ -1622,14 +1669,18 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
                         }
                     }
                     -1 => {
-                        mover_stock(&mut tx, aid, armazem_id, -qtd, None, doc_id, &l.descricao, neg, &agora).await?;
+                        mover_stock(&mut tx, aid, armazem_id, -qtd, None, doc_id, &l.descricao, pode_negativo(neg), &agora)
+                            .await
+                            .map_err(|e| sem_stock_explicado(e, sem_stock))?;
                         if com_lote {
                             usados_lote = lote_saida(&mut tx, aid, armazem_id, qtd, l.lote.as_deref(), doc_id, &agora).await?;
                         }
                     }
                     2 => {
                         let dest = i.armazem_destino_id.unwrap_or_default();
-                        mover_stock(&mut tx, aid, armazem_id, -qtd, None, doc_id, &l.descricao, neg, &agora).await?;
+                        mover_stock(&mut tx, aid, armazem_id, -qtd, None, doc_id, &l.descricao, pode_negativo(neg), &agora)
+                            .await
+                            .map_err(|e| sem_stock_explicado(e, sem_stock))?;
                         mover_stock(&mut tx, aid, dest, qtd, None, doc_id, &txt_mov, true, &agora).await?;
                         if com_lote {
                             usados_lote = lote_saida(&mut tx, aid, armazem_id, qtd, l.lote.as_deref(), doc_id, &agora).await?;
@@ -2105,4 +2156,77 @@ pub async fn auxiliares(st: &AppState) -> AppResult<Value> {
         "moedas": db::query_json(&st.pool, "SELECT * FROM moedas WHERE ativo = 1 ORDER BY codigo = 'AOA' DESC, codigo").await?,
         "tipos_custo": db::query_json(&st.pool, "SELECT * FROM tipos_custo ORDER BY descricao").await?,
     }))
+}
+
+#[cfg(test)]
+mod testes_sem_stock {
+    use serde_json::{json, Value};
+
+    use crate::db;
+    use crate::state::AppState;
+
+    async fn rpc(st: &AppState, m: &str, p: Value) -> Value {
+        match crate::services::dispatch(st, m, p).await {
+            Ok(v) => v,
+            Err(e) => panic!("{m} falhou: {e}"),
+        }
+    }
+    async fn erro(st: &AppState, m: &str, p: Value) -> String {
+        match crate::services::dispatch(st, m, p).await {
+            Ok(v) => panic!("{m} devia falhar: {v}"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    /// Vender sem stock: por omissão nunca (mesmo com «Permite stock negativo» na ficha, como nos artigos importados do
+    /// KIGEST); «conforme a ficha» segue a ficha; «só com autorização» deixa quem tem a permissão e pede o PIN aos outros.
+    #[tokio::test]
+    async fn vender_sem_stock_segue_a_politica() {
+        let pasta = std::env::temp_dir().join(format!("kangest-sem-stock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).unwrap();
+        let mut st = AppState::new(db::abrir(&pasta.join("kigest.db")).await.unwrap());
+        st.pasta_dados = pasta.clone();
+        st.pasta_exportacao = pasta.clone();
+        st.carregar_posto(1).await.unwrap();
+        rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Loja, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+        rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+        rpc(&st, "utilizadores.guardar", json!({ "id": 1, "nome": "Admin", "login": "admin", "perfil": "ADMIN", "pin": "4321" })).await;
+        rpc(&st, "utilizadores.guardar", json!({ "nome": "Operador", "login": "caixa1", "perfil": "CAIXA", "senha": "caixa123", "mudar_senha": false })).await;
+        // como os artigos importados do KIGEST: «Permite stock negativo» ligado na ficha
+        let art = rpc(&st, "artigos.guardar", json!({ "descricao": "Arroz 5kg", "taxa_iva_id": 1, "preco1": 100000, "permite_negativo": true })).await["id"].as_i64().unwrap();
+        rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": art, "quantidade": 2, "preco_unitario": 50000 }] })).await;
+        rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+        let venda = |q: f64, pin: Option<&str>| json!({ "tipo": "FR", "linhas": [{ "artigo_id": art, "quantidade": q }], "pagamentos": [{ "modo": "NU", "valor": 10_000_000 }], "autorizacao_pin": pin });
+        let stock = || async { rpc(&st, "artigos.obter", json!({ "id": art })).await["stock"].as_f64().unwrap() };
+
+        // por omissão: nunca, e explica o que fazer; o POS sabe a política pelas tabelas
+        assert_eq!(rpc(&st, "tabelas", Value::Null).await["sem_stock"], "nao");
+        let e = erro(&st, "documentos.emitir", venda(3.0, None)).await;
+        assert!(e.contains("Stock insuficiente") && e.contains("Registe primeiro a entrada"), "{e}");
+        assert_eq!(stock().await, 2.0);
+
+        // conforme a ficha (o comportamento do KIGEST)
+        rpc(&st, "parametros.opcoesGuardar", json!({ "sem_stock": "artigo" })).await;
+        rpc(&st, "documentos.emitir", venda(3.0, None)).await;
+        assert_eq!(stock().await, -1.0);
+
+        // só com autorização: o administrador tem a permissão; o operador pede o PIN de um supervisor
+        rpc(&st, "parametros.opcoesGuardar", json!({ "sem_stock": "autorizar" })).await;
+        assert_eq!(rpc(&st, "parametros.obter", Value::Null).await["sem_stock"], "autorizar");
+        rpc(&st, "documentos.emitir", venda(1.0, None)).await;
+        assert_eq!(stock().await, -2.0);
+        rpc(&st, "auth.login", json!({ "login": "caixa1", "senha": "caixa123" })).await;
+        let e = erro(&st, "documentos.emitir", venda(1.0, None)).await;
+        assert!(e.contains("supervisor (PIN)"), "{e}");
+        assert!(erro(&st, "documentos.emitir", venda(1.0, Some("0000"))).await.contains("Stock insuficiente"));
+        let d = rpc(&st, "documentos.emitir", venda(1.0, Some("4321"))).await;
+        assert_eq!(d["documento"]["autorizado_por_nome"], "Admin", "fica quem autorizou");
+        assert_eq!(stock().await, -3.0);
+
+        // valor desconhecido recusado
+        rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+        assert!(erro(&st, "parametros.opcoesGuardar", json!({ "sem_stock": "sempre" })).await.contains("Escolha"));
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
 }

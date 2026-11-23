@@ -12,6 +12,7 @@ export const GRUPOS_PERMISSOES: { grupo: string; itens: { id: string; label: str
       { id: "stock.saida", label: "Saída de stock" },
       { id: "stock.transferencia", label: "Transferência" },
       { id: "stock.inventario", label: "Inventário" },
+      { id: "stock.sem_stock", label: "Vender sem stock (quando a opção pede autorização)" },
     ],
   },
   {
