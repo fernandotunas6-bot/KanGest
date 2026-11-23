@@ -22,6 +22,7 @@ mod tv;
 pub mod fe;
 pub(crate) mod impressao;
 pub mod importar;
+mod importar_saft;
 mod integridade;
 pub mod licenca;
 mod oficina;
@@ -194,6 +195,9 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "importar.ficheiros" => importar::ficheiros(st).await,
         // o KIGEST neste computador: Conexao.ini (sem a senha), instâncias do SQL Server e ficheiros .kigest
         "importar.descobrir" => importar::descobrir(st).await,
+        // importação universal por SAF-T (AO): clientes, fornecedores e artigos de qualquer sistema certificado
+        "importar.analisarSaft" => importar_saft::analisar(st, p(params)?).await,
+        "importar.executarSaft" => importar_saft::executar(st, p(params)?).await,
 
         // ---- tesouraria / conta corrente ----
         "tesouraria.contas" => tesouraria::contas(st).await,

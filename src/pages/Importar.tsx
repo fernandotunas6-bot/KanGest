@@ -144,7 +144,7 @@ export default function Importar() {
   const [relatorio, setRelatorio] = useState<Relatorio | null>(null);
   const [busy, setBusy] = useState<"" | "analisar" | "importar" | "simular">("");
   const [confirmar, setConfirmar] = useState(false);
-  const [fonte, setFonte] = useState<"ficheiro" | "sqlserver">("ficheiro");
+  const [fonte, setFonte] = useState<"ficheiro" | "sqlserver" | "saft">("ficheiro");
   const [caminho, setCaminho] = useState("");
   const [encontrados, setEncontrados] = useState<FicheiroKigest[] | null>(null);
   const [procurando, setProcurando] = useState(false);
@@ -261,15 +261,19 @@ export default function Importar() {
 
   return (
     <>
-      <PageHeader title="Importar dados do KIGEST" subtitle="Copia todos os dados do KIGEST GC/POS: empresa, artigos, stock, entidades, documentos, tesouraria, recursos humanos e oficina" />
+      <PageHeader
+        title="Importar dados"
+        subtitle="Do KIGEST GC/POS, tudo (empresa, artigos, stock, entidades, documentos, tesouraria, recursos humanos e oficina), ou de qualquer sistema certificado pelo SAF-T (clientes, fornecedores e artigos)"
+      />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
           <div className="inline-flex rounded-xl border border-line bg-surface p-1">
             {(
               [
-                ["ficheiro", "Ficheiro exportado (.kigest)"],
-                ["sqlserver", "Ligação directa ao SQL Server"],
+                ["ficheiro", "KIGEST: ficheiro exportado"],
+                ["sqlserver", "KIGEST: SQL Server"],
+                ["saft", "Outro sistema: SAF-T"],
               ] as const
             ).map(([id, rotulo]) => (
               <button
@@ -286,6 +290,8 @@ export default function Importar() {
               </button>
             ))}
           </div>
+
+          {fonte === "saft" && <ImportarSaft />}
 
           {fonte === "ficheiro" && (
             <Card className="p-6">
@@ -664,7 +670,7 @@ export default function Importar() {
           )}
         </div>
 
-        <div className="space-y-4">
+        <div className={cn("space-y-4", fonte === "saft" && "hidden")}>
           <Card className="p-5">
             <div className="mb-3 font-semibold">3. O que importar</div>
             <div className="space-y-2.5">
@@ -723,3 +729,229 @@ export default function Importar() {
     </>
   );
 }
+
+interface AnaliseSaft {
+  empresa: { nome: string | null; nif: string | null; inicio: string | null; fim: string | null; programa: string | null };
+  clientes: number;
+  fornecedores: number;
+  artigos: number;
+  com_preco: number;
+  facturas: number;
+}
+interface RelatorioSaft {
+  simulacao: boolean;
+  empresa: string | null;
+  clientes: { novos: number; existentes: number };
+  fornecedores: { novos: number; existentes: number };
+  artigos: { novos: number; existentes: number; com_preco: number };
+  avisos: string[];
+}
+
+/**
+ * Importação universal pelo SAF-T (AO), o ficheiro que todos os sistemas certificados exportam: clientes, fornecedores
+ * e artigos (com o último preço de venda e o IVA das facturas do ficheiro). Os documentos ficam de fora.
+ */
+function ImportarSaft() {
+  const qc = useQueryClient();
+  const [caminho, setCaminho] = useState("");
+  const [encontrados, setEncontrados] = useState<{ caminho: string; nome: string; modificado: string }[] | null>(null);
+  const [analise, setAnalise] = useState<AnaliseSaft | null>(null);
+  const [relatorio, setRelatorio] = useState<RelatorioSaft | null>(null);
+  const [op, setOp] = useState({ clientes: true, fornecedores: true, artigos: true });
+  const [busy, setBusy] = useState<"" | "analisar" | "simular" | "importar">("");
+  const [confirmar, setConfirmar] = useState(false);
+
+  useEffect(() => {
+    call<{ saft?: { caminho: string; nome: string; modificado: string }[] }>("importar.descobrir").then(
+      (r) => setEncontrados(r.saft ?? []),
+      () => setEncontrados([]),
+    );
+  }, []);
+
+  async function correr(tipo: "analisar" | "simular" | "importar") {
+    setBusy(tipo);
+    try {
+      if (tipo === "analisar") {
+        setRelatorio(null);
+        setAnalise(await call<AnaliseSaft>("importar.analisarSaft", { caminho: caminho.trim() }));
+      } else {
+        const r = await call<RelatorioSaft>("importar.executarSaft", { caminho: caminho.trim(), simular: tipo === "simular", ...op });
+        setRelatorio(r);
+        if (!r.simulacao) {
+          toast.success("Dados do SAF-T importados.");
+          qc.invalidateQueries();
+        }
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy("");
+      setConfirmar(false);
+    }
+  }
+
+  const n = (x: number) => numero(x, 0);
+  return (
+    <>
+      <Card className="p-6">
+        <div className="mb-2 flex items-center gap-2 font-semibold">
+          <FileArchive className="size-5 text-brand" /> 1. Ficheiro SAF-T (AO) do outro sistema
+        </div>
+        <p className="mb-4 text-[13.5px] text-ink-2">
+          No programa antigo, exporte o <b>SAF-T (AO) de facturação</b> (o mesmo ficheiro que se envia à AGT), do período mais longo que puder. O KanGest copia os
+          clientes, os fornecedores e os artigos, com o último preço de venda e o IVA das facturas do ficheiro. Os documentos não entram: a facturação recomeça aqui.
+        </p>
+        {encontrados && encontrados.length > 0 && (
+          <div className="mb-4 rounded-lg border border-brand/25 bg-brand-50 p-3">
+            <div className="mb-1.5 text-[13px] font-semibold text-brand-700">Encontrados neste computador</div>
+            <ul className="space-y-1 text-[13px]">
+              {encontrados.map((f) => (
+                <li key={f.caminho}>
+                  <button
+                    type="button"
+                    className="text-left underline-offset-2 hover:underline"
+                    onClick={() => {
+                      setCaminho(f.caminho);
+                      setAnalise(null);
+                      setRelatorio(null);
+                    }}
+                  >
+                    {f.nome} <span className="text-ink-3">· {dataHora(f.modificado)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <Field label="Caminho do ficheiro (.xml)">
+          <Input
+            className="font-mono"
+            value={caminho}
+            placeholder="C:\Users\…\Downloads\SAFT_AO_2026.xml"
+            onChange={(e) => {
+              setCaminho(e.target.value);
+              setAnalise(null);
+              setRelatorio(null);
+            }}
+          />
+        </Field>
+        <div className="mt-4">
+          <Button loading={busy === "analisar"} disabled={!caminho.trim() || !!busy} onClick={() => correr("analisar")}>
+            Analisar ficheiro
+          </Button>
+        </div>
+      </Card>
+
+      {analise && (
+        <Card className="p-6">
+          <div className="mb-3 font-semibold">2. O que o ficheiro traz</div>
+          <p className="text-[13.5px]">
+            <b>{analise.empresa.nome ?? "Empresa"}</b>
+            {analise.empresa.nif && <> · NIF {analise.empresa.nif}</>}
+            {analise.empresa.inicio && (
+              <span className="text-ink-3">
+                {" "}
+                · {analise.empresa.inicio} a {analise.empresa.fim}
+              </span>
+            )}
+            {analise.empresa.programa && <span className="block text-[12px] text-ink-3">Exportado por {analise.empresa.programa}</span>}
+          </p>
+          <div className="mt-4 space-y-2.5">
+            {(
+              [
+                ["clientes", `${n(analise.clientes)} clientes`, "Sem o consumidor final. Não se duplicam: procura-se pelo NIF."],
+                ["fornecedores", `${n(analise.fornecedores)} fornecedores`, "Não se duplicam: procura-se pelo NIF."],
+                [
+                  "artigos",
+                  `${n(analise.artigos)} artigos (${n(analise.com_preco)} com preço)`,
+                  `O preço e o IVA vêm das ${n(analise.facturas)} facturas do ficheiro. Num artigo que já existe (mesma referência) só se preenche o que falta.`,
+                ],
+              ] as const
+            ).map(([id, rotulo, dica]) => (
+              <label key={id} className="flex items-start gap-2.5">
+                <input type="checkbox" className="mt-1" checked={op[id]} onChange={(e) => setOp({ ...op, [id]: e.target.checked })} />
+                <span>
+                  <span className="font-medium">{rotulo}</span>
+                  <span className="block text-[12px] text-ink-3">{dica}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-5 flex gap-2">
+            <Button variant="secondary" loading={busy === "simular"} disabled={!!busy} onClick={() => correr("simular")} title="Corre a importação e desfaz tudo no fim">
+              Simular
+            </Button>
+            <Button loading={busy === "importar"} disabled={!!busy} onClick={() => setConfirmar(true)}>
+              Importar
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {relatorio && (
+        <Card className="p-6">
+          <div className="mb-3 flex items-center gap-2 font-semibold">
+            {relatorio.simulacao ? <Info className="size-5 text-brand" /> : <CheckCircle2 className="size-5 text-ok" />}
+            {relatorio.simulacao ? "Simulação: nada foi gravado" : "Importação concluída"}
+          </div>
+          <Table>
+            <thead>
+              <tr>
+                <Th />
+                <Th className="text-right">Novos</Th>
+                <Th className="text-right">Já existiam</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {(
+                [
+                  ["Clientes", relatorio.clientes],
+                  ["Fornecedores", relatorio.fornecedores],
+                  ["Artigos", relatorio.artigos],
+                ] as const
+              ).map(([rotulo, x]) => (
+                <tr key={rotulo}>
+                  <Td className="font-medium">{rotulo}</Td>
+                  <Td className="num text-right">{n(x.novos)}</Td>
+                  <Td className="num text-right">{n(x.existentes)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          {relatorio.avisos.length > 0 && (
+            <ul className="mt-4 space-y-1.5 text-[13px] text-accent-ink">
+              {relatorio.avisos.map((a) => (
+                <li key={a} className="flex gap-2">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" /> {a}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
+
+      <Modal
+        open={confirmar}
+        onClose={() => setConfirmar(false)}
+        title="Importar do SAF-T"
+        width="max-w-md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmar(false)}>
+              Cancelar
+            </Button>
+            <Button loading={busy === "importar"} onClick={() => correr("importar")}>
+              Importar
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[13.5px] text-ink-2">
+          Os clientes, os fornecedores e os artigos escolhidos passam para o KanGest. O que já existe (mesmo NIF ou mesma referência) não se duplica. Faça antes uma cópia de
+          segurança, se ainda não fez.
+        </p>
+      </Modal>
+    </>
+  );
+}
+

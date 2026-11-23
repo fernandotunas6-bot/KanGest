@@ -2000,6 +2000,7 @@ dependencies = [
  "libsqlite3-sys",
  "minisign-verify",
  "native-tls",
+ "quick-xml",
  "rand",
  "ring",
  "rsa",

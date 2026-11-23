@@ -104,3 +104,19 @@ Segundo o `Conexao.ini` do KIGEST GC, a base `KigestGC` está no SQL Server do c
 6. Só depois **Importar dados** (é feita antes uma cópia de segurança). Pode repetir a importação: não duplica registos.
 
 Referência de desempenho: 10 000 facturas com 30 000 linhas, 2 000 clientes e 3 000 recibos importam em cerca de 8 s numa compilação de testes (mais rápido na versão instalada).
+
+## De outro sistema de facturação: SAF-T (AO)
+
+Para quem vem de **outro programa certificado** (não do KIGEST), o caminho é o ficheiro **SAF-T (AO) de facturação**: todos os programas certificados em Angola o exportam, porque é o que se envia à AGT. Em *Importar dados → Outro sistema: SAF-T*:
+
+1. No programa antigo, exporte o SAF-T de facturação do período mais longo que puder (um ano inteiro, por exemplo). O KanGest também procura sozinho ficheiros SAF-T nas pastas Transferências, Documentos, Ambiente de trabalho e nas pens, e mostra-os em «Encontrados neste computador».
+2. **Analisar ficheiro** mostra a empresa, o período, o programa que o exportou e quantos clientes, fornecedores e artigos traz.
+3. **Simular** corre a importação e desfaz no fim; **Importar** grava.
+
+O que entra:
+
+- **Clientes e fornecedores** (`MasterFiles/Customer`, `Supplier`): procura-se pelo NIF, por isso não se duplicam (um cliente que já existe como fornecedor passa a «ambos»). O consumidor final (999999999) fica de fora.
+- **Artigos** (`MasterFiles/Product`): procura-se pela referência. A lista de artigos do SAF-T não tem preços, por isso o **último preço de venda** e a **taxa de IVA** vêm das facturas do próprio ficheiro (sem as anuladas nem as notas de crédito). Os artigos sem vendas no período ficam sem preço (aviso no fim). Num artigo que já existe só se preenche o que falta.
+- Os **documentos não entram**: a facturação recomeça no KanGest, com as suas séries.
+
+O ficheiro lê-se por fluxo, sem o carregar todo na memória (um SAF-T de um ano com dezenas de milhares de facturas importa-se em segundos).
