@@ -89,3 +89,50 @@ pub async fn query_json_bind(pool: &SqlitePool, sql: &str, p: i64) -> AppResult<
     let rows = sqlx::query(sql).bind(p).fetch_all(pool).await?;
     Ok(rows_json(&rows))
 }
+
+#[cfg(test)]
+mod ensaio_sqlcipher {
+    use sqlx::sqlite::SqliteConnectOptions;
+    use sqlx::{ConnectOptions, Connection};
+
+    async fn abrir(f: &std::path::Path, chave: Option<&str>) -> Result<sqlx::SqliteConnection, sqlx::Error> {
+        let mut o = SqliteConnectOptions::new().filename(f).create_if_missing(true);
+        if let Some(k) = chave {
+            o = o.pragma("key", format!("\"x'{k}'\""));
+        }
+        let mut c = o.connect().await?;
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sqlite_master").fetch_one(&mut c).await?;
+        Ok(c)
+    }
+
+    #[tokio::test]
+    async fn base_cifrada_abre_so_com_a_chave_certa() {
+        let d = std::env::temp_dir().join(format!("kangest-sqlcipher-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("ensaio.db");
+        let k = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        let versao: String = {
+            let mut c = abrir(&f, Some(k)).await.unwrap();
+            let v: String = sqlx::query_scalar("PRAGMA cipher_version").fetch_one(&mut c).await.unwrap();
+            sqlx::query("CREATE TABLE t (x TEXT)").execute(&mut c).await.unwrap();
+            sqlx::query("INSERT INTO t VALUES ('Cliente Exemplo')").execute(&mut c).await.unwrap();
+            c.close().await.unwrap();
+            v
+        };
+        assert!(!versao.is_empty(), "é o SQLCipher");
+        let bytes = std::fs::read(&f).unwrap();
+        assert!(!bytes.starts_with(b"SQLite format 3"), "o ficheiro não começa pelo cabeçalho em claro");
+        assert!(!bytes.windows(15).any(|w| w == b"Cliente Exemplo"), "os dados não se lêem no ficheiro");
+        let mut c = abrir(&f, Some(k)).await.expect("abre com a chave certa");
+        let x: String = sqlx::query_scalar("SELECT x FROM t").fetch_one(&mut c).await.unwrap();
+        assert_eq!(x, "Cliente Exemplo");
+        c.close().await.unwrap();
+        let errada = "ff112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        assert!(abrir(&f, Some(errada)).await.is_err(), "não abre com outra chave");
+        assert!(abrir(&f, None).await.is_err(), "não abre sem chave");
+        let _ = std::fs::remove_dir_all(&d);
+        eprintln!("SQLCipher {versao}");
+    }
+}
+
