@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use crate::db;
 use crate::error::{AppError, AppResult};
@@ -174,6 +174,10 @@ pub struct Estado {
     pub registada: bool,
     /// Última vez que falou com o servidor.
     pub sincronizada_em: Option<String>,
+    /// Porque falhou a última tentativa de falar com o servidor (sem internet, computador bloqueado…), e quando.
+    /// Vazio depois de uma verificação que correu bem.
+    pub sincronizacao_erro: Option<String>,
+    pub sincronizacao_erro_em: Option<String>,
     /// Email usado no registo.
     pub email_registo: Option<String>,
     /// Módulos extra da licença (ex.: «api» acrescenta a API de integração aos planos Essencial e Comércio).
@@ -363,6 +367,8 @@ pub async fn calcular(st: &AppState) -> AppResult<Estado> {
         pedido,
         registada: cfg_ler(p, "licenca.registada").await?.as_deref() == Some("1"),
         sincronizada_em: cfg_ler(p, "licenca.sincronizada_em").await?,
+        sincronizacao_erro: cfg_ler(p, "licenca.sincronizacao_erro").await?.filter(|e| !e.is_empty()),
+        sincronizacao_erro_em: cfg_ler(p, "licenca.sincronizacao_erro_em").await?.filter(|e| !e.is_empty()),
         email_registo: cfg_ler(p, "licenca.registo_email").await?,
         modulos: Vec::new(),
         selo: crate::selo::estado().codigo(),
@@ -680,11 +686,17 @@ pub struct SincronizarIn {
 /// Pede ao servidor a licença mais recente (por exemplo, depois de um pagamento). Só para KanGest registados.
 pub async fn sincronizar(st: &AppState, i: SincronizarIn) -> AppResult<Value> {
     let s = st.sessao()?;
+    sincronizar_com(st, i.forcar, Some(s.id)).await
+}
+
+/// A sincronização em si: licença e equipa gerida no site. `utilizador` é quem fica na auditoria (None: o próprio
+/// KanGest, em segundo plano). Uma tentativa falhada fica registada no estado, para o ecrã da licença a explicar.
+pub(crate) async fn sincronizar_com(st: &AppState, forcar: bool, utilizador: Option<i64>) -> AppResult<Value> {
     let antes = calcular(st).await?;
     if !antes.registada {
         return Ok(json!({ "mudou": false, "estado": antes }));
     }
-    if !i.forcar {
+    if !forcar {
         let recente = antes
             .sincronizada_em
             .as_deref()
@@ -695,18 +707,54 @@ pub async fn sincronizar(st: &AppState, i: SincronizarIn) -> AppResult<Value> {
             return Ok(json!({ "mudou": false, "estado": antes }));
         }
     }
+    let r = falar_com_o_servidor(st, &antes, utilizador).await;
+    match &r {
+        Ok(_) => cfg_gravar(&st.pool, "licenca.sincronizacao_erro", "").await?,
+        Err(e) => {
+            cfg_gravar(&st.pool, "licenca.sincronizacao_erro", &e.to_string()).await?;
+            cfg_gravar(&st.pool, "licenca.sincronizacao_erro_em", &db::agora()).await?;
+        }
+    }
+    r
+}
+
+async fn falar_com_o_servidor(st: &AppState, antes: &Estado, utilizador: Option<i64>) -> AppResult<Value> {
     let (_, nif) = dados_empresa(st).await?;
     let segredo = segredo_maquina(st).await;
-    let estado = estado_instalacao(st, &antes).await?;
+    let estado = estado_instalacao(st, antes).await?;
     let v = chamar_servidor("/v1/renovar", json!({ "nif": nif, "maquina": id_maquina(), "versao": env!("CARGO_PKG_VERSION"), "segredo": segredo, "estado": estado })).await?;
     cfg_gravar(&st.pool, "licenca.sincronizada_em", &db::agora()).await?;
-    let mudou = aplicar(st, &v, Some(s.id)).await?;
+    let mudou = aplicar(st, &v, utilizador).await?;
     // a equipa gerida no site (conta da empresa), quando este KanGest está atrás
     let equipa = match v.get("equipa_gerida").filter(|e| e.is_object()) {
         Some(e) => Some(super::equipa_conta::aplicar(st, e).await?),
         None => None,
     };
     Ok(json!({ "mudou": mudou, "mensagem": v.get("mensagem"), "estado": calcular(st).await?, "equipa": equipa }))
+}
+
+/// Verifica a licença e a equipa gerida no site sozinho, de hora a hora (o servidor só se contacta a cada
+/// HORAS_SINCRONIZAR horas, ou mais vezes enquanto as tentativas falham), mesmo sem ninguém com sessão aberta: o
+/// computador-servidor da loja, que arranca com o sistema, fica com a licença e a equipa em dia. Só no computador que
+/// guarda a base; os postos em rede perguntam-lhe a ele.
+pub fn iniciar(st: Arc<AppState>) {
+    tauri::async_runtime::spawn(async move {
+        // deixa acabar o arranque (rede, cópias, túnel) antes de ir à Internet
+        tokio::time::sleep(std::time::Duration::from_secs(90)).await;
+        loop {
+            if !crate::rede::config().cliente() {
+                match sincronizar_com(&st, false, None).await {
+                    Ok(v) if v["mudou"] == json!(true) => {
+                        let texto = v["estado"]["mensagem"].as_str().filter(|m| !m.is_empty()).unwrap_or("A licença do KanGest foi actualizada.").to_string();
+                        crate::nativo::notificar("licenca", "Licença actualizada", &texto);
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!("Licença: sem verificar no servidor ({e})"),
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        }
+    });
 }
 
 /// O que vai ao servidor de licenças em cada verificação, para a área do produtor: modo de gestão, licença como este
@@ -826,5 +874,49 @@ pub mod teste {
         let corpo = URL_SAFE_NO_PAD.encode(serde_json::to_vec(dados).unwrap());
         let assinatura = URL_SAFE_NO_PAD.encode(par().sign(corpo.as_bytes()).as_ref());
         format!("KG1.{corpo}.{assinatura}")
+    }
+}
+
+#[cfg(test)]
+mod testes_sincronizacao {
+    use serde_json::{json, Value};
+
+    use crate::db;
+    use crate::state::AppState;
+
+    async fn rpc(st: &AppState, m: &str, p: Value) -> Value {
+        match crate::services::dispatch(st, m, p).await {
+            Ok(v) => v,
+            Err(e) => panic!("{m} falhou: {e}"),
+        }
+    }
+
+    /// A sincronização em segundo plano corre sem sessão, e uma tentativa falhada fica no estado para o ecrã a explicar.
+    #[tokio::test]
+    async fn tentativa_falhada_fica_no_estado() {
+        let pasta = std::env::temp_dir().join(format!("kangest-sinc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).unwrap();
+        let mut st = AppState::new(db::abrir(&pasta.join("kigest.db")).await.unwrap());
+        st.pasta_dados = pasta.clone();
+        st.pasta_exportacao = pasta.clone();
+        st.carregar_posto(1).await.unwrap();
+        rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Loja, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+
+        // não registado: nem vai à Internet
+        let r = super::sincronizar_com(&st, true, None).await.unwrap();
+        assert_eq!(r["mudou"], false);
+        assert!(r["estado"]["sincronizacao_erro"].is_null(), "{r}");
+
+        // registado, mas sem o NIF da empresa: falha antes de ir à Internet, e fica registado porquê
+        super::cfg_gravar(&st.pool, "licenca.registada", "1").await.unwrap();
+        sqlx::query("UPDATE empresa SET nif = '' WHERE id = 1").execute(&st.pool).await.unwrap();
+        let e = super::sincronizar_com(&st, false, None).await.unwrap_err();
+        assert!(e.to_string().contains("NIF"), "{e}");
+        rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+        let estado = rpc(&st, "licenca.estado", Value::Null).await;
+        assert!(estado["sincronizacao_erro"].as_str().is_some_and(|m| m.contains("NIF")), "{estado}");
+        assert!(estado["sincronizacao_erro_em"].is_string(), "{estado}");
+        let _ = std::fs::remove_dir_all(&pasta);
     }
 }

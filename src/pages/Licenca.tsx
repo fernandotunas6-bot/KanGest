@@ -75,10 +75,16 @@ function RegistoOnline({ e, podeGerir }: { e: LicencaEstado; podeGerir: boolean 
 
   const verificar = () =>
     correr(async () => {
-      const r = await call<Sincronizacao>("licenca.sincronizar", { forcar: true });
-      qc.setQueryData(["licenca"], r.estado);
-      if (r.mudou) toast.success(r.estado.mensagem);
-      else toast.info(r.mensagem || "A licença já está actualizada.");
+      try {
+        const r = await call<Sincronizacao>("licenca.sincronizar", { forcar: true });
+        qc.setQueryData(["licenca"], r.estado);
+        if (r.mudou) toast.success(r.estado.mensagem);
+        else toast.info(r.mensagem || "A licença já está actualizada.");
+      } catch (err) {
+        // a tentativa falhada fica no estado: mostra-se por baixo da última verificação
+        qc.invalidateQueries({ queryKey: ["licenca"] });
+        throw err;
+      }
     });
 
   if (e.registada) {
@@ -86,11 +92,20 @@ function RegistoOnline({ e, podeGerir }: { e: LicencaEstado; podeGerir: boolean 
       <Card className="p-6">
         <div className="mb-1 flex items-center gap-2 font-semibold"><BadgeCheck className="size-4 text-brand" /> Registado no servidor de licenças</div>
         <p className="text-[13.5px] text-ink-2">
-          Quando há internet, o KanGest confirma a licença sozinho (no máximo a cada 12 horas). Depois de pagar a renovação, a licença nova chega aqui sem ter de a colar.
+          Quando há internet, o KanGest confirma a licença sozinho (no máximo a cada 12 horas), mesmo sem ninguém com sessão aberta, e traz a equipa gerida na conta da empresa
+          no site. Depois de pagar a renovação, a licença nova chega aqui sem ter de a colar.
         </p>
         <dl className="mt-4 grid gap-x-8 gap-y-2 text-[13.5px] sm:grid-cols-2">
           <div><dt className="text-ink-3">Email do registo</dt><dd className="font-medium">{e.email_registo ?? "—"}</dd></div>
           <div><dt className="text-ink-3">Última verificação</dt><dd className="font-medium">{e.sincronizada_em ? dataHora(e.sincronizada_em) : "—"}</dd></div>
+          {e.sincronizacao_erro && (
+            <div className="flex gap-2 text-accent-ink sm:col-span-2">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span>
+                Última tentativa{e.sincronizacao_erro_em ? `, ${dataHora(e.sincronizacao_erro_em)}` : ""}: {e.sincronizacao_erro.replace(/[.\s]*$/, ".")} O KanGest volta a tentar sozinho de hora a hora.
+              </span>
+            </div>
+          )}
         </dl>
         <Button className="mt-5" variant="secondary" loading={aCorrer} onClick={verificar}><RefreshCw className="size-4" /> Verificar agora</Button>
       </Card>

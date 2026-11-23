@@ -28,6 +28,9 @@ export interface LicencaEstado {
   /** registado no servidor de licenças (a licença renova-se sozinha) */
   registada: boolean;
   sincronizada_em: string | null;
+  /** porque falhou a última tentativa de falar com o servidor, e quando (vazio depois de uma que correu bem) */
+  sincronizacao_erro: string | null;
+  sincronizacao_erro_em: string | null;
   email_registo: string | null;
   /** selo de integridade do executável (SEM_SELO: compilação não oficial) */
   selo: "VALIDO" | "SEM_SELO" | "A_CONFIRMAR" | "ALTERADO";
