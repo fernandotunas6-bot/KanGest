@@ -362,6 +362,23 @@ export function Td({ children, className, ...rest }: TdHTMLAttributes<HTMLTableC
   );
 }
 
+/** Linhas a carregar numa tabela: barras a pulsar enquanto os dados chegam (em vez de uma tabela vazia ou de «0»). */
+export function LinhasCarregando({ colunas, linhas = 6 }: { colunas: number; linhas?: number }) {
+  return (
+    <>
+      {Array.from({ length: linhas }, (_, i) => (
+        <tr key={i} aria-hidden>
+          {Array.from({ length: colunas }, (_, j) => (
+            <Td key={j}>
+              <div className="h-3 animate-pulse rounded bg-sunken" style={{ width: `${j === 0 ? 75 : 35 + ((i * 7 + j * 13) % 45)}%` }} />
+            </Td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function Empty({ icon, title, text, action }: { icon: ReactNode; title: string; text?: string; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">

@@ -68,6 +68,8 @@ export default function Dashboard() {
   const [ocultar, setOcultar] = useOcultarValores();
   // enquanto carrega não se mostram zeros nem "sem documentos" (pareceria que não há dados)
   const v = (x: number | undefined) => (d ? kz(x) : "…");
+  // o valor grande dos cartões: enquanto carrega, uma barra a pulsar (em vez de «…»)
+  const valor = (x: number | undefined) => (d ? kz(x) : <span className="inline-block h-7 w-32 max-w-full animate-pulse rounded-md bg-sunken align-middle" aria-label="A carregar" />);
   const ant = d?.antiguidade;
   const vencido = ant ? ant.d1_30 + ant.d31_60 + ant.d61_90 + ant.mais_90 : 0;
   const al = d?.alertas;
@@ -143,21 +145,21 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat
           label="Vendas de hoje"
-          value={v(d?.vendas_hoje)}
+          value={valor(d?.vendas_hoje)}
           delta={d && <Delta atual={d.vendas_hoje} anterior={d.vendas_ontem ?? 0} periodo="vs ontem" />}
           hint={d ? `${d.docs_hoje} ${d.docs_hoje === 1 ? "documento" : "documentos"}${d.vendas_ontem !== undefined ? ` · ontem ${kz(d.vendas_ontem)}` : ""}` : "…"}
           icon={<CircleDollarSign className="size-4" />}
         />
         <Stat
           label="Vendas do mês"
-          value={v(d?.vendas_mes)}
+          value={valor(d?.vendas_mes)}
           delta={d && <Delta atual={d.vendas_mes} anterior={d.vendas_mes_anterior ?? 0} periodo="vs mês anterior" />}
           hint={`IVA liquidado ${v(d?.iva_mes)} · ticket médio ${v(d?.ticket_medio)}`}
           icon={<TrendingUp className="size-4" />}
         />
         <Stat
           label="A receber de clientes"
-          value={v(d?.a_receber)}
+          value={valor(d?.a_receber)}
           hint={
             vencido > 0 ? (
               <button className="text-left font-medium text-danger underline-offset-2 hover:underline" onClick={() => nav("/avisos")}>
@@ -174,7 +176,7 @@ export default function Dashboard() {
         />
         <Stat
           label="A pagar a fornecedores"
-          value={v(d?.a_pagar)}
+          value={valor(d?.a_pagar)}
           hint={
             al?.valor_compras_vencidas ? (
               <button className="text-left font-medium text-danger underline-offset-2 hover:underline" onClick={() => nav("/contas/pagar")}>

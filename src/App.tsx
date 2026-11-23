@@ -1,6 +1,7 @@
 // KanGest — Desenvolvido por Valentino Canguele · 926 445 277 · valentinocanguele@gmail.com
 // © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 
+import { Logo } from "@/components/Logo";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes } from "react-router-dom";
@@ -160,7 +161,18 @@ function Principal() {
   });
 
   if (estado.isLoading) {
-    return <div className="grid h-full place-items-center text-ink-3">A carregar…</div>;
+    // arranque: o logótipo e uma barra fina, em vez de um «A carregar…» solto
+    return (
+      <div className="grid h-full place-items-center" role="status" aria-label="A carregar o KanGest">
+        <div className="flex flex-col items-center gap-4">
+          <Logo className="size-14 animate-pulse" />
+          <div className="text-[15px] font-semibold tracking-tight text-ink">KanGest</div>
+          <div className="h-1 w-32 overflow-hidden rounded-full bg-sunken">
+            <div className="h-full w-1/3 animate-[kg-arranque_1.1s_ease-in-out_infinite] rounded-full bg-brand" />
+          </div>
+        </div>
+      </div>
+    );
   }
   if (estado.error) {
     return (

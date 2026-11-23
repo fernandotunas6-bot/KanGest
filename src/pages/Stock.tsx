@@ -4,11 +4,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { ArrowDownToLine, ArrowRightLeft, ArrowUpFromLine, Boxes, History, Search } from "lucide-react";
+import { ArrowDownToLine, ArrowRightLeft, ArrowUpFromLine, Boxes, Search } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce, useTabelas } from "@/lib/hooks";
-import { dataHora, kz, qtd } from "@/lib/format";
-import { Badge, Button, Card, Empty, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { data, dataHora, kz, qtd } from "@/lib/format";
+import { Badge, Button, Card, Empty, Input, Modal, PageHeader, Select, Table, Td, Th, cn, useOrdenacao, LinhasCarregando } from "@/components/ui";
 
 interface LinhaStock {
   id: number;
@@ -120,19 +120,19 @@ export default function Stock() {
                 <Th className="text-right" {...cab("valor")}>
                   Valor
                 </Th>
-                <Th {...cab("entrada")}>Última entrada</Th>
-                <Th {...cab("saida")}>Última saída</Th>
-                <Th />
+                <Th {...cab("saida")}>Últimos movimentos</Th>
               </tr>
             </thead>
             <tbody>
+              {!lista.data && <LinhasCarregando colunas={8} />}
               {ordenados?.map((l) => (
-                <tr key={l.id} className="hover:bg-sunken/60">
+                // carregar na linha abre os movimentos do artigo
+                <tr key={l.id} className="cursor-pointer hover:bg-sunken/60" onClick={() => setHist(l)} title="Ver os movimentos do artigo">
                   <Td>
-                    <div className="font-medium">{l.descricao}</div>
+                    <div className="min-w-[190px] font-medium">{l.descricao}</div>
                     <div className="font-mono text-[11.5px] text-ink-3">{l.referencia}</div>
                   </Td>
-                  <Td className={cn("num text-right font-medium", l.quantidade <= l.qtd_minima && "text-danger")}>
+                  <Td className={cn("num whitespace-nowrap text-right font-medium", l.quantidade <= l.qtd_minima && "text-danger")}>
                     {qtd(l.quantidade)} {l.unidade}
                   </Td>
                   {temReservas && <Td className="num text-right text-ink-2">{l.reservado ? qtd(l.reservado) : "—"}</Td>}
@@ -141,12 +141,10 @@ export default function Stock() {
                   <Td className="num text-right text-ink-2">{qtd(l.qtd_minima)}</Td>
                   <Td className="num text-right text-ink-2">{kz(l.custo_medio)}</Td>
                   <Td className="num text-right">{kz(l.valor_custo)}</Td>
-                  <Td className="text-ink-2">{dataHora(l.ultima_entrada)}</Td>
-                  <Td className="text-ink-2">{dataHora(l.ultima_saida)}</Td>
-                  <Td>
-                    <Button variant="ghost" size="sm" onClick={() => setHist(l)}>
-                      <History className="size-4" /> Movimentos
-                    </Button>
+                  {/* última entrada e última saída numa coluna: o dia; a hora no balão */}
+                  <Td className="whitespace-nowrap text-[12.5px] leading-tight text-ink-2">
+                    <div title={l.ultima_entrada ? `Última entrada: ${dataHora(l.ultima_entrada)}` : "Sem entradas"}>↓ {l.ultima_entrada ? data(l.ultima_entrada) : "—"}</div>
+                    <div title={l.ultima_saida ? `Última saída: ${dataHora(l.ultima_saida)}` : "Sem saídas"}>↑ {l.ultima_saida ? data(l.ultima_saida) : "—"}</div>
                   </Td>
                 </tr>
               ))}
@@ -154,7 +152,7 @@ export default function Stock() {
           </Table>
         )}
         <div className="flex justify-between border-t border-line px-5 py-3 text-[13px] text-ink-2">
-          <span>{lista.data?.length ?? 0} artigos</span>
+          <span>{lista.data ? `${lista.data.length} artigos` : "…"}</span>
           <span>
             Valor do stock: <b className="num text-ink">{kz(valor)}</b>
           </span>

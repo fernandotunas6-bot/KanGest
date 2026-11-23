@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowDownLeft, ArrowUpRight, History, Lock, Plus, Printer, ShoppingCart, Trash2, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, History, Lock, Plus, Printer, ShoppingCart, Trash2, Wallet } from "lucide-react";
 import { call } from "@/lib/api";
 import { useTabelas, useTalao58 } from "@/lib/hooks";
 import { dataHora, extenso, kz, kzNum, parseKz, qtd } from "@/lib/format";
@@ -125,12 +125,15 @@ export default function Caixa() {
               <div className="px-5 pt-4 font-semibold">Recebimentos por modo de pagamento</div>
               <Table>
                 <tbody>
-                  {c.por_modo.map((m) => (
-                    <tr key={m.codigo}>
-                      <Td>{m.descricao}</Td>
-                      <Td className="num text-right font-medium">{m.total === null ? "—" : kz(m.total)}</Td>
-                    </tr>
-                  ))}
+                  {/* as formas de pagamento com dinheiro primeiro; as que estão a zero, apagadas */}
+                  {[...c.por_modo]
+                    .sort((x, y) => Number(!x.total) - Number(!y.total))
+                    .map((m) => (
+                      <tr key={m.codigo} className={cn(!m.total && "text-ink-3")}>
+                        <Td>{m.descricao}</Td>
+                        <Td className={cn("num text-right", m.total ? "font-medium" : "")}>{m.total === null ? "—" : kz(m.total)}</Td>
+                      </tr>
+                    ))}
                 </tbody>
               </Table>
             </Card>
@@ -162,7 +165,9 @@ export default function Caixa() {
                   ))}
                 </tbody>
               </Table>
-              {!c.movimentos.length && <p className="py-8 text-center text-ink-3">Sem movimentos.</p>}
+              {!c.movimentos.length && (
+                <Empty icon={<ArrowLeftRight className="size-6" />} title="Sem movimentos de caixa" text="As entradas e saídas de dinheiro (fundo, sangrias, pagamentos em numerário) aparecem aqui." />
+              )}
             </Card>
           </div>
         </>

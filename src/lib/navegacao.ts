@@ -46,9 +46,13 @@ export function destinoActual(pathname: string, search: string): Destino | null 
   const atuais = new URLSearchParams(search);
   let simples: Destino | null = null;
   let parcial: Destino | null = null;
+  // o primeiro item deste ecrã: quando todos levam parâmetros e o endereço não traz nenhum (ex.: /rh/salarios abre no
+  // separador do primeiro item), o menu e o caminho no topo ficam nesse item em vez de mostrar só «KanGest»
+  let primeiro: Destino | null = null;
   for (const d of DESTINOS) {
     const [caminho, query] = d.to.split("?");
     if (caminho !== pathname) continue;
+    primeiro ??= d;
     if (!query) {
       simples ??= d;
       continue;
@@ -57,7 +61,7 @@ export function destinoActual(pathname: string, search: string): Destino | null 
     if (pedidos.length === [...atuais].length && pedidos.every(([k, v]) => atuais.get(k) === v)) return d;
     if (!parcial && pedidos.every(([k, v]) => atuais.get(k) === v)) parcial = d;
   }
-  const r = parcial ?? simples;
+  const r = parcial ?? simples ?? primeiro;
   if (r) return r;
   return FORA_DO_MENU[pathname] ? { to: pathname, label: FORA_DO_MENU[pathname] } : null;
 }

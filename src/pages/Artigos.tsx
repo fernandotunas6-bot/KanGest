@@ -13,7 +13,7 @@ import { exportarExcel, kzXL } from "@/lib/csv";
 import type { Artigo, Componente } from "@/lib/types";
 import { ArtigoPicker } from "@/components/Pickers";
 import { useSession } from "@/store/session";
-import { Atalho, Badge, BotaoCancelar, Button, Card, Confirmar, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { Atalho, Badge, BotaoCancelar, Button, Card, Confirmar, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Table, Td, Th, cn, useOrdenacao, LinhasCarregando } from "@/components/ui";
 import { useJaUsado, useSujo } from "@/lib/ficha";
 import { bip, gtinValido, useLeitor } from "@/lib/leitor";
 import { atributosDe, ramoPorId, resumoAtributos, type Ramo } from "@/lib/ramos";
@@ -268,6 +268,7 @@ export default function Artigos() {
               </tr>
             </thead>
             <tbody>
+              {!lista.data && <LinhasCarregando colunas={7} />}
               {ordenados?.map((a) => (
                 <tr key={a.id} className={cn("cursor-pointer hover:bg-sunken/60", !a.ativo && "opacity-50")} onClick={() => {
                     if (!tem("artigos.editar")) return;
@@ -704,7 +705,8 @@ function ArtigoForm({
     <Modal
       open
       onClose={onClose}
-      title={a.id ? `Editar ${a.referencia}` : origem ? "Novo artigo (clonado)" : "Novo artigo"}
+      // o nome do artigo, com a referência (como na ficha do cliente)
+      title={a.id ? `${a.descricao?.trim() || "Artigo"} · ${a.referencia}` : origem ? "Novo artigo (clonado)" : "Novo artigo"}
       width="max-w-3xl"
       sujo={sujo}
       onGuardar={() => guardar()}
