@@ -117,6 +117,9 @@ jobs:
             exit 1
           fi
           echo "APPLE_SIGNING_IDENTITY=$ID" >> "$GITHUB_ENV"
+          # com o certificado, a assinatura fica a mesma entre versões: a chave mestra pode ir para o Porta-chaves
+          # sem o Mac pedir a senha depois de cada actualização (src-tauri/src/segredos.rs, cofre_do_sistema)
+          echo "KANGEST_COFRE_MACOS=1" >> "$GITHUB_ENV"
           echo "A assinar com: $ID"
           if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
             { echo "APPLE_ID=$APPLE_ID"; echo "APPLE_PASSWORD=$APPLE_PASSWORD"; echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"; } >> "$GITHUB_ENV"

@@ -33,8 +33,9 @@ fn aleatorio<const N: usize>() -> [u8; N] {
     b
 }
 
-/// O cofre do sistema onde fica a chave mestra: Porta-chaves (macOS) e Gestor de Credenciais, protegido pela DPAPI
-/// (Windows). Nos outros sistemas, e nos testes, a chave fica no ficheiro, como antes.
+/// O cofre do sistema onde fica a chave mestra: Gestor de Credenciais, protegido pela DPAPI (Windows), e Porta-chaves
+/// (macOS, só nas compilações com certificado da Apple — ver `cofre_do_sistema`). Nos outros casos, e nos testes, a
+/// chave fica no ficheiro, como antes.
 trait Cofre {
     /// `Ok(None)`: o cofre funciona mas não tem esta chave.
     fn ler(&self, id: &str) -> Result<Option<[u8; 32]>, String>;
@@ -93,7 +94,10 @@ fn guardar_no_cofre(cofre: &dyn Cofre, f: &Path, chave: &[u8; 32]) -> Result<(),
 /// passa para o cofre (o ficheiro fica só com o identificador); ficheiro com identificador → lê do cofre. Se o cofre
 /// falhar numa chave antiga, ela continua no ficheiro e o programa funciona como antes. `Ok(None)`: o cofre não deixa
 /// ler a chave agora (bloqueado, ou o utilizador recusou o acesso): não se cria outra por cima.
-fn obter_chave(pasta: &Path, cofre: Option<&dyn Cofre>) -> AppResult<Option<[u8; 32]>> {
+///
+/// Com `criar` a falso, o cofre só serve para ler uma chave que já lá está (ficheiro com identificador): as chaves
+/// novas e as dos ficheiros antigos ficam no ficheiro.
+fn obter_chave(pasta: &Path, cofre: Option<&dyn Cofre>, criar: bool) -> AppResult<Option<[u8; 32]>> {
     let f = pasta.join(FICHEIRO);
     let lido = match std::fs::read(&f) {
         Ok(b) => Some(b),
@@ -102,7 +106,7 @@ fn obter_chave(pasta: &Path, cofre: Option<&dyn Cofre>) -> AppResult<Option<[u8;
     };
     let nova = |pasta_f: &Path| -> AppResult<[u8; 32]> {
         let k = aleatorio::<32>();
-        match cofre {
+        match cofre.filter(|_| criar) {
             Some(c) => {
                 if let Err(motivo) = guardar_no_cofre(c, pasta_f, &k) {
                     eprintln!("Cofre do sistema indisponível ({motivo}): a chave mestra fica no ficheiro.");
@@ -135,7 +139,7 @@ fn obter_chave(pasta: &Path, cofre: Option<&dyn Cofre>) -> AppResult<Option<[u8;
         };
     }
     let k: [u8; 32] = b.try_into().map_err(|_| AppError::msg(format!("O ficheiro {} está danificado.", f.display())))?;
-    if let Some(c) = cofre {
+    if let Some(c) = cofre.filter(|_| criar) {
         if let Err(motivo) = guardar_no_cofre(c, &f, &k) {
             eprintln!("Não foi possível passar a chave mestra para o cofre do sistema ({motivo}): fica no ficheiro.");
         }
@@ -143,13 +147,27 @@ fn obter_chave(pasta: &Path, cofre: Option<&dyn Cofre>) -> AppResult<Option<[u8;
     Ok(Some(k))
 }
 
+/// O cofre deste sistema e se as chaves novas vão para ele.
+///
+/// - Windows: o Gestor de Credenciais (DPAPI) não pergunta nada; as chaves vão para lá.
+/// - macOS: o Porta-chaves só entrega a chave, sem perguntar, à mesma aplicação assinada. Sem certificado da Apple
+///   (assinatura «ad-hoc»), cada actualização é outra aplicação e o Mac pediria a senha e «Permitir/Negar» depois de
+///   cada actualização. Por isso as chaves só vão para o Porta-chaves nas compilações com o certificado (o build.yml
+///   define KANGEST_COFRE_MACOS); nas outras ficam no ficheiro, e o Porta-chaves só se lê se já lá houver uma chave.
+fn cofre_do_sistema() -> (Option<&'static dyn Cofre>, bool) {
+    #[cfg(target_os = "windows")]
+    let r: (Option<&'static dyn Cofre>, bool) = (Some(&CofreSistema), true);
+    #[cfg(target_os = "macos")]
+    let r: (Option<&'static dyn Cofre>, bool) = (Some(&CofreSistema), option_env!("KANGEST_COFRE_MACOS").is_some_and(|v| v == "1"));
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let r: (Option<&'static dyn Cofre>, bool) = (None, false);
+    r
+}
+
 /// Lê (ou cria, na primeira vez) a chave mestra desta pasta de dados.
 pub fn iniciar(pasta: &Path) -> AppResult<()> {
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    let cofre: Option<&dyn Cofre> = Some(&CofreSistema);
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let cofre: Option<&dyn Cofre> = None;
-    if let Some(chave) = obter_chave(pasta, cofre)? {
+    let (cofre, criar) = cofre_do_sistema();
+    if let Some(chave) = obter_chave(pasta, cofre, criar)? {
         let _ = CHAVE.set(chave);
     }
     Ok(())
@@ -277,13 +295,13 @@ mod testes {
     fn instalacao_nova_poe_a_chave_no_cofre_e_so_o_identificador_no_ficheiro() {
         let p = pasta("nova");
         let c = Falso::default();
-        let k = obter_chave(&p, Some(&c)).unwrap().unwrap();
+        let k = obter_chave(&p, Some(&c), true).unwrap().unwrap();
         let f = std::fs::read_to_string(p.join(FICHEIRO)).unwrap();
         assert!(f.starts_with(ID_PREFIXO) && f.len() == ID_PREFIXO.len() + 32, "{f}");
         assert!(!f.contains(&hex(&k)), "a chave não está no ficheiro");
         assert_eq!(c.itens.borrow().len(), 1);
         // arranque seguinte: a mesma chave, vinda do cofre
-        assert_eq!(obter_chave(&p, Some(&c)).unwrap(), Some(k));
+        assert_eq!(obter_chave(&p, Some(&c), true).unwrap(), Some(k));
         let _ = std::fs::remove_dir_all(&p);
     }
 
@@ -293,10 +311,10 @@ mod testes {
         let antiga = aleatorio::<32>();
         std::fs::write(p.join(FICHEIRO), antiga).unwrap();
         let c = Falso::default();
-        assert_eq!(obter_chave(&p, Some(&c)).unwrap(), Some(antiga), "os segredos já cifrados continuam a abrir");
+        assert_eq!(obter_chave(&p, Some(&c), true).unwrap(), Some(antiga), "os segredos já cifrados continuam a abrir");
         assert!(std::fs::read(p.join(FICHEIRO)).unwrap().starts_with(ID_PREFIXO.as_bytes()));
         assert_eq!(c.itens.borrow().values().next(), Some(&antiga));
-        assert_eq!(obter_chave(&p, Some(&c)).unwrap(), Some(antiga));
+        assert_eq!(obter_chave(&p, Some(&c), true).unwrap(), Some(antiga));
         let _ = std::fs::remove_dir_all(&p);
     }
 
@@ -306,11 +324,11 @@ mod testes {
         let antiga = aleatorio::<32>();
         std::fs::write(p.join(FICHEIRO), antiga).unwrap();
         let c = Falso { falha_gravar: true, ..Default::default() };
-        assert_eq!(obter_chave(&p, Some(&c)).unwrap(), Some(antiga));
+        assert_eq!(obter_chave(&p, Some(&c), true).unwrap(), Some(antiga));
         assert_eq!(std::fs::read(p.join(FICHEIRO)).unwrap(), antiga, "o ficheiro não foi tocado");
         // e uma instalação nova com o cofre avariado também funciona (chave no ficheiro)
         let p2 = pasta("falha2");
-        let k = obter_chave(&p2, Some(&c)).unwrap().unwrap();
+        let k = obter_chave(&p2, Some(&c), true).unwrap().unwrap();
         assert_eq!(std::fs::read(p2.join(FICHEIRO)).unwrap(), k);
         let _ = std::fs::remove_dir_all(&p);
         let _ = std::fs::remove_dir_all(&p2);
@@ -320,10 +338,10 @@ mod testes {
     fn cofre_que_recusa_ler_nao_cria_outra_chave() {
         let p = pasta("recusa");
         let c = Falso::default();
-        obter_chave(&p, Some(&c)).unwrap();
+        obter_chave(&p, Some(&c), true).unwrap();
         let antes = std::fs::read(p.join(FICHEIRO)).unwrap();
         let recusa = Falso { falha_ler: true, ..Default::default() };
-        assert_eq!(obter_chave(&p, Some(&recusa)).unwrap(), None);
+        assert_eq!(obter_chave(&p, Some(&recusa), true).unwrap(), None);
         assert_eq!(std::fs::read(p.join(FICHEIRO)).unwrap(), antes, "o identificador não muda");
         let _ = std::fs::remove_dir_all(&p);
     }
@@ -332,13 +350,13 @@ mod testes {
     fn chave_que_desapareceu_do_cofre_recomeca_com_o_mesmo_identificador() {
         let p = pasta("some");
         let c = Falso::default();
-        let k1 = obter_chave(&p, Some(&c)).unwrap().unwrap();
+        let k1 = obter_chave(&p, Some(&c), true).unwrap().unwrap();
         c.itens.borrow_mut().clear();
-        let k2 = obter_chave(&p, Some(&c)).unwrap().unwrap();
+        let k2 = obter_chave(&p, Some(&c), true).unwrap().unwrap();
         assert_ne!(k1, k2);
-        assert_eq!(obter_chave(&p, Some(&c)).unwrap(), Some(k2));
+        assert_eq!(obter_chave(&p, Some(&c), true).unwrap(), Some(k2));
         // sem cofre neste computador, um ficheiro com identificador é um erro claro
-        assert!(obter_chave(&p, None).unwrap_err().to_string().contains("cofre do sistema"));
+        assert!(obter_chave(&p, None, true).unwrap_err().to_string().contains("cofre do sistema"));
         let _ = std::fs::remove_dir_all(&p);
     }
 
@@ -352,20 +370,42 @@ mod testes {
         let p = pasta("real");
         let antiga = aleatorio::<32>();
         std::fs::write(p.join(FICHEIRO), antiga).unwrap();
-        assert_eq!(obter_chave(&p, Some(&CofreSistema)).unwrap(), Some(antiga));
+        assert_eq!(obter_chave(&p, Some(&CofreSistema), true).unwrap(), Some(antiga));
         let f = std::fs::read_to_string(p.join(FICHEIRO)).unwrap();
         let id = f.strip_prefix(ID_PREFIXO).expect("passou para o Porta-chaves").to_string();
-        assert_eq!(obter_chave(&p, Some(&CofreSistema)).unwrap(), Some(antiga), "lida de volta do Porta-chaves");
+        assert_eq!(obter_chave(&p, Some(&CofreSistema), true).unwrap(), Some(antiga), "lida de volta do Porta-chaves");
         keyring::Entry::new(SERVICO, &id).unwrap().delete_credential().unwrap();
         let _ = std::fs::remove_dir_all(&p);
     }
 
     #[test]
+    fn sem_criar_no_cofre_as_chaves_ficam_no_ficheiro_mas_le_as_que_la_estao() {
+        // macOS sem certificado da Apple: instalação nova e ficheiro antigo ficam no ficheiro, sem tocar no cofre
+        let c = Falso::default();
+        let p = pasta("macos-nova");
+        let k = obter_chave(&p, Some(&c), false).unwrap().unwrap();
+        assert_eq!(std::fs::read(p.join(FICHEIRO)).unwrap(), k);
+        let p2 = pasta("macos-antiga");
+        let antiga = aleatorio::<32>();
+        std::fs::write(p2.join(FICHEIRO), antiga).unwrap();
+        assert_eq!(obter_chave(&p2, Some(&c), false).unwrap(), Some(antiga));
+        assert_eq!(std::fs::read(p2.join(FICHEIRO)).unwrap(), antiga, "não passou para o cofre");
+        assert!(c.itens.borrow().is_empty());
+        // uma chave que já está no cofre (compilação assinada antes) continua a ler-se dele
+        let p3 = pasta("macos-cofre");
+        let k3 = obter_chave(&p3, Some(&c), true).unwrap().unwrap();
+        assert_eq!(obter_chave(&p3, Some(&c), false).unwrap(), Some(k3));
+        for x in [p, p2, p3] {
+            let _ = std::fs::remove_dir_all(x);
+        }
+    }
+
+    #[test]
     fn sem_cofre_tudo_como_antes() {
         let p = pasta("sem");
-        let k = obter_chave(&p, None).unwrap().unwrap();
+        let k = obter_chave(&p, None, true).unwrap().unwrap();
         assert_eq!(std::fs::read(p.join(FICHEIRO)).unwrap(), k);
-        assert_eq!(obter_chave(&p, None).unwrap(), Some(k));
+        assert_eq!(obter_chave(&p, None, true).unwrap(), Some(k));
         let _ = std::fs::remove_dir_all(&p);
     }
 }

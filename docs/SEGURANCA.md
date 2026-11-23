@@ -82,8 +82,12 @@ Electrónica, a senha do email e os segredos dos avisos automáticos vão cifrad
 vez da chave ou da senha. Na compilação oficial, a chave do produtor e as credenciais da Facturação Electrónica nem
 sequer vão para a base: vêm dentro do programa ([CERTIFICACAO-AGT.md](CERTIFICACAO-AGT.md)).
 
-- A chave mestra fica no **cofre do sistema**: no Porta-chaves (macOS) e no Gestor de Credenciais, protegido pela DPAPI
-  (Windows), ligado à conta do utilizador do sistema. O ficheiro `kangest.chave`, na pasta de dados, guarda só o
+- A chave mestra fica no **cofre do sistema**: no Windows, no Gestor de Credenciais, protegido pela DPAPI, ligado à
+  conta do utilizador do sistema. No macOS, no Porta-chaves, mas **só nas compilações assinadas com o certificado da
+  Apple** (o `build.yml` define `KANGEST_COFRE_MACOS=1`): o Porta-chaves só entrega a chave sem perguntar à mesma
+  aplicação assinada, e com a assinatura «ad-hoc» cada actualização seria outra aplicação, por isso o Mac pediria a
+  senha e «Permitir/Negar» depois de cada actualização. Sem o certificado, no macOS a chave fica no ficheiro, como
+  antes; uma chave que já esteja no Porta-chaves continua a ler-se dele. O ficheiro `kangest.chave`, na pasta de dados, guarda só o
   identificador (`cofre1:…`), não a chave. Uma cópia da base, ou da pasta de dados inteira, sozinha, não revela os
   segredos. Os valores antigos, em texto, são cifrados no arranque.
 - Instalações anteriores, com a chave no `kangest.chave`, passam-na sozinhas para o cofre no primeiro arranque; a chave
