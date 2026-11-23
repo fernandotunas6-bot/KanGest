@@ -47,8 +47,10 @@ shasum -a 256 KanGest_1.2.0_aarch64.dmg
 3. O KanGest usa o WebView2 do Windows (já vem no Windows 11 e no Windows 10 actualizado). Se faltar, o instalador
    descarrega-o: nesse caso é preciso Internet durante a instalação.
 
-Os dados ficam em `%APPDATA%\ao.kigest.app` (base `kigest.db`, cópias em `copias\`). Desinstalar (Definições → Aplicações)
-**não apaga os dados**, a não ser que marque a opção de apagar os dados da aplicação.
+Os dados ficam em `%APPDATA%\ao.kigest.app` (base `kigest.db`, cifrada, e cópias em `copias\`). Desinstalar (Definições →
+Aplicações) **não apaga os dados**, a não ser que marque a opção de apagar os dados da aplicação. Para passar para outro
+computador, use uma cópia externa ou exportada e **Restaurar**: a chave da base fica no cofre do Windows do computador
+antigo, por isso copiar a pasta não chega ([COPIAS.md](COPIAS.md)).
 
 ## 4. macOS
 

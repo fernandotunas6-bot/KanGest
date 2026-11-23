@@ -2,8 +2,9 @@
 // © 2026 Valentino Canguele. Todos os direitos reservados. Proibido copiar, alterar ou redistribuir sem autorização escrita do autor.
 
 import { useState, type FormEvent, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowRight, Building2, Check, Coins, DatabaseBackup, GraduationCap, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, Check, Coins, DatabaseBackup, GraduationCap, ShieldAlert, ShieldCheck } from "lucide-react";
 import { call } from "@/lib/api";
 import { Badge, Button, Card, Field, Input, Select, cn } from "@/components/ui";
 import { Logo } from "@/components/Logo";
@@ -44,6 +45,12 @@ export default function Setup({ onDone }: { onDone: () => void }) {
   // computador novo: restaurar uma cópia de segurança em vez de configurar do zero
   const [copia, setCopia] = useState("");
   const [restaurar, setRestaurar] = useState(false);
+  // a base que estava neste computador não abriu com a chave dele (pasta vinda de outro computador) e ficou de parte
+  const { data: estado } = useQuery({
+    queryKey: ["setup-estado"],
+    queryFn: () => call<{ base_de_parte?: string | null }>("setup.estado"),
+    staleTime: Infinity,
+  });
 
   const escola = modo === "escola";
   const atual = PASSOS[passo];
@@ -94,6 +101,22 @@ export default function Setup({ onDone }: { onDone: () => void }) {
           <h1 className="text-[28px] font-semibold tracking-tight">Bem-vindo ao KanGest</h1>
           <p className="mt-1 text-ink-2">Três passos e começa a facturar. O resto ajusta-se depois em Configurações.</p>
         </div>
+
+        {estado?.base_de_parte && (
+          <Card className="mb-5 border-accent/40 bg-accent-50 p-5 text-[13.5px]">
+            <div className="mb-1.5 flex items-center gap-2 font-semibold text-accent-ink">
+              <ShieldAlert className="size-5" /> A base de dados anterior não abriu neste computador
+            </div>
+            <p className="text-ink-2">
+              Está cifrada com a chave de outro computador. Acontece quando a pasta do KanGest é copiada de um computador para
+              outro. Não foi apagada: ficou guardada em <span className="break-all font-mono text-[12.5px]">{estado.base_de_parte}</span>.
+            </p>
+            <p className="mt-2 text-ink-2">
+              Para continuar com os dados da loja, restaure em baixo uma <b>cópia externa</b> (pen, OneDrive) ou a <b>cópia
+              exportada</b> do computador antigo.
+            </p>
+          </Card>
+        )}
 
         <ol className="mb-5 flex flex-wrap gap-1.5" aria-label="Passos da instalação">
           {PASSOS.map((p, i) => (

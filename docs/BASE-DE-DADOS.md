@@ -1,6 +1,8 @@
 # Base de dados
 
-O KanGest guarda tudo num ficheiro SQLite (`kigest.db`, na pasta de dados: ver [INSTALACAO.md](INSTALACAO.md)). Num
+O KanGest guarda tudo num ficheiro SQLite cifrado com o SQLCipher (`kigest.db`, na pasta de dados: ver
+[INSTALACAO.md](INSTALACAO.md) e [SEGURANCA.md](SEGURANCA.md) §5). Para o abrir num editor de SQLite, use a cópia
+exportada (em claro), não o ficheiro em uso. Num
 conjunto de postos em rede, só o servidor tem a base; os postos falam com ele ([REDE.md](REDE.md)).
 
 ## Como está configurada

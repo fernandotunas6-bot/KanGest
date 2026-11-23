@@ -14,12 +14,26 @@ pub async fn estado(st: &AppState) -> AppResult<Value> {
     let empresa: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM empresa").fetch_one(&st.pool).await?;
     let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM utilizadores").fetch_one(&st.pool).await?;
     let nome: Option<String> = sqlx::query_scalar("SELECT nome FROM empresa WHERE id = 1").fetch_optional(&st.pool).await?;
+    let inicializado = empresa > 0 && users > 0;
     // as cores da empresa já se vêem antes de entrar
     Ok(json!({
-        "inicializado": empresa > 0 && users > 0,
+        "inicializado": inicializado,
         "empresa": nome,
         "cores": super::aparencia::cores(&st.pool).await?,
+        // a base que não abriu com a chave deste computador e ficou de parte (db.rs, por_de_parte): o ecrã inicial explica
+        "base_de_parte": if inicializado { None } else { ultima_de_parte(&st.pasta_dados) },
     }))
+}
+
+/// A base posta de parte mais recente (`kigest.db.ilegivel-AAAAMMDD-HHMMSS`), sem o WAL e o índice que a acompanham.
+fn ultima_de_parte(pasta: &std::path::Path) -> Option<String> {
+    std::fs::read_dir(pasta)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.starts_with("kigest.db.ilegivel-") && !n.ends_with("-db-wal") && !n.ends_with("-db-shm"))
+        .max()
+        .map(|n| pasta.join(n).display().to_string())
 }
 
 #[derive(Deserialize)]
@@ -264,3 +278,20 @@ pub async fn agt_guardar(st: &AppState, c: CertIn) -> AppResult<Value> {
         .await?;
     Ok(Value::Null)
 }
+
+#[cfg(test)]
+mod testes {
+    #[test]
+    fn base_de_parte_mais_recente_sem_wal() {
+        let p = std::env::temp_dir().join(format!("kangest-de-parte-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        assert_eq!(super::ultima_de_parte(&p), None);
+        for n in ["kigest.db", "kigest.db.ilegivel-20261101-090000", "kigest.db.ilegivel-20261123-101010", "kigest.db.ilegivel-20261123-101010-db-wal"] {
+            std::fs::write(p.join(n), b"x").unwrap();
+        }
+        assert_eq!(super::ultima_de_parte(&p), Some(p.join("kigest.db.ilegivel-20261123-101010").display().to_string()));
+        let _ = std::fs::remove_dir_all(&p);
+    }
+}
+

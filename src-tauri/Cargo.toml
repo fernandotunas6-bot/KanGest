@@ -47,6 +47,13 @@ socket2 = "0.6"
 keyring = { version = "3", default-features = false, features = ["apple-native"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", default-features = false, features = ["windows-native"] }
+# SQLCipher no Windows: o OpenSSL compila-se junto (o Windows não o traz)
+libsqlite3-sys = { version = "0.30", features = ["bundled-sqlcipher-vendored-openssl"] }
+
+# Base de dados cifrada (SQLCipher, AES-256): o SQLite do sqlx passa a ser o SQLCipher. No macOS usa o CommonCrypto da
+# Apple; no Linux (CI, desenvolvimento) o libcrypto do sistema.
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+libsqlite3-sys = { version = "0.30", features = ["bundled-sqlcipher"] }
 
 # Crypto e hashing ficam muito lentos sem optimizações em debug.
 [profile.dev.package.rsa]

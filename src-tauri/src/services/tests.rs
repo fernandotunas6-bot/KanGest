@@ -3203,7 +3203,9 @@ async fn copias_externas_cifradas_e_restauro() {
     let nova = pasta2.join("kangest-versao-nova.db");
     super::sistema::copiar(&st2.pool, &nova).await.unwrap();
     {
-        let p = sqlx::SqlitePool::connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&nova)).await.unwrap();
+        // as cópias locais saem cifradas com a chave deste computador
+        let o = db::com_chave(sqlx::sqlite::SqliteConnectOptions::new().filename(&nova), &crate::segredos::chave_base().unwrap());
+        let p = sqlx::SqlitePool::connect_with(o).await.unwrap();
         sqlx::query("INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (999999, 'de uma versão futura', 1, x'00', 0)")
             .execute(&p)
             .await

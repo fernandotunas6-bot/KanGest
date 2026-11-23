@@ -39,7 +39,8 @@ pub async fn backup(st: &AppState) -> AppResult<Value> {
     st.exigir_perm("sistema.backup")?;
     let nome = format!("kangest-copia-{}.db", chrono::Local::now().format("%Y%m%d-%H%M%S"));
     let destino = st.pasta_exportacao.join(nome);
-    copiar(&st.pool, &destino).await?;
+    // portátil (em claro): é a que se leva para outro computador; a base em uso e as cópias locais vão cifradas
+    crate::db::exportar_em_claro(&st.pool, &destino).await?;
     let bytes = std::fs::metadata(&destino).map(|m| m.len()).unwrap_or(0);
     Ok(json!({ "ficheiro": destino.display().to_string(), "bytes": bytes }))
 }
@@ -136,16 +137,25 @@ fn e_cifrada(f: &Path) -> bool {
 pub async fn verificar_ficheiro(f: &Path) -> AppResult<()> {
     use sqlx::sqlite::SqliteConnectOptions;
     use sqlx::{ConnectOptions, Connection};
-    let mut c = SqliteConnectOptions::new()
-        .filename(f)
-        .read_only(true)
-        .connect()
-        .await
-        .map_err(|e| AppError::msg(format!("{} não é uma cópia de segurança do KanGest ({e}).", f.display())))?;
-    let r: String = sqlx::query_scalar("PRAGMA integrity_check")
-        .fetch_one(&mut c)
-        .await
-        .map_err(|e| AppError::msg(format!("{} não é uma cópia de segurança do KanGest ({e}).", f.display())))?;
+    // as cópias locais vão cifradas com a chave deste computador; as exportadas e as externas, em claro
+    let cifrada = !crate::db::em_claro(f);
+    let mut o = SqliteConnectOptions::new().filename(f).read_only(true);
+    if cifrada {
+        o = crate::db::com_chave(o, &crate::segredos::chave_base()?);
+    }
+    let mut c = o.connect().await.map_err(|e| AppError::msg(format!("{} não é uma cópia de segurança do KanGest ({e}).", f.display())))?;
+    let r: String = sqlx::query_scalar("PRAGMA integrity_check").fetch_one(&mut c).await.map_err(|e| {
+        if cifrada {
+            AppError::msg(format!(
+                "{} não é uma cópia de segurança do KanGest, ou está cifrada com a chave de outro computador. Para passar \
+                 a loja para outro computador, use uma cópia externa (pen, OneDrive) ou a cópia exportada em \
+                 Configurações → Sistema.",
+                f.display()
+            ))
+        } else {
+            AppError::msg(format!("{} não é uma cópia de segurança do KanGest ({e}).", f.display()))
+        }
+    })?;
     let tabelas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('documentos', 'config', 'empresa', '_sqlx_migrations')")
         .fetch_one(&mut c)
         .await?;
@@ -229,6 +239,9 @@ pub async fn fazer_copia(pool: &SqlitePool, pasta_dados: &Path, motivo: &str) ->
     Ok(json!({ "ficheiro": destino.display().to_string(), "externa": externa }))
 }
 
+/// A cópia externa (pen, OneDrive) é a que salva a loja quando o computador avaria: tem de abrir noutro computador,
+/// por isso vai em claro (exportada da base, porque a cópia local está cifrada com a chave deste), e cifrada com a
+/// senha das cópias quando está definida.
 async fn copiar_para_externa(pool: &SqlitePool, local: &Path, c: &Cfg, carimbo: &str) -> AppResult<String> {
     let dir = PathBuf::from(c.pasta_externa.trim());
     if !dir.is_dir() {
@@ -236,7 +249,11 @@ async fn copiar_para_externa(pool: &SqlitePool, local: &Path, c: &Cfg, carimbo: 
     }
     let nif: String = sqlx::query_scalar("SELECT nif FROM empresa WHERE id = 1").fetch_optional(pool).await?.unwrap_or_default();
     let prefixo = format!("kangest-{}-", nif.trim());
-    let dados = std::fs::read(local).map_err(|e| AppError::msg(e.to_string()))?;
+    let portatil = local.with_extension("portatil.db");
+    crate::db::exportar_em_claro(pool, &portatil).await?;
+    let lido = std::fs::read(&portatil).map_err(|e| AppError::msg(e.to_string()));
+    let _ = std::fs::remove_file(&portatil);
+    let dados = lido?;
     let (nome, conteudo) = if c.cifrar_externa {
         let senha = crate::segredos::ler(pool, "copias.senha").await?.filter(|s| !s.is_empty()).ok_or_else(|| AppError::msg("falta a senha das cópias cifradas"))?;
         (format!("{prefixo}{carimbo}.kgc"), cifrar_bytes(&dados, &senha))
