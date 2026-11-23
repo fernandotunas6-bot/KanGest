@@ -25,6 +25,12 @@ export async function escolherCopia(): Promise<string | null> {
   return typeof r === "string" ? r : null;
 }
 
+/** Um ficheiro para o KanGest ler (SAF-T, folha de cálculo), ou null se se cancelou. */
+export async function escolherFicheiro(titulo: string, filtros: { name: string; extensions: string[] }[]): Promise<string | null> {
+  const r = await open({ multiple: false, directory: false, title: titulo, filters: filtros });
+  return typeof r === "string" ? r : null;
+}
+
 /** Uma pasta (pen, disco de rede, OneDrive), ou null se se cancelou. */
 export async function escolherPasta(titulo: string): Promise<string | null> {
   const r = await open({ multiple: false, directory: true, title: titulo });

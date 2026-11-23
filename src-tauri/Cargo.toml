@@ -41,6 +41,10 @@ minisign-verify = "0.2"
 flate2 = "1"
 # SAF-T (AO) de outros sistemas, lido por fluxo (importação universal). A mesma versão que já vem com o Tauri.
 quick-xml = "0.42"
+# Folhas de cálculo de outros programas ou feitas à mão (Excel .xlsx/.xls, LibreOffice .ods) e CSV em Windows-1252.
+# O calamine usa o mesmo quick-xml; o encoding_rs já vem com outras dependências.
+calamine = { version = "=0.38.0", default-features = false }
+encoding_rs = "0.8"
 # Portas em IPv4 e IPv6 ao mesmo tempo (IPV6_V6ONLY desligado também no Windows).
 socket2 = "0.6"
 # Uma só cópia do KanGest aberta (a segunda traz a janela da primeira para a frente) e o arranque automático ao ligar o
