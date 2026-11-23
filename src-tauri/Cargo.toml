@@ -43,6 +43,14 @@ flate2 = "1"
 quick-xml = "0.42"
 # Portas em IPv4 e IPv6 ao mesmo tempo (IPV6_V6ONLY desligado também no Windows).
 socket2 = "0.6"
+# Uma só cópia do KanGest aberta (a segunda traz a janela da primeira para a frente) e o arranque automático ao ligar o
+# computador (o servidor da loja). Série 2: o KanGest usa o Tauri 2.
+tauri-plugin-single-instance = "=2.5.5"
+tauri-plugin-autostart = "=2.7.0"
+# Notificações do sistema (centro de notificações do macOS, avisos do Windows): o que falha em segundo plano.
+tauri-plugin-notification = "=2.8.0"
+# Janelas nativas de guardar e abrir (cópias de segurança, restauro, pasta externa).
+tauri-plugin-dialog = "=2.8.4"
 
 # Importação: as instâncias locais do SQL Server (registo do Windows). A mesma versão que já vem com o Tauri.
 [target.'cfg(target_os = "windows")'.dependencies.winreg]
@@ -72,6 +80,9 @@ opt-level = 3
 opt-level = 3
 # PBKDF2 da rede entre postos e AES/ChaCha dos segredos
 [profile.dev.package.ring]
+opt-level = 3
+# o SQLite (SQLCipher) em C: sem optimização, os testes com a base ficam lentos
+[profile.dev.package.libsqlite3-sys]
 opt-level = 3
 
 [profile.release]

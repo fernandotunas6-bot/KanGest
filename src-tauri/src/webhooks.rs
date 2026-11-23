@@ -265,6 +265,15 @@ async fn entregar(p: &SqlitePool, d: &SqliteRow) -> AppResult<bool> {
             .bind(webhook)
             .execute(p)
             .await?;
+        // à terceira falha seguida, a loja online (ou outro sistema) parou de receber os avisos
+        let parado: Option<(String, i64)> = sqlx::query_as("SELECT nome, falhas_seguidas FROM api_webhooks WHERE id = ?").bind(webhook).fetch_optional(p).await?;
+        if let Some((nome, 3)) = parado {
+            crate::nativo::notificar(
+                &format!("webhook-{webhook}"),
+                "Integração sem resposta",
+                &format!("«{nome}» não respondeu a 3 avisos seguidos. Veja em Sistema → API e Integrações."),
+            );
+        }
     }
     Ok(aceite)
 }

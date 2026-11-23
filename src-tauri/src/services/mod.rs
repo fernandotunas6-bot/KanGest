@@ -274,6 +274,9 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "rede.estado" => crate::rede::estado(st).await,
         "rede.guardar" => crate::rede::guardar(st, p(params)?).await,
         "rede.testar" => crate::rede::testar(st).await,
+        // arranque automático deste computador (método local: cada computador tem o seu; src/nativo.rs)
+        "rede.arranque" => crate::nativo::arranque(st).await,
+        "rede.arranqueGuardar" => crate::nativo::arranque_guardar(st, p(params)?).await,
 
         // ---- impressão térmica (ESC/POS) e gaveta ----
         "impressao.estado" => impressao::estado(st).await,
@@ -444,7 +447,7 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "saft.exportar" => saft::exportar(st, p(params)?).await,
         "saft.exportarCompras" => saft::exportar_compras(st, p(params)?).await,
         "saft.exportarEstado" => saft::exportar_estado(st, p(params)?).await,
-        "sistema.backup" => sistema::backup(st).await,
+        "sistema.backup" => sistema::backup(st, p(params)?).await,
         "sistema.copias" => sistema::copias(st).await,
         "sistema.copiasGuardar" => sistema::copias_guardar(st, p(params)?).await,
         "sistema.copiaAgora" => sistema::copia_agora(st).await,
