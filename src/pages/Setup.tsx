@@ -11,6 +11,7 @@ import { Logo } from "@/components/Logo";
 import { FAMILIA_ENSINO, MODOS, MOTIVO_ENSINO, artigosEscola, modoPorId, type ModoId } from "@/lib/modos";
 import { kz, parseKz } from "@/lib/format";
 import { RestaurarCopia } from "@/pages/Configuracoes";
+import { escolherCopia, useEscolherNoComputador } from "@/lib/dialogos";
 
 /** Moedas que se podem aceitar em numerário no POS logo na instalação (as da tabela de moedas de origem). */
 const MOEDAS_POS = [
@@ -45,6 +46,7 @@ export default function Setup({ onDone }: { onDone: () => void }) {
   // computador novo: restaurar uma cópia de segurança em vez de configurar do zero
   const [copia, setCopia] = useState("");
   const [restaurar, setRestaurar] = useState(false);
+  const noComputador = useEscolherNoComputador();
   // a base que estava neste computador não abriu com a chave dele (pasta vinda de outro computador) e ficou de parte
   const { data: estado } = useQuery({
     queryKey: ["setup-estado"],
@@ -335,6 +337,18 @@ export default function Setup({ onDone }: { onDone: () => void }) {
               <Field label="Caminho da cópia (.db ou .kgc)" className="flex-1">
                 <Input className="font-mono" value={copia} onChange={(x) => setCopia(x.target.value)} placeholder="E:\Copias KanGest\kangest-….kgc" />
               </Field>
+              {noComputador && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={async () => {
+                    const c = await escolherCopia();
+                    if (c) setCopia(c);
+                  }}
+                >
+                  Escolher…
+                </Button>
+              )}
               <Button type="button" variant="secondary" disabled={!copia.trim()} onClick={() => setRestaurar(true)}>
                 Restaurar
               </Button>

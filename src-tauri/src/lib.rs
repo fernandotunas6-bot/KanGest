@@ -86,6 +86,8 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         // notificações do sistema: o que falha em segundo plano (src/nativo.rs, notificar)
         .plugin(tauri_plugin_notification::init())
+        // janelas nativas de guardar e abrir (o ecrã usa-as em src/lib/dialogos.ts; permissões em capabilities/nativo.json)
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             nativo::definir(app.handle().clone());
             // selo de integridade do executável (só nas compilações oficiais; corre numa thread à parte)
