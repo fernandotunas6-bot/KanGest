@@ -9,6 +9,7 @@
 //! segredos. Restaurar a base noutra máquina obriga a introduzir de novo esses segredos.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
@@ -26,6 +27,9 @@ pub const FICHEIRO: &str = "kangest.chave";
 pub const CHAVES: [&str; 7] = ["agt.chave_privada", "fe.senha", "fe.chave_software", "fe.chave_contribuinte", "email.senha", "licenca.segredo", "web.token"];
 
 static CHAVE: OnceLock<[u8; 32]> = OnceLock::new();
+/// O cofre do sistema não deixou ler a chave mestra neste arranque: os segredos voltam a pedir-se e a base cifrada
+/// não abre (não se cria outra chave por cima da que lá está).
+static SEM_CHAVE: AtomicBool = AtomicBool::new(false);
 
 fn aleatorio<const N: usize>() -> [u8; N] {
     let mut b = [0u8; N];
@@ -168,10 +172,29 @@ fn cofre_do_sistema() -> (Option<&'static dyn Cofre>, bool) {
 /// Lê (ou cria, na primeira vez) a chave mestra desta pasta de dados.
 pub fn iniciar(pasta: &Path) -> AppResult<()> {
     let (cofre, criar) = cofre_do_sistema();
-    if let Some(chave) = obter_chave(pasta, cofre, criar)? {
-        let _ = CHAVE.set(chave);
+    match obter_chave(pasta, cofre, criar)? {
+        Some(chave) => {
+            let _ = CHAVE.set(chave);
+        }
+        None => SEM_CHAVE.store(true, Ordering::SeqCst),
     }
     Ok(())
+}
+
+/// A chave da base de dados (SQLCipher), em hexadecimal: derivada da chave mestra com SHA-256 e um rótulo próprio,
+/// para a base e os segredos nunca usarem a mesma chave. Uma chave em bruto (`x'…'`) poupa o PBKDF2 do SQLCipher em
+/// cada ligação nova.
+pub fn chave_base() -> AppResult<String> {
+    if SEM_CHAVE.load(Ordering::SeqCst) {
+        return Err(AppError::msg(
+            "O cofre do sistema não deixou ler a chave do KanGest, por isso a base de dados não abre. Desbloqueie o cofre \
+             (ou autorize o KanGest) e abra o programa outra vez.",
+        ));
+    }
+    let k = CHAVE.get_or_init(aleatorio::<32>);
+    let mut dados = b"kangest-base-de-dados-v1".to_vec();
+    dados.extend_from_slice(k);
+    Ok(hex(ring::digest::digest(&ring::digest::SHA256, &dados).as_ref()))
 }
 
 /// Sem `iniciar` (testes), usa uma chave só desta execução.

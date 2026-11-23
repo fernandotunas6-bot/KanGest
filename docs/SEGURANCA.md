@@ -99,16 +99,35 @@ sequer vão para a base: vêm dentro do programa ([CERTIFICACAO-AGT.md](CERTIFIC
   segredo de cada aviso automático em **Sistema → API e Integrações**. Os documentos já assinados continuam
   verificáveis: a chave pública de cada chave de assinatura fica registada.
 
-## 5. Limites (o que estas protecções não fazem)
+## 5. Base de dados cifrada
+
+A base de dados (`kigest.db`) vai cifrada com o **SQLCipher** (AES-256, cada página com o seu código de autenticação):
+quem abre o ficheiro com um editor de SQLite, ou o copia, não vê documentos, clientes nem artigos. A chave da base
+deriva da chave mestra (SHA-256 com um rótulo próprio, `segredos::chave_base`), por isso fica onde a chave mestra fica:
+no cofre do sistema no Windows, e no ficheiro `kangest.chave` no macOS sem certificado da Apple.
+
+- **Bases antigas, em claro:** cifram-se sozinhas no primeiro arranque (`sqlcipher_export` para um ficheiro ao lado,
+  conferido tabela a tabela, que depois substitui o original; um corte a meio deixa o original intacto).
+- **Cópias locais** (`copias/`, feitas com `VACUUM INTO`): saem cifradas com a mesma chave; restauram-se neste
+  computador.
+- **Cópia exportada e cópias externas (pen, OneDrive):** saem **portáteis**, em claro, e as externas cifradas com a
+  senha das cópias se estiver definida. São estas que salvam a loja quando o computador avaria, por isso têm de abrir
+  noutro computador, onde a chave deste não existe. Defina a senha das cópias externas.
+- **Mudar de computador:** use uma cópia externa ou exportada e **Restaurar**. Copiar a pasta de dados não chega no
+  Windows: a chave ficou no cofre do utilizador do computador antigo. Uma base que não abre com a chave deste computador
+  fica de parte (`kigest.db.ilegivel-…`, nunca apagada) e o KanGest arranca com uma base nova, onde se restaura a cópia.
+- **Suporte:** para analisar uma base, use a cópia exportada (em claro); `kigest.db` só abre com a chave.
+
+## 6. Limites (o que estas protecções não fazem)
 
 - **Quem altera o executável também pode retirar as verificações.** O selo, o selo da licença e a detecção de
   depurador obrigam a perceber e alterar várias partes do programa compilado (Rust optimizado, sem símbolos), mas não
   o tornam impossível. O que realmente não se falsifica são as licenças (só o produtor tem a chave privada) e a cadeia
   de assinaturas dos documentos.
-- **O resto da base não está cifrado.** Os segredos vão cifrados, mas os documentos, os clientes e os artigos lêem-se
-  com um editor de SQLite por quem tiver acesso ao computador. As cópias de segurança devem ser guardadas com o mesmo
-  cuidado. Cifrar a base inteira (SQLCipher) obriga a uma senha ou a uma chave guardada no sistema (DPAPI no Windows,
-  Porta-chaves no macOS) e a um cuidado especial ao restaurar noutro computador: fica como passo seguinte.
+- **As cópias portáteis vão em claro sem a senha das cópias.** A cópia exportada e as externas sem senha lêem-se com
+  um editor de SQLite: guarde-as com cuidado, ou defina a senha das cópias externas.
+- **No macOS sem certificado da Apple,** a chave fica no `kangest.chave`, ao lado da base: quem copia a pasta de dados
+  inteira leva as duas. No Windows a chave está no cofre do utilizador.
 - **Os segredos cifrados não resistem a quem entra na conta do utilizador no computador**: o cofre do sistema entrega
   a chave a programas que correm nessa conta. Protege contra quem copia a pasta de dados ou o disco, ou entra com
   outra conta do sistema. Contra quem tem a própria conta só uma senha que não está no computador — é o caso das

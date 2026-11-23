@@ -16,12 +16,15 @@ As cópias fazem-se na máquina que guarda a base de dados (modo *Sozinho* ou *S
 os dados estão no servidor.
 
 Cada cópia é feita com o programa em uso (`VACUUM INTO`) e **verificada** logo a seguir (`PRAGMA integrity_check` e as
-tabelas do KanGest). Guardam-se as últimas N (por omissão 30) em `copias/`, na pasta de dados.
+tabelas do KanGest). Guardam-se as últimas N (por omissão 30) em `copias/`, na pasta de dados. Como a base, vão
+**cifradas** com a chave deste computador: restauram-se aqui ([SEGURANCA.md](SEGURANCA.md) §5).
 
 ## Fora deste computador
 
 Indique uma **pasta externa**: uma pen (`E:\Copias KanGest`), um disco de rede (`\\SERVIDOR\Copias`) ou a pasta do OneDrive
 ou do Google Drive (que a sincroniza para a nuvem). Cada cópia é gravada também lá, com o NIF da empresa no nome.
+Estas cópias são **portáteis**: abrem noutro computador (é para isso que servem), por isso vão em claro, a menos que
+defina a senha abaixo.
 
 - Se a pen não estiver ligada, a cópia local faz-se na mesma e o ecrã mostra o erro da pasta externa.
 - **Cifrar as cópias da pasta externa** (opcional): ficam em `.kgc`, cifradas com AES-256-GCM e uma senha (PBKDF2). Protege
@@ -35,7 +38,9 @@ ou do Google Drive (que a sincroniza para a nuvem). Cada cópia é gravada tamb�
 - Uma cópia feita por uma **versão mais recente** do KanGest é recusada («Actualize este KanGest antes de a restaurar»):
   tem migrações que esta versão não conhece e, depois da troca, a base deixaria de abrir.
 - **Computador novo:** no ecrã de configuração inicial há «Já tem uma cópia de segurança do KanGest?» para restaurar em vez
-  de configurar do zero.
+  de configurar do zero. Use uma **cópia externa** ou a **cópia exportada** («Fazer cópia»): as cópias de `copias/` e a
+  própria base estão cifradas com a chave do computador antigo e não abrem noutro. No Windows, copiar a pasta de dados
+  para o computador novo não chega (a chave fica no cofre do computador antigo).
 - Os segredos guardados na instalação (chave do contribuinte da FE, senhas) estão cifrados com a chave mestra do
   computador onde foram gravados: noutro computador é preciso introduzi-los de novo (ver
   [CERTIFICACAO-AGT.md](CERTIFICACAO-AGT.md)).
