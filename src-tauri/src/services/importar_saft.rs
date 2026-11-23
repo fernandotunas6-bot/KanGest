@@ -321,13 +321,15 @@ pub async fn executar(st: &AppState, i: ExecutarIn) -> AppResult<Value> {
             }
             let existente: Option<i64> = sqlx::query_scalar("SELECT id FROM artigos WHERE referencia = ?").bind(codigo).fetch_optional(&mut *tx).await?;
             match existente {
-                // o que já está no KanGest manda: só se preenche o que falta
+                // o que já está no KanGest manda: só se preenche o que falta, e só se toca no artigo quando
+                // alguma coisa muda (a data de alteração leva-o à loja online e à API)
                 Some(id) => {
                     art_exist += 1;
                     sqlx::query(
                         "UPDATE artigos SET codigo_barras = COALESCE(codigo_barras, ?1),
                             preco1 = CASE WHEN preco1 = 0 THEN ?2 ELSE preco1 END,
-                            pvp1 = CASE WHEN preco1 = 0 THEN ?3 ELSE pvp1 END WHERE id = ?4",
+                            pvp1 = CASE WHEN preco1 = 0 THEN ?3 ELSE pvp1 END
+                         WHERE id = ?4 AND ((codigo_barras IS NULL AND ?1 IS NOT NULL) OR (preco1 = 0 AND ?2 <> 0))",
                     )
                     .bind(&barras)
                     .bind(valor)
