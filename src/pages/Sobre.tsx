@@ -56,7 +56,7 @@ const ATALHOS_GESTAO: [string, string][] = [
 
 const MANUAL: { titulo: string; texto: string }[] = [
   { titulo: "Navegação", texto: "Prima Ctrl+K (⌘K no Mac) em qualquer ecrã para ir para um ecrã ou encontrar um documento, cliente ou artigo. Marque com a estrela os ecrãs que mais usa: ficam em Favoritos, no topo do menu. O menu pode recolher-se (fica só com os ícones) e, no menu do utilizador (canto superior direito), escolhe o tema claro ou escuro e tabelas compactas." },
-  { titulo: "Primeiros passos", texto: "Preencha a empresa (Configurações), crie os utilizadores e as permissões, configure o posto e a impressora e, se vem do KIGEST antigo, use «Importar dados do KIGEST» antes de começar a facturar." },
+  { titulo: "Primeiros passos", texto: "Preencha a empresa (Configurações), crie os utilizadores e as permissões, configure o posto e a impressora e, se vem do KIGEST ou de outro programa, use «Importar dados» (KIGEST, SAF-T ou Excel) antes de começar a facturar." },
   { titulo: "Documentos", texto: "Todos os documentos (facturas, recibos, notas de crédito, guias, compras e stock) usam o mesmo ecrã. As séries são automáticas por posto e ano. Um documento emitido não se altera: anula-se com motivo ou corrige-se com nota de crédito." },
   { titulo: "POS", texto: "O caixa tem de estar aberto para vender. No fecho conte o dinheiro: o sistema mostra a diferença para o valor esperado. Os talões podem sair na impressora térmica (ESC/POS) ou pelo diálogo de impressão." },
   { titulo: "Stock", texto: "O stock muda em cada documento. Artigos com lotes saem pelo lote que expira primeiro. Use o Inventário para acertar contagens e o Recálculo de Stock se suspeitar de existências erradas." },

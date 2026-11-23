@@ -16,7 +16,7 @@ import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import type { Entidade } from "@/lib/types";
 import { AbasFicha } from "@/components/Auditoria";
 import { InputData } from "@/components/InputData";
-import { Atalho, Badge, BotaoCancelar, Button, Card, Confirmar, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { Atalho, Badge, BotaoCancelar, Button, Card, Confirmar, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, Table, Td, Th, cn, useOrdenacao, LinhasCarregando } from "@/components/ui";
 import { useJaUsado, useSujo } from "@/lib/ficha";
 
 export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
@@ -159,6 +159,7 @@ export default function Entidades({ tipo }: { tipo: "C" | "F" }) {
               </tr>
             </thead>
             <tbody>
+              {!lista.data && <LinhasCarregando colunas={6} />}
               {ordenados?.map((e) => (
                 <tr key={e.id} className={cn("cursor-pointer hover:bg-sunken/60", e.ativo === 0 && "opacity-60")} onClick={() => e.id !== 1 && setEditar(e)}>
                   <Td onClick={(x) => x.stopPropagation()}>

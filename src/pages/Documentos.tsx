@@ -11,7 +11,7 @@ import { data, hojeISO, inicioMesISO, kz } from "@/lib/format";
 import { MENU } from "@/lib/menu";
 import type { DocResumo, Grupo } from "@/lib/types";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Empty, Input, PageHeader, Select, Table, Td, Th, cn, useOrdenacao } from "@/components/ui";
+import { Badge, Button, Card, Empty, Input, PageHeader, Select, Table, Td, Th, cn, useOrdenacao, LinhasCarregando } from "@/components/ui";
 import { InputData } from "@/components/InputData";
 import DocumentoModal from "@/components/DocumentoModal";
 
@@ -132,6 +132,7 @@ export default function Documentos() {
               </tr>
             </thead>
             <tbody>
+              {!lista.data && <LinhasCarregando colunas={6} />}
               {ordenados?.map((d) => (
                 <tr key={d.id} className="cursor-pointer hover:bg-sunken/60" onClick={() => setAberto(d.id)}>
                   <Td>
@@ -177,7 +178,7 @@ export default function Documentos() {
           </Table>
         )}
         <div className="flex justify-between border-t border-line px-5 py-3 text-[13px] text-ink-2">
-          <span>{lista.data?.length ?? 0} documentos</span>
+          <span>{lista.data ? `${lista.data.length} documentos` : "…"}</span>
           <span>
             {rotuloTotal}: <b className="num text-ink">{kz(total)}</b>
           </span>

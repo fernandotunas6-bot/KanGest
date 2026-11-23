@@ -182,6 +182,12 @@ input, textarea, select, [data-selectable] { user-select: text; -webkit-user-sel
 ::-webkit-scrollbar-thumb { background: var(--color-line-strong); border-radius: 10px; border: 2px solid var(--color-bg); }
 ::-webkit-scrollbar-track { background: transparent; }
 
+/* barra do ecrã de arranque (App.tsx): vai e vem */
+@keyframes kg-arranque {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
 /* ---------- Impressão: só a área #print-area ---------- */
 @media screen {
   #print-area { display: none; }
