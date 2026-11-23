@@ -82,8 +82,19 @@ Electrónica, a senha do email e os segredos dos avisos automáticos vão cifrad
 vez da chave ou da senha. Na compilação oficial, a chave do produtor e as credenciais da Facturação Electrónica nem
 sequer vão para a base: vêm dentro do programa ([CERTIFICACAO-AGT.md](CERTIFICACAO-AGT.md)).
 
-- A chave mestra está num ficheiro à parte, `kangest.chave`, na pasta de dados da aplicação, fora da base: uma cópia
-  da base, sozinha, não revela os segredos. Os valores antigos, em texto, são cifrados no arranque.
+- A chave mestra fica no **cofre do sistema**: no Windows, no Gestor de Credenciais, protegido pela DPAPI, ligado à
+  conta do utilizador do sistema. No macOS, no Porta-chaves, mas **só nas compilações assinadas com o certificado da
+  Apple** (o `build.yml` define `KANGEST_COFRE_MACOS=1`): o Porta-chaves só entrega a chave sem perguntar à mesma
+  aplicação assinada, e com a assinatura «ad-hoc» cada actualização seria outra aplicação, por isso o Mac pediria a
+  senha e «Permitir/Negar» depois de cada actualização. Sem o certificado, no macOS a chave fica no ficheiro, como
+  antes; uma chave que já esteja no Porta-chaves continua a ler-se dele. O ficheiro `kangest.chave`, na pasta de dados, guarda só o
+  identificador (`cofre1:…`), não a chave. Uma cópia da base, ou da pasta de dados inteira, sozinha, não revela os
+  segredos. Os valores antigos, em texto, são cifrados no arranque.
+- Instalações anteriores, com a chave no `kangest.chave`, passam-na sozinhas para o cofre no primeiro arranque; a chave
+  é a mesma, por isso os segredos já cifrados continuam a abrir. O ficheiro só troca a chave pelo identificador depois
+  de a ler de volta do cofre. Se o cofre não estiver disponível, a chave continua no ficheiro, como antes; se o cofre
+  recusar o acesso, o programa abre e pede de novo os segredos, sem criar outra chave por cima.
+- Noutros sistemas (Linux, testes) a chave continua no ficheiro.
 - Restaurar a base noutro computador obriga a introduzir de novo esses segredos (o programa avisa) e a renovar o
   segredo de cada aviso automático em **Sistema → API e Integrações**. Os documentos já assinados continuam
   verificáveis: a chave pública de cada chave de assinatura fica registada.
@@ -98,8 +109,10 @@ sequer vão para a base: vêm dentro do programa ([CERTIFICACAO-AGT.md](CERTIFIC
   com um editor de SQLite por quem tiver acesso ao computador. As cópias de segurança devem ser guardadas com o mesmo
   cuidado. Cifrar a base inteira (SQLCipher) obriga a uma senha ou a uma chave guardada no sistema (DPAPI no Windows,
   Porta-chaves no macOS) e a um cuidado especial ao restaurar noutro computador: fica como passo seguinte.
-- **Os segredos cifrados não resistem a quem tem o computador**: a chave mestra está no `kangest.chave`, ao lado da
-  base. Contra isso só uma senha que não está no computador — é o caso das cópias de segurança cifradas com senha.
+- **Os segredos cifrados não resistem a quem entra na conta do utilizador no computador**: o cofre do sistema entrega
+  a chave a programas que correm nessa conta. Protege contra quem copia a pasta de dados ou o disco, ou entra com
+  outra conta do sistema. Contra quem tem a própria conta só uma senha que não está no computador — é o caso das
+  cópias de segurança cifradas com senha.
 - **A chave de assinatura dos documentos (AGT)** é gerada na base até haver o certificado do produtor. Com o
   certificado, a chave do produtor passa a ir no programa e merece o mesmo cuidado que a chave do selo.
 - **Uma base nova recomeça a experiência** se não estiver registada no servidor de licenças: o registo online prende a

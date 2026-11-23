@@ -42,6 +42,12 @@ flate2 = "1"
 # Portas em IPv4 e IPv6 ao mesmo tempo (IPV6_V6ONLY desligado também no Windows).
 socket2 = "0.6"
 
+# Cofre do sistema para a chave mestra dos segredos: Porta-chaves no macOS e Gestor de Credenciais (DPAPI) no Windows.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native"] }
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+
 # Crypto e hashing ficam muito lentos sem optimizações em debug.
 [profile.dev.package.rsa]
 opt-level = 3
