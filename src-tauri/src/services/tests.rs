@@ -1271,10 +1271,12 @@ async fn talao_escpos() {
     assert!(texto.contains("2.280,00"), "sem o total formatado: {texto}");
     assert!(texto.contains("Troco"), "sem o troco");
     assert!(texto.contains("Processado por programa"), "sem o rodapé da AGT");
-    assert_eq!(texto.matches("Total (AOA)").count(), 2, "deviam sair 2 vias: {texto}");
-    assert!(texto.contains("Qtd  Un"), "sem o cabeçalho das colunas: {texto}");
-    assert!(texto.contains("Modo de Pagamento") && texto.contains("Resumo de Imposto"), "sem as secções do talão do KIGEST");
-    assert!(texto.contains("* OBRIGADO VOLTE SEMPRE *"), "sem o fecho do talão");
+    assert_eq!(texto.matches("TOTAL (AOA)").count(), 2, "deviam sair 2 vias: {texto}");
+    // talão curto: a linha diz quantidade × preço sem IVA e a taxa; uma só taxa dispensa o quadro do IVA
+    assert!(texto.contains("2 un x 1.000,00 IVA 14%"), "sem o pormenor da linha: {texto}");
+    assert!(texto.contains("IVA 14%") && texto.contains("Total sem IVA") && texto.contains("Numerario"), "sem os totais ou o pagamento: {texto}");
+    assert!(!texto.contains("Resumo de Imposto") && !texto.contains("Qtd  Un"), "secções do talão antigo: {texto}");
+    assert!(texto.contains("Obrigado e volte sempre!"), "sem o fecho do talão");
     assert_eq!(bytes.windows(3).filter(|w| *w == [0x1D, b'V', 1]).count(), 2, "cada via tem de cortar o papel");
     assert_eq!(bytes.windows(5).filter(|w| *w == [0x1B, b'p', 0, 25, 250]).count(), 1, "a gaveta abre uma vez");
     // nenhuma linha passa da largura do papel
