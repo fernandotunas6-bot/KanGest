@@ -187,13 +187,20 @@ input, textarea, select, [data-selectable] { user-select: text; -webkit-user-sel
   #print-area { display: none; }
 }
 @media print {
-  body * { visibility: hidden !important; }
-  #print-area, #print-area * { visibility: visible !important; }
-  #print-area { position: absolute; inset: 0 auto auto 0; width: 100%; background: white; }
+  /* só o #print-area vai para o papel: o resto do programa sai da página (com «visibility: hidden» continuava a ocupar
+     espaço e a impressora puxava metros de papel em branco) */
+  body > *:not(#print-area) { display: none !important; }
+  html, body { height: auto !important; min-height: 0 !important; overflow: visible !important; background: white !important; }
+  #print-area { display: block !important; position: static; width: 100%; background: white; }
   @page { margin: 10mm; }
   .print-ticket { width: 72mm !important; }
   .print-ticket.talao-58 { width: 48mm !important; }
+  /* cada via do talão na sua página (a impressora corta entre elas) */
+  .via-talao + .via-talao { break-before: page; }
 }
+/* medição do talão antes de imprimir (lib/print.ts): a mesma largura que no papel */
+#print-area.a-medir .print-ticket { width: 72mm !important; }
+#print-area.a-medir .print-ticket.talao-58 { width: 48mm !important; }
 
 /* Capturas do KanGest tiradas no jogo verde-petróleo (cartões do ecrã de entrada): nos outros jogos ficam a cinzento e
    o véu do cartão dá-lhes a cor do jogo, para não misturar o verde com o azul, o vinho… */
