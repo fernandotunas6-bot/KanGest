@@ -18,6 +18,8 @@ pub const PERMISSOES: &[&str] = &[
     "stock.saida",
     "stock.transferencia",
     "stock.inventario",
+    // vender ou tirar do armazém mais do que a existência, quando a opção «Vender sem stock» pede autorização
+    "stock.sem_stock",
     "vendas.fatura",
     "vendas.fatura_recibo",
     "vendas.proforma",

@@ -220,6 +220,8 @@ export interface Tabelas {
   posto: Posto;
   /** Opção de venda «preços com IVA incluído»: as linhas partem do PVP com IVA. */
   precos_com_iva?: boolean;
+  /** Vender mais do que a existência: nunca, só com autorização (PIN) ou conforme a ficha de cada artigo. */
+  sem_stock?: PoliticaSemStock;
   /** Fidelização de clientes (cartão de pontos). */
   fidelizacao?: FidelizacaoCfg;
   /** ramo de actividade da empresa (src/lib/ramos.ts) */
@@ -260,6 +262,8 @@ export interface TipoDocumento {
   texto_rodape: string | null;
   formato: "A4" | "A5";
 }
+
+export type PoliticaSemStock = "nao" | "autorizar" | "artigo";
 
 /** Definição de Faturas e Recibos: o que aparece no impresso. */
 export interface OpcoesImpresso {

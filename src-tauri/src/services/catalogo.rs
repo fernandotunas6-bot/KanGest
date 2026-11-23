@@ -28,6 +28,7 @@ pub async fn tabelas(st: &AppState) -> AppResult<Value> {
         "posto": st.posto(),
         // vendas calculadas a partir do PVP com IVA (Parametrização → Opções de venda)
         "precos_com_iva": super::documentos::precos_com_iva(p).await?,
+        "sem_stock": super::documentos::politica_sem_stock(p).await?,
         "fidelizacao": super::fidelizacao::cfg(p).await?,
         // ramo de actividade: decide os dados de ramo dos artigos e alguns comportamentos do POS
         "ramo": super::ramos::ramo(p).await?,

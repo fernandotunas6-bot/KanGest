@@ -7,7 +7,7 @@ import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Pencil } from "lucide-react";
 import { call } from "@/lib/api";
-import type { OpcoesImpresso, TipoDocumento } from "@/lib/types";
+import type { OpcoesImpresso, PoliticaSemStock, TipoDocumento } from "@/lib/types";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
 
 interface Modo {
@@ -22,6 +22,7 @@ interface Dados {
   modos: Modo[];
   contas: { id: number; descricao: string; tipo: string }[];
   opcoes: OpcoesImpresso;
+  sem_stock: PoliticaSemStock;
 }
 
 const VISTAS = [
@@ -59,7 +60,10 @@ export default function Parametrizacao() {
       ) : vista === "documentos" ? (
         <Documentos tipos={q.data.tipos} />
       ) : vista === "venda" ? (
-        <OpcoesVenda modos={q.data.modos} contas={q.data.contas} />
+        <>
+          <VenderSemStock valor={q.data.sem_stock} />
+          <OpcoesVenda modos={q.data.modos} contas={q.data.contas} />
+        </>
       ) : (
         <Impresso opcoes={q.data.opcoes} />
       )}
@@ -201,6 +205,48 @@ function TipoModal({ t, onClose }: { t: TipoDocumento; onClose: () => void }) {
 }
 
 // ======================================================================= opções de venda
+/** Vender mais do que a existência: nunca (por omissão), só com autorização de um gestor, ou conforme a ficha. */
+function VenderSemStock({ valor }: { valor: PoliticaSemStock }) {
+  const qc = useQueryClient();
+  const [v, setV] = useState(valor);
+  async function escolher(n: PoliticaSemStock) {
+    const antes = v;
+    setV(n);
+    try {
+      await call("parametros.opcoesGuardar", { sem_stock: n });
+      toast.success("Gravado: vale para as vendas seguintes.");
+      qc.invalidateQueries({ queryKey: ["parametros"] });
+      // o POS lê a política das tabelas
+      qc.invalidateQueries({ queryKey: ["tabelas"] });
+    } catch (e) {
+      setV(antes);
+      toast.error((e as Error).message);
+    }
+  }
+  const opcoes: [PoliticaSemStock, string, string][] = [
+    ["nao", "Nunca (recomendado)", "Não se vende nem se tira do armazém mais do que a existência. O stock fica sempre certo."],
+    ["autorizar", "Só com autorização", "Quem tem a permissão «Vender sem stock» (por omissão, gestores) vende; os outros pedem o PIN de um gestor."],
+    ["artigo", "Conforme a ficha de cada artigo", "Vale o «Permite stock negativo» da ficha, como no KIGEST (os artigos importados do KIGEST trazem-no)."],
+  ];
+  return (
+    <Card className="mb-4 max-w-3xl p-5">
+      <div className="font-semibold">Vender sem stock</div>
+      <p className="mb-3 text-[13px] text-ink-3">O que fazer quando uma venda, ou outra saída, pede mais do que há no armazém do posto.</p>
+      <div className="space-y-2.5">
+        {opcoes.map(([id, titulo, texto]) => (
+          <label key={id} className="flex cursor-pointer items-start gap-3">
+            <input className="mt-1" type="radio" name="sem-stock" checked={v === id} onChange={() => escolher(id)} />
+            <span>
+              <span className="font-medium">{titulo}</span>
+              <span className="block text-[13px] text-ink-3">{texto}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 function OpcoesVenda({ modos, contas }: { modos: Modo[]; contas: Dados["contas"] }) {
   const qc = useQueryClient();
   async function guardar(m: Modo, patch: Partial<Modo>) {
