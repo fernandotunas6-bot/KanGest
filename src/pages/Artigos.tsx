@@ -61,6 +61,8 @@ export default function Artigos() {
   const lista = useQuery({
     queryKey: ["artigos", dq, familia, estado !== "activos"],
     queryFn: () => call<Artigo[]>("artigos.listar", { q: dq, familia_id: familia ? Number(familia) : null, inativos: estado !== "activos" }),
+    // a existência acompanha as vendas dos postos sem ter de recarregar
+    refetchInterval: 20_000,
   });
   const visiveis = estado === "inactivos" ? lista.data?.filter((a) => !a.ativo) : lista.data;
   const miniaturas = useMiniaturas(visiveis);

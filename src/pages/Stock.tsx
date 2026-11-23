@@ -39,6 +39,8 @@ export default function Stock() {
   const lista = useQuery({
     queryKey: ["stock", armazem, dq, baixo],
     queryFn: () => call<LinhaStock[]>("stock.listar", { armazem_id: armazem, q: dq, abaixo_minimo: baixo }),
+    // a existência acompanha as vendas dos postos sem ter de recarregar
+    refetchInterval: 20_000,
   });
   const valor = lista.data?.reduce((s, l) => s + l.valor_custo, 0) ?? 0;
   const { ordenados, cab } = useOrdenacao(lista.data, (l, k: "artigo" | "qtd" | "reservado" | "disponivel" | "encomendado" | "minimo" | "custo" | "valor" | "entrada" | "saida") =>
