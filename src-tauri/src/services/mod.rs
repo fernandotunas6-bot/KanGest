@@ -192,6 +192,8 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "importar.analisarFicheiro" => importar::analisar_ficheiro(st, p(params)?).await,
         "importar.executarFicheiro" => importar::executar_ficheiro(st, p(params)?).await,
         "importar.ficheiros" => importar::ficheiros(st).await,
+        // o KIGEST neste computador: Conexao.ini (sem a senha), instâncias do SQL Server e ficheiros .kigest
+        "importar.descobrir" => importar::descobrir(st).await,
 
         // ---- tesouraria / conta corrente ----
         "tesouraria.contas" => tesouraria::contas(st).await,
