@@ -52,6 +52,7 @@ import { PinModal, Segmento, TecladoModal, TextoModal } from "@/components/PosDi
 import { Logo } from "@/components/Logo";
 import { bloquearSessao } from "@/components/Sessao";
 import { AvisoLicenca } from "@/components/AvisoLicenca";
+import { SugestaoTermica } from "@/components/SugestaoTermica";
 import { useLicenca } from "@/lib/licenca";
 import { useEmpresa } from "@/components/PrintCabecalho";
 import { useAparencia } from "@/lib/aparencia";
@@ -260,6 +261,8 @@ export default function Pos() {
   const artigos = useQuery({
     queryKey: ["pos-artigos", q, familia],
     queryFn: () => call<Artigo[]>("artigos.listar", { q, familia_id: familia, limite: 120 }),
+    // stock em tempo real: as vendas dos outros postos aparecem sozinhas
+    refetchInterval: 15_000,
   });
 
   const miniaturas = useMiniaturas(artigos.data);
@@ -275,6 +278,19 @@ export default function Pos() {
   const totais = useMemo(() => calcular(linhas, descGlobal, comIva), [linhas, descGlobal, comIva]);
   const idx = sel ?? (linhas.length ? linhas.length - 1 : null); // linha activa (seleccionada ou a última)
   const linhaAtiva = idx !== null ? linhas[idx] : null;
+  // ---------------- stock em tempo real ----------------
+  // quanto de cada artigo já está nesta venda, e a existência mais recente (a lista refresca-se; o artigo da linha é
+  // o do momento em que entrou na venda): o artigo e a linha mostram o que fica
+  const naVenda = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const l of linhas) m.set(l.artigo.id, (m.get(l.artigo.id) ?? 0) + l.quantidade);
+    return m;
+  }, [linhas]);
+  const stockFresco = useMemo(() => new Map((artigos.data ?? []).map((a) => [a.id, a.stock])), [artigos.data]);
+  const stockDe = (a: Artigo) => stockFresco.get(a.id) ?? a.stock;
+  const comStock = (a: Artigo) => a.controla_stock === 1 && a.tipo === "P" && a.composto !== 1;
+  const fica = (a: Artigo) => stockDe(a) - (naVenda.get(a.id) ?? 0);
+
   const algumModal = !!desconhecido || !!pedirSerie || renomear || pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido || pedirCupao;
 
   /** Executa a acção se o operador tiver permissão (e limite de desconto); caso contrário pede o PIN de um supervisor. */
@@ -308,9 +324,8 @@ export default function Pos() {
   /** Lança o artigo com as regras do ramo: aviso de receita, n.º de série (uma linha por unidade) e garantia na descrição. */
   /** Juntar mais `quantidade` passa a existência deste posto? (artigos com stock; os kits confere-os o servidor) */
   function faltaStock(a: Artigo, quantidade: number) {
-    if (a.controla_stock !== 1 || a.tipo !== "P" || a.composto === 1) return false;
-    const noCarrinho = linhas.filter((l) => l.artigo.id === a.id).reduce((s, l) => s + l.quantidade, 0);
-    return noCarrinho + quantidade > a.stock + 1e-9;
+    if (!comStock(a)) return false;
+    return (naVenda.get(a.id) ?? 0) + quantidade > stockDe(a) + 1e-9;
   }
 
   /** Junta o artigo à venda; sem stock, conforme a política da empresa: recusa, pede autorização ou segue a ficha. */
@@ -1015,6 +1030,7 @@ export default function Pos() {
         </div>
       </header>
       <AvisoLicenca compacto className="mx-4 mt-3" />
+      <SugestaoTermica className="mx-4 mt-3" posto={tabelas.data?.posto} opcoes={opcoes} pode={tem("pos.config_posto")} />
 
       <div className="flex min-h-0 flex-1">
         {/* Catálogo */}
@@ -1106,7 +1122,9 @@ export default function Pos() {
             ) : (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(170px,1fr))]">
                 {artigos.data?.map((a) => {
-                  const semStock = a.controla_stock === 1 && a.tipo === "P" && a.composto !== 1 && a.stock <= 0;
+                  // o que fica depois desta venda (existência − o que já está no carrinho)
+                  const resta = fica(a);
+                  const semStock = comStock(a) && resta <= 0;
                   // com «só com autorização» o artigo continua a poder tocar-se (pede o PIN); com «nunca» não
                   const bloqueado = semStock && (politicaStock === "nao" || (politicaStock === "artigo" && a.permite_negativo !== 1));
                   return (
@@ -1135,11 +1153,12 @@ export default function Pos() {
                         ) : (
                           a.controla_stock === 1 && (
                             <span
-                              className={cn("num inline-flex items-center gap-1 text-[11px]", a.stock <= 0 ? "text-danger" : a.stock <= a.qtd_minima ? "text-accent-ink" : "text-ink-3")}
-                              title={a.stock <= a.qtd_minima ? "No mínimo ou abaixo" : "Em stock"}
+                              className={cn("num inline-flex items-center gap-1 text-[11px]", resta <= 0 ? "text-danger" : resta <= a.qtd_minima ? "text-accent-ink" : "text-ink-3", naVenda.has(a.id) && "font-semibold")}
+                              title={naVenda.has(a.id) ? `Em stock ${qtd(stockDe(a))}; ${qtd(naVenda.get(a.id) ?? 0)} nesta venda` : resta <= a.qtd_minima ? "No mínimo ou abaixo" : "Em stock"}
                             >
-                              <span className={cn("size-1.5 rounded-full", a.stock <= 0 ? "bg-danger" : a.stock <= a.qtd_minima ? "bg-accent" : "bg-ok")} />
-                              {qtd(a.stock)} {a.unidade ?? "un"}
+                              <span className={cn("size-1.5 rounded-full", resta <= 0 ? "bg-danger" : resta <= a.qtd_minima ? "bg-accent" : "bg-ok")} />
+                              {naVenda.has(a.id) ? "fica " : ""}
+                              {qtd(resta)} {a.unidade ?? "un"}
                             </span>
                           )
                         )}
@@ -1323,6 +1342,12 @@ export default function Pos() {
                             {kzNum(l.pvp ?? comIvaArt(l.preco, l.artigo))} / {l.artigo.unidade ?? "UN"} · IVA {l.artigo.taxa_pct}%
                             {l.desconto ? ` · \u2212${numero(l.desconto, 2)}%` : ""}
                           </div>
+                          {/* o que fica no armazém depois desta venda (em tempo real) */}
+                          {comStock(l.artigo) && (
+                            <div className={cn("num text-[12px]", fica(l.artigo) <= 0 ? "font-medium text-danger" : fica(l.artigo) <= l.artigo.qtd_minima ? "text-accent-ink" : "text-ink-3")}>
+                              {fica(l.artigo) === 1 ? "Fica" : "Ficam"} {qtd(fica(l.artigo))} em stock
+                            </div>
+                          )}
                           {l.regra && <div className="mt-0.5 inline-block rounded bg-accent-50 px-1.5 py-px text-[11.5px] font-medium text-accent-ink">{l.regra}</div>}
                           {/* preço líquido (já com os descontos) abaixo do custo médio: só aviso, a venda continua possível */}
                           {!!c && l.artigo.custo_medio > 0 && l.quantidade > 0 && c.liquido < Math.round(l.artigo.custo_medio * l.quantidade) && (
