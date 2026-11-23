@@ -2247,6 +2247,7 @@ dependencies = [
  "tiberius",
  "tokio",
  "tokio-util",
+ "winreg",
 ]
 
 [[package]]

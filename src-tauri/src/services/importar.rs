@@ -137,7 +137,172 @@ pub struct ConexaoIn {
     porta: Option<u16>,
     base: String,
     utilizador: String,
+    #[serde(default)]
     senha: String,
+    /// O Conexao.ini do KIGEST encontrado neste computador (`importar.descobrir`): sem senha escrita, lê-se dele. A senha
+    /// do `sa` fica no servidor e nunca vai para o ecrã.
+    #[serde(default)]
+    ini: Option<String>,
+}
+
+impl ConexaoIn {
+    /// A senha: a escrita no ecrã ou, sem ela, a do Conexao.ini indicado.
+    fn com_senha_do_ini(&self) -> AppResult<ConexaoIn> {
+        let mut c = self.clone();
+        if c.senha.is_empty() {
+            if let Some(f) = c.ini.as_deref().filter(|f| !f.trim().is_empty()) {
+                c.senha = ler_conexao_ini(std::path::Path::new(f.trim()))?.senha;
+            }
+        }
+        Ok(c)
+    }
+}
+
+// ------------------------------------------------------------------ descobrir (KIGEST neste computador)
+
+/// O Conexao.ini do KIGEST: `[DATA]` com `Source=SERVIDOR\INSTANCIA`, `BDados`, `User` e `Senha`.
+#[derive(Debug, Default, PartialEq)]
+struct Ini {
+    servidor: String,
+    instancia: String,
+    base: String,
+    utilizador: String,
+    senha: String,
+}
+
+fn interpretar_ini(texto: &str) -> Option<Ini> {
+    let mut v: HashMap<String, String> = HashMap::new();
+    for linha in texto.lines() {
+        if let Some((k, x)) = linha.split_once('=') {
+            v.entry(k.trim().to_lowercase()).or_insert_with(|| x.trim().to_string());
+        }
+    }
+    let source = v.get("source").cloned().unwrap_or_default();
+    let (servidor, instancia) = match source.split_once('\\') {
+        Some((s, i)) => (s.trim().to_string(), i.trim().to_string()),
+        None => (source.trim().to_string(), String::new()),
+    };
+    if servidor.is_empty() && !v.contains_key("bdados") {
+        return None;
+    }
+    Some(Ini {
+        servidor,
+        instancia,
+        base: v.get("bdados").cloned().unwrap_or_default(),
+        utilizador: v.get("user").cloned().unwrap_or_default(),
+        senha: v.get("senha").cloned().unwrap_or_default(),
+    })
+}
+
+/// Lê um Conexao.ini (o KIGEST grava-o em ANSI; o que não for UTF-8 lê-se como Latin-1).
+fn ler_conexao_ini(f: &std::path::Path) -> AppResult<Ini> {
+    if !f.extension().is_some_and(|e| e.eq_ignore_ascii_case("ini")) {
+        return Err(AppError::msg("Indique um ficheiro .ini do KIGEST."));
+    }
+    let b = std::fs::read(f).map_err(|e| AppError::msg(format!("Não foi possível ler {}: {e}", f.display())))?;
+    let texto = String::from_utf8(b.clone()).unwrap_or_else(|_| b.iter().map(|&c| c as char).collect());
+    interpretar_ini(&texto).ok_or_else(|| AppError::msg(format!("{} não tem a ligação do KIGEST (Source, BDados).", f.display())))
+}
+
+/// As pastas onde o KIGEST costuma estar: a raiz dos discos, os Programas, as pastas do utilizador e as pens.
+fn raizes_kigest() -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let mut v = Vec::new();
+    let casa = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from);
+    if let Some(c) = &casa {
+        for p in ["Desktop", "Documents", "Downloads", "OneDrive/Desktop", "OneDrive/Ambiente de Trabalho", "OneDrive/Documentos"] {
+            v.push(c.join(p));
+        }
+    }
+    if cfg!(windows) {
+        for letra in b'C'..=b'Z' {
+            v.push(PathBuf::from(format!("{}:\\", letra as char)));
+        }
+        for p in ["C:\\Program Files", "C:\\Program Files (x86)", "C:\\ProgramData"] {
+            v.push(PathBuf::from(p));
+        }
+    } else if let Ok(vols) = std::fs::read_dir("/Volumes") {
+        v.extend(vols.flatten().map(|e| e.path()));
+    }
+    v
+}
+
+/// Procura o Conexao.ini: na própria pasta e dentro das pastas com «kigest» no nome (até dois níveis).
+fn procurar_inis(raizes: &[std::path::PathBuf]) -> Vec<Value> {
+    fn dentro(p: &std::path::Path, nivel: usize, achados: &mut Vec<std::path::PathBuf>) {
+        let Ok(it) = std::fs::read_dir(p) else { return };
+        for e in it.flatten().take(500) {
+            let caminho = e.path();
+            let Ok(tipo) = e.file_type() else { continue };
+            if tipo.is_file() && e.file_name().to_string_lossy().eq_ignore_ascii_case("conexao.ini") {
+                achados.push(caminho);
+            } else if tipo.is_dir() && nivel > 0 {
+                dentro(&caminho, nivel - 1, achados);
+            }
+        }
+    }
+    let mut achados = Vec::new();
+    for r in raizes {
+        let Ok(it) = std::fs::read_dir(r) else { continue };
+        for e in it.flatten().take(500) {
+            let nome = e.file_name().to_string_lossy().to_lowercase();
+            match e.file_type() {
+                Ok(t) if t.is_file() && nome == "conexao.ini" => achados.push(e.path()),
+                Ok(t) if t.is_dir() && nome.contains("kigest") => dentro(&e.path(), 2, &mut achados),
+                _ => {}
+            }
+        }
+    }
+    let mut vistos = HashSet::new();
+    achados
+        .into_iter()
+        .filter(|f| vistos.insert(f.clone()))
+        .filter_map(|f| {
+            let ini = ler_conexao_ini(&f).ok()?;
+            Some(json!({
+                "caminho": f.display().to_string(), "servidor": ini.servidor, "instancia": ini.instancia,
+                "base": ini.base, "utilizador": ini.utilizador, "tem_senha": !ini.senha.is_empty(),
+            }))
+        })
+        .collect()
+}
+
+/// As instâncias do SQL Server instaladas neste computador (registo do Windows). Noutros sistemas, nenhuma.
+fn instancias_sql_server() -> Vec<Value> {
+    #[cfg(windows)]
+    {
+        use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY};
+        let mut nomes = std::collections::BTreeSet::new();
+        for vista in [KEY_WOW64_64KEY, KEY_WOW64_32KEY] {
+            if let Ok(k) = winreg::RegKey::predef(HKEY_LOCAL_MACHINE)
+                .open_subkey_with_flags("SOFTWARE\\Microsoft\\Microsoft SQL Server\\Instance Names\\SQL", KEY_READ | vista)
+            {
+                nomes.extend(k.enum_values().flatten().map(|(n, _)| n));
+            }
+        }
+        return nomes
+            .into_iter()
+            .map(|n| json!({ "servidor": "localhost", "instancia": if n.eq_ignore_ascii_case("MSSQLSERVER") { String::new() } else { n } }))
+            .collect();
+    }
+    #[cfg(not(windows))]
+    Vec::new()
+}
+
+/// O que se pode importar neste computador: o Conexao.ini do KIGEST (sem a senha), as instâncias locais do SQL
+/// Server e os ficheiros .kigest.
+pub async fn descobrir(st: &AppState) -> AppResult<Value> {
+    st.exigir_perm("sistema.importar")?;
+    let pasta_exp = st.pasta_exportacao.clone();
+    tokio::task::spawn_blocking(move || {
+        json!({
+            "conexoes": procurar_inis(&raizes_kigest()),
+            "instancias": instancias_sql_server(),
+            "ficheiros": procurar_ficheiros(&pasta_exp),
+        })
+    })
+    .await
+    .map_err(|e| AppError::msg(e.to_string()))
 }
 
 pub struct SqlServer {
@@ -668,7 +833,7 @@ pub async fn analisar_fonte<F: Fonte>(fonte: &mut F) -> AppResult<Value> {
 
 pub async fn analisar(st: &AppState, c: ConexaoIn) -> AppResult<Value> {
     st.exigir_perm("sistema.importar")?;
-    let mut fonte = SqlServer::ligar(&c).await?;
+    let mut fonte = SqlServer::ligar(&c.com_senha_do_ini()?).await?;
     analisar_fonte(&mut fonte).await
 }
 
@@ -680,7 +845,7 @@ pub struct ExecutarIn {
 
 pub async fn executar(st: &AppState, e: ExecutarIn) -> AppResult<Value> {
     st.exigir_perm("sistema.importar")?;
-    let mut fonte = SqlServer::ligar(&e.conexao).await?;
+    let mut fonte = SqlServer::ligar(&e.conexao.com_senha_do_ini()?).await?;
     let origem = format!("{}/{}", e.conexao.servidor, e.conexao.base);
     importar_dados(st, &mut fonte, &e.opcoes, &origem).await
 }
@@ -2885,6 +3050,46 @@ mod testes {
         assert_eq!(certificado_no_rodape("Processado por programa válido n.º 123/AGT/2020").as_deref(), Some("123/AGT/2020"));
         assert_eq!(certificado_no_rodape("VOLTE SEMPRE"), None);
         assert_eq!(certificado_no_rodape("Processado por computador"), None);
+    }
+}
+
+#[cfg(test)]
+mod testes_descobrir {
+    use super::*;
+
+    #[test]
+    fn le_o_conexao_ini_do_kigest() {
+        let ini = interpretar_ini("[DATA]\r\nSource=DESKTOP-G26LDJM\\SQLEXPRESS\r\nBDados=KigestGC\r\nUser=sa\r\nSenha=s3gr3d0\r\n").unwrap();
+        assert_eq!(ini, Ini { servidor: "DESKTOP-G26LDJM".into(), instancia: "SQLEXPRESS".into(), base: "KigestGC".into(), utilizador: "sa".into(), senha: "s3gr3d0".into() });
+        let sem_instancia = interpretar_ini("source = 192.168.1.20\nbdados = KigestPOS\n").unwrap();
+        assert_eq!((sem_instancia.servidor.as_str(), sem_instancia.instancia.as_str(), sem_instancia.base.as_str()), ("192.168.1.20", "", "KigestPOS"));
+        assert!(interpretar_ini("[Outra]\nCor=azul\n").is_none(), "não é do KIGEST");
+    }
+
+    #[test]
+    fn procura_nas_pastas_do_kigest_e_nao_devolve_a_senha() {
+        let raiz = std::env::temp_dir().join(format!("kangest-descobrir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&raiz);
+        let pasta = raiz.join("KIGEST GC").join("Config");
+        std::fs::create_dir_all(&pasta).unwrap();
+        // em ANSI (Latin-1), como o KIGEST grava
+        let mut b = b"[DATA]\r\nSource=SERVIDOR-LOJA\r\nBDados=KigestGC\r\nUser=sa\r\nSenha=Cora".to_vec();
+        b.extend_from_slice(&[0xE7, 0xE3, b'o']); // «Coração» em Latin-1
+        std::fs::write(pasta.join("Conexao.ini"), &b).unwrap();
+        std::fs::create_dir_all(raiz.join("Outra coisa")).unwrap();
+        std::fs::write(raiz.join("Outra coisa").join("Conexao.ini"), "Source=X").unwrap();
+        let achados = procurar_inis(std::slice::from_ref(&raiz));
+        assert_eq!(achados.len(), 1, "só dentro de pastas com «kigest» no nome: {achados:?}");
+        let a = &achados[0];
+        assert_eq!((a["servidor"].as_str(), a["base"].as_str(), a["utilizador"].as_str(), a["tem_senha"].as_bool()), (Some("SERVIDOR-LOJA"), Some("KigestGC"), Some("sa"), Some(true)));
+        assert!(a.get("senha").is_none() && !a.to_string().contains("Cora"), "a senha não vai para o ecrã");
+        // a ligação com o ini lê a senha no servidor
+        let c = ConexaoIn { servidor: "SERVIDOR-LOJA".into(), instancia: None, porta: None, base: "KigestGC".into(), utilizador: "sa".into(), senha: String::new(), ini: a["caminho"].as_str().map(String::from) };
+        assert_eq!(c.com_senha_do_ini().unwrap().senha, "Coração");
+        let escrita = ConexaoIn { senha: "outra".into(), ..c.clone() };
+        assert_eq!(escrita.com_senha_do_ini().unwrap().senha, "outra", "a senha escrita prevalece");
+        assert!(ConexaoIn { ini: Some(raiz.join("x.txt").display().to_string()), ..c }.com_senha_do_ini().is_err(), "só ficheiros .ini");
+        let _ = std::fs::remove_dir_all(&raiz);
     }
 }
 

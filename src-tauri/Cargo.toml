@@ -50,6 +50,10 @@ tauri-plugin-notification = "=2.8.0"
 # Janelas nativas de guardar e abrir (cópias de segurança, restauro, pasta externa).
 tauri-plugin-dialog = "=2.8.4"
 
+# Importação: as instâncias locais do SQL Server (registo do Windows). A mesma versão que já vem com o Tauri.
+[target.'cfg(target_os = "windows")'.dependencies.winreg]
+version = "0.55"
+
 # Cofre do sistema para a chave mestra dos segredos: Porta-chaves no macOS e Gestor de Credenciais (DPAPI) no Windows.
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", default-features = false, features = ["apple-native"] }

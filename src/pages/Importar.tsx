@@ -23,6 +23,11 @@ interface Conexao {
   utilizador: string;
   senha: string;
 }
+/** O que importar.descobrir encontra neste computador (o Conexao.ini sem a senha; ela fica no servidor). */
+interface Descoberta {
+  conexoes: { caminho: string; servidor: string; instancia: string; base: string; utilizador: string; tem_senha: boolean }[];
+  instancias: { servidor: string; instancia: string }[];
+}
 interface Analise {
   tabelas_total: number;
   reconhecidas: { conjunto: string; tabela: string | null; registos?: number; candidatos?: string[]; colunas?: string[] }[];
@@ -143,8 +148,11 @@ export default function Importar() {
   const [caminho, setCaminho] = useState("");
   const [encontrados, setEncontrados] = useState<FicheiroKigest[] | null>(null);
   const [procurando, setProcurando] = useState(false);
+  // o KIGEST encontrado neste computador; `ini`: a senha vem do Conexao.ini, lida no servidor
+  const [descoberta, setDescoberta] = useState<Descoberta | null>(null);
+  const [ini, setIni] = useState<string | null>(null);
 
-  const conexao = () => ({ ...c, instancia: c.instancia || null, porta: c.porta ? Number(c.porta) : null });
+  const conexao = () => ({ ...c, instancia: c.instancia || null, porta: c.porta ? Number(c.porta) : null, ini: c.senha ? null : ini });
   const executar = (op: Record<string, boolean>) =>
     fonte === "ficheiro" ? call<Relatorio>("importar.executarFicheiro", { caminho, opcoes: op }) : call<Relatorio>("importar.executar", { conexao: conexao(), opcoes: op });
 
@@ -161,6 +169,10 @@ export default function Importar() {
     }
   }
 
+  useEffect(() => {
+    if (fonte !== "sqlserver" || descoberta) return;
+    call<Descoberta>("importar.descobrir").then(setDescoberta, () => setDescoberta({ conexoes: [], instancias: [] }));
+  }, [fonte, descoberta]);
   useEffect(() => {
     procurar();
     // ficheiro arrastado para a janela (só na aplicação desktop)
@@ -369,6 +381,51 @@ export default function Importar() {
                   />
                 </label>
               </div>
+              {descoberta && (descoberta.conexoes.length > 0 || descoberta.instancias.length > 0) && (
+                <div className="mb-5 rounded-lg border border-brand/25 bg-brand-50 p-4">
+                  <div className="mb-2 text-[13px] font-semibold text-brand-700">Encontrado neste computador</div>
+                  <ul className="space-y-2 text-[13.5px]">
+                    {descoberta.conexoes.map((x) => (
+                      <li key={x.caminho} className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="min-w-0">
+                          <b>KIGEST</b> · {x.servidor}
+                          {x.instancia ? `\\${x.instancia}` : ""} · base {x.base} · {x.utilizador}
+                          {x.tem_senha && " (senha do Conexao.ini)"}
+                          <span className="block truncate text-[12px] text-ink-3">{x.caminho}</span>
+                        </span>
+                        <Button
+                          size="sm"
+                          variant={ini === x.caminho ? "primary" : "secondary"}
+                          onClick={() => {
+                            setC({ servidor: x.servidor, instancia: x.instancia, porta: "", base: x.base || "KigestGC", utilizador: x.utilizador || "sa", senha: "" });
+                            setIni(x.caminho);
+                            setAnalise(null);
+                          }}
+                        >
+                          {ini === x.caminho ? "Em uso" : "Usar esta ligação"}
+                        </Button>
+                      </li>
+                    ))}
+                    {descoberta.instancias.map((x) => (
+                      <li key={x.instancia || "omissao"} className="flex flex-wrap items-center justify-between gap-2">
+                        <span>
+                          <b>SQL Server</b> neste computador · {x.instancia || "instância por omissão"}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            setC((y) => ({ ...y, servidor: x.servidor, instancia: x.instancia, porta: "" }));
+                            setAnalise(null);
+                          }}
+                        >
+                          Usar
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="grid grid-cols-6 gap-4">
                 <Field label="Servidor (nome ou IP)" className="col-span-3" hint="Ex.: DESKTOP-G26LDJM ou 192.168.1.20">
                   <Input value={c.servidor} onChange={(e) => setC({ ...c, servidor: e.target.value })} />
@@ -385,8 +442,8 @@ export default function Importar() {
                 <Field label="Utilizador" className="col-span-2">
                   <Input value={c.utilizador} onChange={(e) => setC({ ...c, utilizador: e.target.value })} />
                 </Field>
-                <Field label="Senha" className="col-span-2">
-                  <Input type="password" value={c.senha} onChange={(e) => setC({ ...c, senha: e.target.value })} />
+                <Field label="Senha" className="col-span-2" hint={ini && !c.senha ? "Vazia: usa a do Conexao.ini, lida neste computador." : undefined}>
+                  <Input type="password" value={c.senha} placeholder={ini ? "Do Conexao.ini" : undefined} onChange={(e) => setC({ ...c, senha: e.target.value })} />
                 </Field>
               </div>
               <div className="mt-5 flex items-center gap-3">
