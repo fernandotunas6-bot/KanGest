@@ -4,9 +4,11 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Database, Download, FileArchive, FileUp, Info, Printer, RefreshCw, ShieldAlert, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Database, Download, FileArchive, FileUp, FolderOpen, Info, Printer, RefreshCw, ShieldAlert, XCircle } from "lucide-react";
 import { exportarFicheiro } from "@/lib/csv";
 import { call } from "@/lib/api";
+import { escolherFicheiro, useEscolherNoComputador } from "@/lib/dialogos";
+import { ImportarFolha } from "@/components/ImportarFolha";
 import { imprimir } from "@/lib/print";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Table, Td, Th, cn } from "@/components/ui";
 import { PrintPortal } from "@/components/DocumentoPrint";
@@ -144,7 +146,9 @@ export default function Importar() {
   const [relatorio, setRelatorio] = useState<Relatorio | null>(null);
   const [busy, setBusy] = useState<"" | "analisar" | "importar" | "simular">("");
   const [confirmar, setConfirmar] = useState(false);
-  const [fonte, setFonte] = useState<"ficheiro" | "sqlserver" | "saft">("ficheiro");
+  const [fonte, setFonte] = useState<"ficheiro" | "sqlserver" | "saft" | "folha">("ficheiro");
+  // SAF-T e folhas: ecrã próprio, sem o painel do KIGEST à direita
+  const outroSistema = fonte === "saft" || fonte === "folha";
   const [caminho, setCaminho] = useState("");
   const [encontrados, setEncontrados] = useState<FicheiroKigest[] | null>(null);
   const [procurando, setProcurando] = useState(false);
@@ -263,17 +267,18 @@ export default function Importar() {
     <>
       <PageHeader
         title="Importar dados"
-        subtitle="Do KIGEST GC/POS, tudo (empresa, artigos, stock, entidades, documentos, tesouraria, recursos humanos e oficina), ou de qualquer sistema certificado pelo SAF-T (clientes, fornecedores e artigos)"
+        subtitle="Do KIGEST GC/POS, tudo (empresa, artigos, stock, entidades, documentos, tesouraria, recursos humanos e oficina); de qualquer sistema certificado, pelo SAF-T; ou de uma folha do Excel ou CSV (artigos, clientes, fornecedores)"
       />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className={cn("grid grid-cols-1 gap-4", !outroSistema && "lg:grid-cols-[minmax(0,1fr)_360px]")}>
         <div className="space-y-4">
-          <div className="inline-flex rounded-xl border border-line bg-surface p-1">
+          <div className="inline-flex flex-wrap rounded-xl border border-line bg-surface p-1">
             {(
               [
                 ["ficheiro", "KIGEST: ficheiro exportado"],
                 ["sqlserver", "KIGEST: SQL Server"],
                 ["saft", "Outro sistema: SAF-T"],
+                ["folha", "Excel ou CSV"],
               ] as const
             ).map(([id, rotulo]) => (
               <button
@@ -292,6 +297,7 @@ export default function Importar() {
           </div>
 
           {fonte === "saft" && <ImportarSaft />}
+          {fonte === "folha" && <ImportarFolha />}
 
           {fonte === "ficheiro" && (
             <Card className="p-6">
@@ -670,7 +676,7 @@ export default function Importar() {
           )}
         </div>
 
-        <div className={cn("space-y-4", fonte === "saft" && "hidden")}>
+        <div className={cn("space-y-4", outroSistema && "hidden")}>
           <Card className="p-5">
             <div className="mb-3 font-semibold">3. O que importar</div>
             <div className="space-y-2.5">
@@ -753,6 +759,7 @@ interface RelatorioSaft {
  */
 function ImportarSaft() {
   const qc = useQueryClient();
+  const nativo = useEscolherNoComputador();
   const [caminho, setCaminho] = useState("");
   const [encontrados, setEncontrados] = useState<{ caminho: string; nome: string; modificado: string }[] | null>(null);
   const [analise, setAnalise] = useState<AnaliseSaft | null>(null);
@@ -824,16 +831,34 @@ function ImportarSaft() {
           </div>
         )}
         <Field label="Caminho do ficheiro (.xml)">
-          <Input
-            className="font-mono"
-            value={caminho}
-            placeholder="C:\Users\…\Downloads\SAFT_AO_2026.xml"
-            onChange={(e) => {
-              setCaminho(e.target.value);
-              setAnalise(null);
-              setRelatorio(null);
-            }}
-          />
+          <div className="flex gap-2">
+            <Input
+              className="font-mono"
+              value={caminho}
+              placeholder="C:\Users\…\Downloads\SAFT_AO_2026.xml"
+              onChange={(e) => {
+                setCaminho(e.target.value);
+                setAnalise(null);
+                setRelatorio(null);
+              }}
+            />
+            {nativo && (
+              <Button
+                variant="secondary"
+                disabled={!!busy}
+                onClick={async () => {
+                  const c = await escolherFicheiro("Escolher o ficheiro SAF-T", [{ name: "SAF-T (AO)", extensions: ["xml"] }]);
+                  if (c) {
+                    setCaminho(c);
+                    setAnalise(null);
+                    setRelatorio(null);
+                  }
+                }}
+              >
+                <FolderOpen className="size-4" /> Escolher…
+              </Button>
+            )}
+          </div>
         </Field>
         <div className="mt-4">
           <Button loading={busy === "analisar"} disabled={!caminho.trim() || !!busy} onClick={() => correr("analisar")}>

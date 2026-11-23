@@ -22,6 +22,7 @@ mod tv;
 pub mod fe;
 pub(crate) mod impressao;
 pub mod importar;
+mod importar_folha;
 mod importar_saft;
 mod integridade;
 pub mod licenca;
@@ -198,6 +199,8 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         // importação universal por SAF-T (AO): clientes, fornecedores e artigos de qualquer sistema certificado
         "importar.analisarSaft" => importar_saft::analisar(st, p(params)?).await,
         "importar.executarSaft" => importar_saft::executar(st, p(params)?).await,
+        "importar.analisarFolha" => importar_folha::analisar(st, p(params)?).await,
+        "importar.executarFolha" => importar_folha::executar(st, p(params)?).await,
 
         // ---- tesouraria / conta corrente ----
         "tesouraria.contas" => tesouraria::contas(st).await,

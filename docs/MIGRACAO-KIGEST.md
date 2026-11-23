@@ -120,3 +120,20 @@ O que entra:
 - Os **documentos não entram**: a facturação recomeça no KanGest, com as suas séries.
 
 O ficheiro lê-se por fluxo, sem o carregar todo na memória (um SAF-T de um ano com dezenas de milhares de facturas importa-se em segundos).
+
+## De uma folha do Excel ou de um CSV
+
+Para a loja que tem os artigos, os clientes ou os fornecedores numa **folha de cálculo** (Excel `.xlsx`/`.xls`, LibreOffice `.ods`) ou num **CSV** exportado de outro programa. Em *Importar dados → Excel ou CSV*:
+
+1. **Escolher…** (ou escrever o caminho) e **Analisar folha**. Num livro com várias folhas, escolhe-se a folha; o KanGest propõe a que tem mais linhas.
+2. Das dez primeiras linhas com dados, a primeira com pelo menos dois títulos é a dos títulos (as de cima, com o nome da loja ou a data, ficam de fora). O KanGest diz se a folha parece de **artigos**, **clientes** ou **fornecedores** e liga cada coluna a um campo pelos títulos habituais («Código», «Designação», «P.V.P.», «Preço de custo», «IVA %», «Família», «Stock», «Nome», «Nº Contribuinte», «Telemóvel», «E-mail», «Morada»…). A ligação corrige-se no ecrã, e a tabela «Como fica» mostra as primeiras linhas já arrumadas.
+3. **Simular** e depois **Importar**. O relatório diz as linhas que ficaram de fora e porquê (sem descrição, repetidas na folha, código de barras já de outro artigo), com o número da linha no Excel.
+
+Regras:
+
+- **Artigos**: procura-se pela referência, senão pelo código de barras, senão pela descrição, por isso não se duplicam. Sem referência, o KanGest dá-lhe uma, como faz na ficha do artigo (`A00042`, por exemplo). Por omissão os preços da folha **incluem o IVA** (o PVP da etiqueta); desliga-se se a folha tem os preços sem IVA. Sem coluna de IVA, usa-se a taxa escolhida no ecrã (por omissão a normal). As famílias que não existem criam-se.
+- Num artigo que **já existe** só se preenche o que falta (código de barras, família, preço ou custo a zero), a não ser que se marque **Actualizar os preços dos artigos que já existem**, para carregar uma tabela de preços nova. O preço sem IVA calcula-se com a taxa que o artigo já tem.
+- O **stock** entra só nos artigos novos, como saldo inicial no armazém escolhido, com o movimento «Saldo inicial importado de …». O dos que já existem acerta-se por um inventário.
+- **Clientes e fornecedores**: procura-se pelo NIF, senão pelo nome. Num que já existe só se preenche o que falta (telefone, email, morada, localidade); um fornecedor que aparece numa lista de clientes passa a «ambos».
+- Os números aceitam os formatos de cá: «1 234,50», «1.234,50», «Kz 1500», «14%». Só com pontos, «1.500» lê-se mil e quinhentos.
+- O CSV pode vir em UTF-8, UTF-16 ou Windows-1252 (o «CSV» do Excel em português), separado por ponto e vírgula, vírgula ou tabulação.
