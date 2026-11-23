@@ -498,7 +498,7 @@ mod testes {
 
     #[tokio::test]
     async fn importa_simula_e_nao_duplica() {
-        let pasta = std::env::temp_dir().join(format!("kangest-saft-base-{}", std::process::id()));
+        let pasta = std::env::temp_dir().join(format!("kangest-saft-db-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&pasta);
         std::fs::create_dir_all(&pasta).unwrap();
         let mut st = AppState::new(db::abrir(&pasta.join("kigest.db")).await.unwrap());
