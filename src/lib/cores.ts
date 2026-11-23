@@ -37,7 +37,7 @@ const deHex = (h: string): RGB => {
 };
 const paraHex = (c: RGB) => "#" + c.map((x) => Math.round(Math.min(255, Math.max(0, x))).toString(16).padStart(2, "0")).join("");
 /** `a` misturado com `b` na proporção `t` (0 = só `a`). */
-const mistura = (a: string, b: string, t: number) => {
+export const mistura = (a: string, b: string, t: number) => {
   const x = deHex(a);
   const y = deHex(b);
   return paraHex([0, 1, 2].map((i) => x[i] * (1 - t) + y[i] * t) as RGB);
@@ -120,14 +120,24 @@ const TODAS = [
   "--cor-logo-a", "--cor-logo-b", "--cor-logo-k",
 ];
 
+/** O canal RGB de uma cor do tema («--color-nav» → «--rgb-nav»): scripts/css-webkit15.mjs cria-o para as cores do index.css. */
+const canalDe = (v: string) => v.replace(/^--color-/, "--rgb-");
+
 /** Põe o jogo de cores no documento (sem jogo, ou o do KanGest: as cores do index.css). */
 export function aplicarCores(c: Cores | null | undefined, escuro: boolean) {
   const r = document.documentElement.style;
-  for (const v of TODAS) r.removeProperty(v);
+  for (const v of TODAS) {
+    r.removeProperty(v);
+    r.removeProperty(canalDe(v));
+  }
   // para o CSS saber se é o jogo do KanGest (ex.: as capturas do ecrã de entrada, tiradas no verde, ficam a cinzento nos outros)
   document.documentElement.dataset.paleta = c?.paleta ?? "petroleo";
   if (!c || c.paleta === "petroleo") return;
-  for (const [k, v] of Object.entries(variaveis(c, escuro))) r.setProperty(k, v);
+  for (const [k, v] of Object.entries(variaveis(c, escuro))) {
+    r.setProperty(k, v);
+    // o canal RGB acompanha a cor: no WebKit do macOS 12 e anteriores, as cores com transparência (bg-nav/95…) usam-no
+    if (k.startsWith("--color-") && /^#[0-9a-f]{6}$/i.test(v)) r.setProperty(canalDe(k), deHex(v).join(" "));
+  }
 }
 
 const CHAVE = "kangest.cores";

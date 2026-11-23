@@ -44,6 +44,13 @@ jobs:
       - name: Tipos do frontend
         run: npm run typecheck
 
+      # o CSS compilado tem de funcionar no WebKit do macOS 12 e anteriores (docs/BUILD.md): sem color-mix nem
+      # degradés «in oklab» fora de um @supports
+      - name: CSS para o WebKit do macOS 12
+        run: |
+          npx vite build
+          node scripts/verificar-css.mjs
+
       # o tauri::generate_context! procura a pasta do frontend compilado
       - run: mkdir -p dist
 

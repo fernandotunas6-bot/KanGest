@@ -117,7 +117,7 @@ export function Moldura({
         <Vitrine />
         <section className="relative flex min-h-0 flex-col overflow-y-auto">
           {/* luz quente no canto, como num fim de tarde, e o verde da marca em baixo */}
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(75%_60%_at_100%_0%,color-mix(in_srgb,var(--color-accent)_14%,transparent),transparent_70%),radial-gradient(60%_50%_at_0%_100%,color-mix(in_srgb,var(--color-brand)_10%,transparent),transparent_70%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(75%_60%_at_100%_0%,rgb(var(--rgb-accent)/0.14),transparent_70%),radial-gradient(60%_50%_at_0%_100%,rgb(var(--rgb-brand)/0.1),transparent_70%)]" />
           <div className="pointer-events-none absolute inset-0 bg-[repeating-linear-gradient(115deg,transparent_0_140px,rgba(255,255,255,0.22)_140px_143px)]" />
           {/* ecrãs pequenos (telemóvel, terminal POS): só uma faixa com a marca */}
           <div className="relative flex items-center gap-2.5 bg-nav px-5 py-3 text-white md:hidden">

@@ -5,6 +5,7 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
+import webkit15 from "./scripts/css-webkit15.mjs";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -26,6 +27,8 @@ function avisoDireitos(): Plugin {
 export default defineConfig({
   plugins: [react(), tailwindcss(), avisoDireitos()],
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
+  // o CSS do Tailwind v4 não funciona por inteiro no WebKit do macOS 12 e anteriores (degradés, cores com transparência)
+  css: { postcss: { plugins: [webkit15()] } },
   clearScreen: false,
   server: {
     port: 1420,

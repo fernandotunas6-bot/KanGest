@@ -3,13 +3,13 @@
 
 import { Check } from "lucide-react";
 import { cn } from "@/components/ui";
-import { PALETAS, coresDe, type Cores } from "@/lib/cores";
+import { PALETAS, coresDe, mistura, type Cores } from "@/lib/cores";
 
 /** Amostra de um jogo: o menu na cor principal, um botão nela e outro no destaque. */
 function Amostra({ marca, destaque }: { marca: string; destaque: string }) {
   return (
     <div className="flex h-14 overflow-hidden rounded-md ring-1 ring-black/10">
-      <div className="w-1/3" style={{ background: `color-mix(in srgb, ${marca} 68%, black)` }} />
+      <div className="w-1/3" style={{ background: mistura(marca, "#000000", 0.32) }} />
       <div className="flex flex-1 flex-col justify-center gap-1.5 bg-[#f6f4ef] px-2">
         <span className="h-2.5 w-3/4 rounded-sm" style={{ background: marca }} />
         <span className="h-2.5 w-1/2 rounded-sm" style={{ background: destaque }} />
