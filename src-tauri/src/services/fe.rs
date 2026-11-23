@@ -495,6 +495,13 @@ pub async fn ciclo(p: &SqlitePool) -> AppResult<Value> {
                         sqlx::query("UPDATE fe_envios SET erros = ?, tentativas = tentativas + 1 WHERE documento_id = ?").bind(json!(msg).to_string()).bind(id).execute(p).await?;
                     }
                 }
+                if rejeitados > 0 {
+                    crate::nativo::notificar(
+                        "agt-rejeitada",
+                        "Facturas rejeitadas pela AGT",
+                        &format!("{rejeitados} documento(s) rejeitado(s) pela AGT. Veja em Facturação Electrónica e corrija-os."),
+                    );
+                }
                 avisos.push(format!(
                     "A AGT recusou o pedido (HTTP {estado}){}",
                     gerais.first().or(erros.first().map(|e| &e.1)).map(|g| format!(": {g}")).unwrap_or_default()
@@ -553,6 +560,12 @@ pub async fn ciclo(p: &SqlitePool) -> AppResult<Value> {
                     .await?;
                     if valido {
                         validados += 1;
+                    } else {
+                        crate::nativo::notificar(
+                            "agt-rejeitada",
+                            "Factura rejeitada pela AGT",
+                            &format!("{no} foi rejeitada pela AGT. Veja em Facturação Electrónica e corrija-a."),
+                        );
                     }
                 }
             }

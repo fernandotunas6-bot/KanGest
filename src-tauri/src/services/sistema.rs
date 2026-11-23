@@ -229,6 +229,11 @@ pub async fn fazer_copia(pool: &SqlitePool, pasta_dados: &Path, motivo: &str) ->
             }
             Err(e) => {
                 cfg_gravar(pool, "copias.erro_externa", &format!("{} — {e}", crate::db::agora())).await?;
+                crate::nativo::notificar(
+                    "copia-externa",
+                    "Cópia externa não gravada",
+                    &format!("A cópia ficou neste computador, mas não na pasta externa: {e}. Veja em Configurações → Sistema."),
+                );
             }
         }
     }
@@ -298,6 +303,7 @@ pub fn iniciar_agendamento(st: Arc<AppState>) {
                 Ok(true) => {
                     if let Err(e) = fazer_copia(&st.pool, &st.pasta_dados, "Cópia automática periódica").await {
                         eprintln!("Cópia de segurança periódica falhou: {e}");
+                        crate::nativo::notificar("copia", "Cópia de segurança falhou", &format!("{e}. Veja em Configurações → Sistema."));
                     }
                 }
                 Ok(false) => {}
@@ -314,6 +320,7 @@ pub async fn copia_evento(st: &AppState, motivo: &str) {
     }
     if let Err(e) = fazer_copia(&st.pool, &st.pasta_dados, motivo).await {
         eprintln!("Cópia de segurança ({motivo}) falhou: {e}");
+        crate::nativo::notificar("copia", "Cópia de segurança falhou", &format!("{motivo}: {e}. Veja em Configurações → Sistema."));
     }
 }
 

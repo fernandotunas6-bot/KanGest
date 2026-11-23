@@ -84,6 +84,8 @@ pub fn run() {
         }))
         // abrir ao ligar o computador (Configurações → Rede): chave «Run» no Windows, LaunchAgent no macOS
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        // notificações do sistema: o que falha em segundo plano (src/nativo.rs, notificar)
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             nativo::definir(app.handle().clone());
             // selo de integridade do executável (só nas compilações oficiais; corre numa thread à parte)
