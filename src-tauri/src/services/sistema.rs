@@ -35,10 +35,39 @@ pub async fn copiar(pool: &SqlitePool, destino: &Path) -> AppResult<()> {
     Ok(())
 }
 
-pub async fn backup(st: &AppState) -> AppResult<Value> {
+#[derive(Deserialize, Default)]
+pub struct BackupIn {
+    /// «Guardar como…»: o caminho escolhido na janela nativa (só no computador que guarda a base). Sem ele, vai para
+    /// a pasta de transferências.
+    #[serde(default)]
+    destino: Option<String>,
+}
+
+/// O caminho escolhido em «Guardar como…»: absoluto, numa pasta que existe, com a extensão `.db`. Só se aceita no
+/// próprio computador que guarda a base: um pedido de um posto em rede não grava em caminhos do servidor.
+fn destino_escolhido(caminho: &str) -> AppResult<PathBuf> {
+    if crate::state::contexto().is_some() || crate::rede::config().cliente() {
+        return Err(AppError::msg("«Guardar como» só existe no computador que guarda a base de dados (o servidor)."));
+    }
+    let mut f = PathBuf::from(caminho.trim());
+    if !f.is_absolute() {
+        return Err(AppError::msg("Escolha onde guardar a cópia."));
+    }
+    if f.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("db")) != Some(true) {
+        f.set_extension("db");
+    }
+    match f.parent() {
+        Some(p) if p.is_dir() => Ok(f),
+        _ => Err(AppError::msg(format!("A pasta de {} não existe (pen desligada?).", f.display()))),
+    }
+}
+
+pub async fn backup(st: &AppState, i: BackupIn) -> AppResult<Value> {
     st.exigir_perm("sistema.backup")?;
-    let nome = format!("kangest-copia-{}.db", chrono::Local::now().format("%Y%m%d-%H%M%S"));
-    let destino = st.pasta_exportacao.join(nome);
+    let destino = match i.destino.as_deref().filter(|d| !d.trim().is_empty()) {
+        Some(d) => destino_escolhido(d)?,
+        None => st.pasta_exportacao.join(format!("kangest-copia-{}.db", chrono::Local::now().format("%Y%m%d-%H%M%S"))),
+    };
     // portátil (em claro): é a que se leva para outro computador; a base em uso e as cópias locais vão cifradas
     crate::db::exportar_em_claro(&st.pool, &destino).await?;
     let bytes = std::fs::metadata(&destino).map(|m| m.len()).unwrap_or(0);
@@ -572,3 +601,21 @@ pub async fn info(st: &AppState) -> AppResult<Value> {
         "utilizadores": conta("SELECT COUNT(*) FROM utilizadores").await?,
     }))
 }
+
+#[cfg(test)]
+mod testes {
+    #[test]
+    fn guardar_como_aceita_so_caminhos_validos() {
+        let d = std::env::temp_dir().join(format!("kangest-guardar-como-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        // sem extensão: fica .db
+        let f = super::destino_escolhido(&d.join("copia-da-loja").display().to_string()).unwrap();
+        assert_eq!(f, d.join("copia-da-loja.db"));
+        assert_eq!(super::destino_escolhido(&d.join("x.DB").display().to_string()).unwrap(), d.join("x.DB"));
+        assert!(super::destino_escolhido("copia.db").unwrap_err().to_string().contains("Escolha onde"), "relativo: não");
+        let e = super::destino_escolhido(&d.join("pen-desligada").join("copia.db").display().to_string()).unwrap_err();
+        assert!(e.to_string().contains("não existe"), "{e}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+

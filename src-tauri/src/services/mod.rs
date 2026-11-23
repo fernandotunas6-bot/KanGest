@@ -441,7 +441,7 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "saft.exportar" => saft::exportar(st, p(params)?).await,
         "saft.exportarCompras" => saft::exportar_compras(st, p(params)?).await,
         "saft.exportarEstado" => saft::exportar_estado(st, p(params)?).await,
-        "sistema.backup" => sistema::backup(st).await,
+        "sistema.backup" => sistema::backup(st, p(params)?).await,
         "sistema.copias" => sistema::copias(st).await,
         "sistema.copiasGuardar" => sistema::copias_guardar(st, p(params)?).await,
         "sistema.copiaAgora" => sistema::copia_agora(st).await,

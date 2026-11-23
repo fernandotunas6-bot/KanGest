@@ -47,6 +47,8 @@ tauri-plugin-single-instance = "=2.5.5"
 tauri-plugin-autostart = "=2.7.0"
 # Notificações do sistema (centro de notificações do macOS, avisos do Windows): o que falha em segundo plano.
 tauri-plugin-notification = "=2.8.0"
+# Janelas nativas de guardar e abrir (cópias de segurança, restauro, pasta externa).
+tauri-plugin-dialog = "=2.8.4"
 
 # Cofre do sistema para a chave mestra dos segredos: Porta-chaves no macOS e Gestor de Credenciais (DPAPI) no Windows.
 [target.'cfg(target_os = "macos")'.dependencies]
