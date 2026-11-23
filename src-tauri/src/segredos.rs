@@ -59,6 +59,7 @@ impl Cofre for CofreSistema {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const SERVICO: &str = "ao.kigest.app";
 /// O ficheiro `kangest.chave` guarda, em vez da chave, «cofre1:<identificador>» (mover a pasta de dados leva o
 /// identificador consigo). Nas versões anteriores tinha os 32 bytes da chave.
