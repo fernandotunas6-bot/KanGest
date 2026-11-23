@@ -138,9 +138,10 @@ const ehRecibo = (classe: string) => classe === "RECIBO" || classe === "PAGAMENT
 const naoServeFactura = (classe: string) => classe === "PROFORMA" || ehRecibo(classe) || classe === "TRANSPORTE";
 
 /**
- * Talão para impressora térmica de 80 mm (POS80 / EPSON TM-T20II) ou de 58 mm, com o desenho do Fatura.fr3
- * do KIGEST POS: empresa ao centro, título, n.º, data e hora, cliente, linhas em duas filas, totais,
- * modo de pagamento, resumo de imposto, código de certificação, operador e «OBRIGADO VOLTE SEMPRE».
+ * Talão para impressora térmica de 80 mm (POS80 / EPSON TM-T20II) ou de 58 mm: curto e fácil de ler, com tudo o que a
+ * AGT exige. Empresa (nome, morada, NIF); documento, data e hora; cliente (o NIF só quando o tem); cada linha com a
+ * descrição e o total e, por baixo, quantidade × preço sem IVA, taxa e desconto; total sem IVA, desconto, IVA e TOTAL;
+ * o que se pagou e o troco; o IVA por taxa só quando há mais de uma taxa ou isenções; o código de certificação.
  */
 export function Ticket({ d, via = "Original" }: { d: DocCompleto; via?: string }) {
   const doc = d.documento;
@@ -149,158 +150,134 @@ export function Ticket({ d, via = "Original" }: { d: DocCompleto; via?: string }
   const recibo = ehRecibo(doc.classe);
   const segunda = via.startsWith("2.ª");
   const outraVia = !segunda && via !== "Original";
-  const cols = t58 ? "grid-cols-[22px_18px_1fr_26px_26px_1fr]" : "grid-cols-[30px_24px_1fr_36px_36px_1fr]";
-  const cabecalho = (t: string) => <div className="mt-2 border-y border-black py-0.5 text-center">{t}</div>;
+  const consumidor = !doc.entidade_nif || doc.entidade_nif === "999999999";
+  const resumo = d.resumo_iva;
+  // uma só taxa, sem isenções: a linha do IVA diz a taxa e dispensa o quadro
+  const umaTaxa = resumo.length === 1 && !resumo[0].motivo_isencao;
+  const corte = "mt-1.5 border-t border-dashed border-black pt-1";
+  const morada = [e.endereco, e.localidade || e.provincia].filter(Boolean).join(", ");
+  const pago = pagamentosEntregues(d);
   return (
     <div className={`print-ticket mx-auto bg-white text-black ${t58 ? "talao-58 w-[220px] p-2 text-[9.5px] leading-[1.25]" : "w-[300px] p-3 text-[11px] leading-[1.3]"}`} style={ARIAL}>
       <div className="text-center">
-        {e.logo && <img src={e.logo} alt="" className="mx-auto mb-1 max-h-14 max-w-[180px] object-contain grayscale" />}
-        <div className="text-[13px] font-bold">{e.nome}</div>
-        {e.designacao_comercial && e.designacao_comercial !== e.nome && <div>{e.designacao_comercial}</div>}
-        {e.endereco && <div>{e.endereco}</div>}
-        {e.telefone && <div>Tel.: {e.telefone}</div>}
-        <div>NIF: {e.nif}</div>
-        <div>{local(e)}</div>
-      </div>
-      {segunda && <div className="mt-1.5 text-center font-bold">2.ª via em conformidade com o original</div>}
-      <div className="mt-2 flex items-baseline justify-between gap-2">
-        <span className="text-[13px] font-bold">{doc.numero_doc}</span>
-        <span className="text-right font-bold">{doc.tipo_desc}</span>
-      </div>
-      {outraVia && <div className="text-right">{via}</div>}
-      <div className="flex justify-between">
-        <span>Data: {data(doc.data_emissao)}</span>
-        <span>Hora: {hora(doc.data_hora)}</span>
-      </div>
-      <div>Cliente : {doc.entidade_nome}</div>
-      <div>NIF : {nifTexto(doc.entidade_nif)}</div>
-      {/* nota de crédito/débito: origem e motivo; factura a crédito: vencimento (como no A4) */}
-      {doc.doc_origem && <div>Ref.: {doc.doc_origem}</div>}
-      {doc.motivo && <div>Motivo: {doc.motivo}</div>}
-      {doc.data_vencimento && doc.data_vencimento.slice(0, 10) !== doc.data_emissao.slice(0, 10) && !recibo && (
+        {e.logo && <img src={e.logo} alt="" className="mx-auto mb-1 max-h-12 max-w-[160px] object-contain grayscale" />}
+        <div className="text-[13px] font-bold leading-tight">{e.designacao_comercial || e.nome}</div>
+        {e.designacao_comercial && e.designacao_comercial !== e.nome && <div>{e.nome}</div>}
+        {morada && <div>{morada}</div>}
         <div>
-          {doc.classe === "PROFORMA" ? "Válido até" : "Vencimento"}: {data(doc.data_vencimento)}
+          NIF {e.nif}
+          {e.telefone ? ` · Tel. ${e.telefone}` : ""}
         </div>
-      )}
-      {naoServeFactura(doc.classe) && <div className="mt-1 text-center">Este documento não serve de factura</div>}
-      {doc.estado === "A" && <div className="my-1 text-center font-bold">*** DOCUMENTO ANULADO ***</div>}
+      </div>
+      {segunda && <div className="mt-1 text-center font-bold">2.ª via em conformidade com o original</div>}
+
+      <div className={corte}>
+        <div className="flex items-baseline justify-between gap-2 font-bold">
+          <span>{doc.tipo_desc}</span>
+          <span className="text-[12px]">{doc.numero_doc}</span>
+        </div>
+        <div className="flex justify-between gap-2">
+          <span>
+            {data(doc.data_emissao)} {hora(doc.data_hora)}
+          </span>
+          <span>{outraVia ? via : ""}</span>
+        </div>
+        <div>Cliente: {consumidor ? "Consumidor final" : doc.entidade_nome}</div>
+        {!consumidor && <div>NIF {doc.entidade_nif}</div>}
+        {doc.doc_origem && <div>Ref.: {doc.doc_origem}</div>}
+        {doc.motivo && <div>Motivo: {doc.motivo}</div>}
+        {doc.data_vencimento && doc.data_vencimento.slice(0, 10) !== doc.data_emissao.slice(0, 10) && !recibo && (
+          <div>
+            {doc.classe === "PROFORMA" ? "Válido até" : "Vencimento"}: {data(doc.data_vencimento)}
+          </div>
+        )}
+        {naoServeFactura(doc.classe) && <div className="text-center">Este documento não serve de factura</div>}
+        {doc.estado === "A" && <div className="text-center font-bold">*** DOCUMENTO ANULADO ***</div>}
+      </div>
 
       {!recibo && (
-        <>
-          <div className="mt-2 font-bold">Descrição</div>
-          <div className={`grid ${cols} gap-x-1 border-b border-black pb-0.5 font-bold`}>
-            <span>Qtd</span>
-            <span>Un</span>
-            <span className="text-right">P. Unit</span>
-            <span className="text-right">Desc.%</span>
-            <span className="text-right">Taxa%</span>
-            <span className="text-right">Valor</span>
-          </div>
+        <div className={corte}>
           {d.linhas.map((l) => (
-            <div key={l.id} className="mt-1">
-              <div>{l.descricao}</div>
-              <div className={`grid ${cols} gap-x-1`}>
-                <span>{qtd(l.quantidade)}</span>
-                <span className="truncate">{l.unidade ?? "un"}</span>
-                <span className="text-right">{kzNum(l.preco_unitario)}</span>
-                <span className="text-right">{l.desconto_pct ? pct(l.desconto_pct) : "0"}</span>
-                <span className="text-right">{pct(l.taxa_iva_pct)}</span>
-                <span className="text-right">{kzNum(l.total)}</span>
+            <div key={l.id} className="mb-0.5">
+              <div className="flex justify-between gap-2">
+                <span className="min-w-0">{l.descricao}</span>
+                <span className="shrink-0">{kzNum(l.total)}</span>
               </div>
-              {l.motivo_isencao && (
-                <div className="text-[9px]">
-                  {l.motivo_isencao} {MOTIVO_TXT[l.motivo_isencao] ?? "Isento"}
-                </div>
-              )}
-              {l.lote && <div className="text-[9px]">Lote {l.lote}</div>}
+              <div className="pl-2 text-[0.9em]">
+                {qtd(l.quantidade)} {l.unidade ?? "un"} × {kzNum(l.preco_unitario)} · IVA {pct(l.taxa_iva_pct)}
+                {l.motivo_isencao ? ` (${l.motivo_isencao})` : ""}
+                {l.desconto_pct ? ` · desc. ${pct(l.desconto_pct)}` : ""}
+                {l.lote ? ` · lote ${l.lote}` : ""}
+              </div>
             </div>
           ))}
-        </>
+        </div>
       )}
       {recibo && (
-        <>
-          <div className={`mt-2 grid grid-cols-[1fr_auto_auto] gap-x-2 border-b border-black pb-0.5 font-bold`}>
-            <span>Documento</span>
-            <span>Data</span>
-            <span className="text-right">Valor</span>
-          </div>
+        <div className={corte}>
           {d.liquidacoes.map((l) => (
-            <div key={l.id} className="grid grid-cols-[1fr_auto_auto] gap-x-2">
-              <span>{l.numero_doc}</span>
-              <span>{data(l.data_emissao)}</span>
-              <span className="text-right">{kzNum(l.valor)}</span>
+            <div key={l.id} className="flex justify-between gap-2">
+              <span>
+                {l.numero_doc} · {data(l.data_emissao)}
+              </span>
+              <span>{kzNum(l.valor)}</span>
             </div>
           ))}
-        </>
+        </div>
       )}
 
-      <div className="mt-1.5 border-t border-black pt-1">
+      <div className={corte}>
         {!recibo && (
           <>
-            <Row k="Total sem Imposto" v={kzNum(doc.total_bruto)} />
-            <Row k="Descontos" v={kzNum(doc.total_desconto)} />
-            <Row k="Total Imposto" v={kzNum(doc.total_iva)} />
+            {doc.total_desconto > 0 && <Row k="Desconto" v={`−${kzNum(doc.total_desconto)}`} />}
+            <Row k="Total sem IVA" v={kzNum(doc.total_liquido)} />
+            <Row k={umaTaxa ? `IVA ${pct(resumo[0].taxa)}` : "IVA"} v={kzNum(doc.total_iva)} />
           </>
         )}
-        <div className="flex justify-between text-[14px] font-bold">
-          <span>Total ({doc.moeda || "AOA"})</span>
+        <div className="flex justify-between text-[15px] font-bold">
+          <span>{recibo ? "Recebido" : "TOTAL"} ({doc.moeda || "AOA"})</span>
           <span>{kzNum(doc.total)}</span>
         </div>
-        {doc.valor_entregue > 0 && <Row k="Valor Entregue" v={kzNum(doc.valor_entregue)} />}
+        {pago.map((p) => (
+          <Row key={p.chave} k={p.descricao} v={kzNum(p.valor)} />
+        ))}
         {doc.troco > 0 && <Row k="Troco" v={kzNum(doc.troco)} />}
       </div>
-      {d.pagamentos.length > 0 && (
-        <>
-          {cabecalho("Modo de Pagamento")}
-          {pagamentosEntregues(d).map((p) => (
-            <Row key={p.chave} k={p.descricao} v={kzNum(p.valor)} />
+
+      {!recibo && !umaTaxa && resumo.length > 0 && (
+        <div className={`${corte} text-[0.9em]`}>
+          {resumo.map((r) => (
+            <div key={`${r.taxa}${r.motivo_isencao}`} className="flex justify-between gap-2">
+              <span>
+                {r.motivo_isencao ? `Isento ${r.motivo_isencao} ${MOTIVO_TXT[r.motivo_isencao] ?? ""}`.trim() : `IVA ${pct(r.taxa)}`} s/ {kzNum(r.base)}
+              </span>
+              <span>{kzNum(r.iva)}</span>
+            </div>
           ))}
-        </>
+        </div>
       )}
       {d.fidelizacao && (d.fidelizacao.ganhos > 0 || d.fidelizacao.gastos > 0) && (
-        <>
-          {cabecalho("Pontos de Fidelização")}
+        <div className={`${corte} text-[0.9em]`}>
           {d.fidelizacao.ganhos > 0 && <Row k={doc.credito === 1 ? "Pontos devolvidos" : "Pontos ganhos"} v={`+${d.fidelizacao.ganhos}`} />}
           {d.fidelizacao.gastos > 0 && <Row k={doc.credito === 1 ? "Pontos retirados" : "Pontos usados"} v={`−${d.fidelizacao.gastos}`} />}
           <Row k="Saldo de pontos" v={String(d.fidelizacao.saldo)} />
-        </>
+        </div>
       )}
-      {!recibo && d.resumo_iva.length > 0 && (
-        <>
-          {cabecalho("Resumo de Imposto")}
-          <div className="grid grid-cols-3 text-[10px]">
-            <span>Taxa</span>
-            <span className="text-center">Incidência</span>
-            <span className="text-right">Total Imposto</span>
-            {d.resumo_iva.map((r) => (
-              <Fragment key={`${r.taxa}${r.motivo_isencao}`}>
-                <span>
-                  {pct(r.taxa)}
-                  {r.motivo_isencao ? ` ${r.motivo_isencao}` : ""}
-                </span>
-                <span className="text-center">{kzNum(r.base)}</span>
-                <span className="text-right">{kzNum(r.iva)}</span>
-              </Fragment>
-            ))}
-          </div>
-        </>
-      )}
-      {doc.classe === "VENDA" && <div className="mt-2 text-center text-[9px]">Os bens e/ou serviços foram colocados à disposição do adquirente na data e local do documento.</div>}
-      {d.fe && <QrAgt d={d} tamanho="32mm" />}
-      {rodapeAgt(d) && <div className="mt-2 text-center text-[10px]">{rodapeAgt(d)}</div>}
-      <div className="mt-1.5">Operador: {doc.utilizador}</div>
-      {doc.classe === "PROFORMA" && e.bancos && e.bancos.length > 0 && (
-        <div className="mt-1 text-center text-[9.5px]">
-          {e.bancos.map((b) => (
+
+      <div className={`${corte} text-center text-[0.9em]`}>
+        {d.fe && <QrAgt d={d} tamanho="30mm" />}
+        {rodapeAgt(d) && <div>{rodapeAgt(d)}</div>}
+        {doc.classe === "VENDA" && <div>Bens/serviços colocados à disposição na data e local do documento.</div>}
+        <div>Operador: {doc.utilizador}</div>
+        {doc.classe === "PROFORMA" &&
+          e.bancos?.map((b) => (
             <div key={b.iban}>
               {b.banco}: {b.iban}
             </div>
           ))}
-        </div>
-      )}
-      {doc.texto_rodape && <div className="mt-1 text-center text-[10px]">{doc.texto_rodape}</div>}
-      {e.rodape && <div className="mt-1 text-center text-[10px]">{e.rodape}</div>}
-      <div className="mt-1.5 text-center">* OBRIGADO VOLTE SEMPRE *</div>
+        {doc.texto_rodape && <div>{doc.texto_rodape}</div>}
+        <div className="mt-1 text-[1.1em] font-medium">{e.rodape || "Obrigado e volte sempre!"}</div>
+      </div>
     </div>
   );
 }
@@ -374,19 +351,23 @@ export function A4({ d, via = "Original" }: { d: DocCompleto; via?: string }) {
   if (doc.doc_origem) faixa.push(["Documento de Origem", doc.doc_origem]);
   // como no KIGEST, o armazém só aparece nos documentos de stock (entradas, saídas, transferências)
   if (doc.armazem && stock) faixa.push(["Armazém", `${doc.armazem}${doc.armazem_destino ? ` → ${doc.armazem_destino}` : ""}`]);
-  faixa.push(["Moeda", moeda]);
+  // a moeda só quando não é o kwanza (o total do documento já diz «AOA»)
+  if (moeda !== "AOA") faixa.push(["Moeda", moeda]);
 
+  // só o que conta: o ilíquido e os descontos quando há desconto, a retenção quando há; o total com imposto é o
+  // TOTAL DO DOCUMENTO por baixo
   const totais: [string, number][] = recibo
     ? []
-    : [
-        ["Total Ilíquido", doc.total_bruto],
-        ["Descontos por Linha", porLinha],
-        ["Desconto Global", doc.total_desconto - porLinha],
-        ["Total Líquido", doc.total_liquido],
-        ["Imposto (IVA)", doc.total_iva],
-        ["Total com Imposto", doc.total],
-        ["Retenção", doc.total_retencao],
-      ];
+    : (
+        [
+          ["Total Ilíquido", doc.total_desconto > 0 ? doc.total_bruto : 0],
+          ["Descontos por Linha", porLinha],
+          ["Desconto Global", doc.total_desconto - porLinha],
+          ["Total Líquido", doc.total_liquido],
+          ["Imposto (IVA)", doc.total_iva],
+          ["Retenção", doc.total_retencao],
+        ] as [string, number][]
+      ).filter(([k, v]) => v !== 0 || k === "Total Líquido" || k === "Imposto (IVA)");
 
   return (
     <div
