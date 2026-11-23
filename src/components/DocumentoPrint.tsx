@@ -346,7 +346,9 @@ export function A4({ d, via = "Original" }: { d: DocCompleto; via?: string }) {
     ["Data de Emissão", data(doc.data_emissao)],
     ["Hora", hora(doc.data_hora)],
   ];
-  if (!recibo && !stock) faixa.push([proforma ? "Validade" : "Data de Vencimento", data(doc.data_vencimento || doc.data_emissao)]);
+  // o vencimento só quando diz alguma coisa (numa factura-recibo é o próprio dia); a validade da proforma, sempre
+  const vence = doc.data_vencimento && doc.data_vencimento.slice(0, 10) !== doc.data_emissao.slice(0, 10);
+  if (!recibo && !stock && (proforma || vence)) faixa.push([proforma ? "Validade" : "Data de Vencimento", data(doc.data_vencimento || doc.data_emissao)]);
   if (!recibo && !stock && doc.prazo_desc) faixa.push(["Condição de Pagamento", doc.prazo_desc]);
   if (doc.doc_origem) faixa.push(["Documento de Origem", doc.doc_origem]);
   // como no KIGEST, o armazém só aparece nos documentos de stock (entradas, saídas, transferências)
