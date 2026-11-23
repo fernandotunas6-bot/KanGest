@@ -33,8 +33,17 @@ export function Copias({ d, formato, vias, segundaVia }: { d: DocCompleto; forma
         const nome = segundaVia ? `2.ª Via — ${NOMES_VIAS[i] ?? `Cópia ${i + 1}`}` : (NOMES_VIAS[i] ?? `Cópia ${i + 1}`);
         return (
           <Fragment key={i}>
-            {formato === "a4" ? <A4 d={d} via={nome} /> : <Ticket d={d} via={nome} />}
-            {i < vias - 1 && <div className={formato === "a4" ? "break-after-page" : "h-10"} />}
+            {formato === "a4" ? (
+              <>
+                <A4 d={d} via={nome} />
+                {i < vias - 1 && <div className="break-after-page" />}
+              </>
+            ) : (
+              // cada via na sua página do tamanho do talão (lib/print.ts), e a impressora corta entre elas
+              <div className="via-talao">
+                <Ticket d={d} via={nome} />
+              </div>
+            )}
           </Fragment>
         );
       })}

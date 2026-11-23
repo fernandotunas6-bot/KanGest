@@ -598,11 +598,9 @@ function RelatorioFecho({ r, onClose }: { r: CaixaResumo; onClose: () => void })
     >
       {e && (
         <div className="text-center">
-          <div className="text-[13px] font-bold">{e.nome}</div>
-          {e.designacao_comercial && e.designacao_comercial !== e.nome && <div>{e.designacao_comercial}</div>}
-          {e.endereco && <div>{e.endereco}</div>}
-          {e.telefone && <div>Telf.: {e.telefone}</div>}
-          <div>{e.localidade || e.provincia || "Luanda"} - Angola</div>
+          <div className="text-[13px] font-bold">{e.designacao_comercial || e.nome}</div>
+          {[e.endereco, e.localidade || e.provincia].filter(Boolean).join(", ")}
+          {e.telefone && <div>Tel. {e.telefone}</div>}
         </div>
       )}
       <div className="mt-2 text-[12.5px] font-bold">
