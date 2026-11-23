@@ -79,5 +79,17 @@ fn main() {
     let saida = std::path::Path::new(&std::env::var("OUT_DIR").expect("OUT_DIR")).join("segredos_produtor.rs");
     std::fs::write(&saida, src).expect("gravar segredos_produtor.rs");
 
-    tauri_build::build()
+    // Windows (MSVC): o manifesto com os Common Controls 6, de que as janelas do tauri-plugin-dialog precisam
+    // (TaskDialogIndirect), entra pelo linker em tudo o que se liga: o executável e também os binários de testes.
+    // Pelo recurso do tauri-build (o mesmo manifesto) só ia para o executável, e os testes morriam ao arrancar com
+    // STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139): sem manifesto, o Windows dá-lhes a comctl32 antiga.
+    let mut atributos = tauri_build::Attributes::new();
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        atributos = atributos.windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest());
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
+        );
+    }
+    tauri_build::try_build(atributos).expect("tauri-build");
 }
