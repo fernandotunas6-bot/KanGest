@@ -268,6 +268,9 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "rede.estado" => crate::rede::estado(st).await,
         "rede.guardar" => crate::rede::guardar(st, p(params)?).await,
         "rede.testar" => crate::rede::testar(st).await,
+        // arranque automático deste computador (método local: cada computador tem o seu; src/nativo.rs)
+        "rede.arranque" => crate::nativo::arranque(st).await,
+        "rede.arranqueGuardar" => crate::nativo::arranque_guardar(st, p(params)?).await,
 
         // ---- impressão térmica (ESC/POS) e gaveta ----
         "impressao.estado" => impressao::estado(st).await,
