@@ -295,10 +295,13 @@ pub async fn descobrir(st: &AppState) -> AppResult<Value> {
     st.exigir_perm("sistema.importar")?;
     let pasta_exp = st.pasta_exportacao.clone();
     tokio::task::spawn_blocking(move || {
+        let mut pastas = raizes_kigest();
+        pastas.push(pasta_exp.clone());
         json!({
             "conexoes": procurar_inis(&raizes_kigest()),
             "instancias": instancias_sql_server(),
             "ficheiros": procurar_ficheiros(&pasta_exp),
+            "saft": super::importar_saft::procurar(&pastas),
         })
     })
     .await
