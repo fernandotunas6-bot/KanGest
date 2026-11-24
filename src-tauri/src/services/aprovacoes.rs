@@ -273,8 +273,8 @@ mod testes {
         let fr1 = rpc(&st, "documentos.emitir", venda(1)).await["documento"]["id"].as_i64().unwrap();
         let fr2 = rpc(&st, "documentos.emitir", venda(1)).await["documento"]["id"].as_i64().unwrap();
         let fr3 = rpc(&st, "documentos.emitir", venda(2)).await["documento"]["id"].as_i64().unwrap();
-        let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
-        let _ = ft;
+        let fr4 = rpc(&st, "documentos.emitir", venda(1)).await["documento"]["id"].as_i64().unwrap();
+        rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
         let banco: i64 = sqlx::query_scalar("SELECT id FROM contas ORDER BY id LIMIT 1").fetch_one(&st.pool).await.unwrap();
 
         // desligadas: o operador anula sem PIN
@@ -333,8 +333,7 @@ mod testes {
         rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
         rpc(&st, "aprovacoes.guardar", json!({ "regra": "anular", "ativo": true, "so_dias_anteriores": true })).await;
         rpc(&st, "auth.login", json!({ "login": "op", "senha": "op12345" })).await;
-        let nc_id = nc["documento"]["id"].as_i64().unwrap();
-        rpc(&st, "documentos.anular", json!({ "id": nc_id, "motivo": "nota de crédito errada" })).await;
+        rpc(&st, "documentos.anular", json!({ "id": fr4, "motivo": "venda registada por engano" })).await;
 
         // o registo: quem pediu, quem aprovou, o quê
         rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
