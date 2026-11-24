@@ -38,6 +38,12 @@ export interface OrdemDados {
   campo: string;
   desc: boolean;
 }
+/** Indicador calculado com as colunas do relatório (services/dados/formula.rs): «{Lucro} / {Valor sem IVA} * 100». */
+export interface FormulaDados {
+  nome: string;
+  expressao: string;
+  tipo?: "numero" | "dinheiro";
+}
 
 export interface ConsultaDados {
   fonte: string;
@@ -45,6 +51,7 @@ export interface ConsultaDados {
   filtros?: FiltroDados[];
   agrupar?: string[];
   agregados?: AgregadoDados[];
+  formulas?: FormulaDados[];
   ordenar?: OrdemDados[];
   limite?: number;
 }
