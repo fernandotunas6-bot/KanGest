@@ -34,7 +34,15 @@ export function parseKz(s: string): number {
   return Number.isFinite(v) ? Math.round(v * 100) : 0;
 }
 
-export const toInputKz = (c: number) => (c / 100).toFixed(2).replace(".", ",");
+/**
+ * Um valor em cêntimos para um campo de texto, com os milhares agrupados como no resto do programa
+ * («5 130,00» e não «5130,00»). O sinal é o «-» do teclado (o «−» do `numero` não se lê de volta), e o espaço é o
+ * que não parte a linha, que o `parseKz` ignora.
+ */
+export const toInputKz = (c: number) => {
+  const [inteiros, decimais] = (Math.abs(c) / 100).toFixed(2).split(".");
+  return `${c < 0 ? "-" : ""}${inteiros.replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0")},${decimais}`;
+};
 
 export function data(d?: string | null) {
   if (!d) return "—";
