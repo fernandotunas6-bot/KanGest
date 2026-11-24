@@ -1,14 +1,14 @@
 {
   "site": "https://kangest.pages.dev",
-  "versao": "1.4.2",
+  "versao": "1.4.3",
   "downloads": {
     "windows": "/actualizacoes/KanGest_{versao}_x64-setup.exe",
     "macArm": "/actualizacoes/KanGest_{versao}_aarch64.dmg",
     "macIntel": "/actualizacoes/KanGest_{versao}_x64.dmg",
     "versoes": "https://github.com/fernandotunas6-bot/KanGest/releases",
-    "tamanhoWindows": "5,7 MB",
-    "tamanhoMacArm": "5,4 MB",
-    "tamanhoMacIntel": "5,9 MB"
+    "tamanhoWindows": "7,6 MB",
+    "tamanhoMacArm": "5,9 MB",
+    "tamanhoMacIntel": "6,5 MB"
   },
   "contacto": {
     "email": "",
