@@ -9,6 +9,8 @@ mod atualizacao;
 mod avencas;
 mod assistente;
 mod auth;
+// motor central de dados (construtor de relatórios, BI, qualidade dos dados)
+mod dados;
 mod caixa;
 mod comissoes;
 pub(crate) mod catalogo;
@@ -440,6 +442,8 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "inteligencia.resumoGuardar" => resumo_email::config_guardar(st, p(params)?).await,
         "inteligencia.resumoEnviar" => resumo_email::enviar_agora(st).await,
         "relatorios.vendas" => relatorios::vendas(st, p(params)?).await,
+        "dados.fontes" => dados::fontes_listar(st).await,
+        "dados.consultar" => dados::consultar(st, p(params)?).await,
         "relatorios.sintese" => relatorios::sintese(st, p(params)?).await,
         "relatorios.top" => relatorios::top(st, p(params)?).await,
         "relatorios.irtC" => relatorios::irt_c_obter(st).await,
