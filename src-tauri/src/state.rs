@@ -70,6 +70,11 @@ pub const PERMISSOES: &[&str] = &[
     "sistema.api",
     // fechar e reabrir meses (fecho de períodos): por omissão, só o administrador
     "sistema.periodos",
+    // quem aprova com o PIN, quando as regras de aprovação estão ligadas (services/aprovacoes.rs); o gestor tem-nas
+    "aprovar.anulacao",
+    "aprovar.saidas",
+    "aprovar.vales",
+    "aprovar.creditos",
 ];
 
 /// Permissões que, por omissão, só o administrador tem (o gestor tem todas as outras).

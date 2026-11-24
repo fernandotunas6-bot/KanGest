@@ -40,6 +40,7 @@ mod rh;
 mod tesouraria;
 mod periodos;
 mod conciliacao;
+pub(crate) mod aprovacoes;
 mod relatorios;
 pub mod resumo_email;
 pub(crate) mod saft;
@@ -460,6 +461,9 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "conciliacao.descasar" => conciliacao::descasar(st, p(params)?).await,
         "conciliacao.fechar" => conciliacao::fechar(st, p(params)?).await,
         "conciliacao.eliminar" => conciliacao::eliminar(st, p(params)?).await,
+        "aprovacoes.regras" => aprovacoes::regras(st).await,
+        "aprovacoes.guardar" => aprovacoes::guardar(st, p(params)?).await,
+        "aprovacoes.listar" => aprovacoes::listar(st, p(params).unwrap_or_default()).await,
         "dados.modeloGuardar" => dados::modelo_guardar(st, p(params)?).await,
         "dados.modeloEliminar" => dados::modelo_eliminar(st, p(params)?).await,
         "relatorios.sintese" => relatorios::sintese(st, p(params)?).await,

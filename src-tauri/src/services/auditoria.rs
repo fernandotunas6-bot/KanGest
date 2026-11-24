@@ -51,6 +51,7 @@ pub const FICHAS: &[(&str, &str)] = &[
     ("periodos_fechados", "Período fechado"),
     ("conciliacoes", "Conciliação bancária"),
     ("conciliacao_linhas", "Linha de extracto bancário"),
+    ("regras_aprovacao", "Regra de aprovação"),
     ("documentos", "Documento"),
     ("empresa", "Empresa"),
     ("config", "Configurações"),
@@ -152,6 +153,7 @@ pub(super) fn alvo(metodo: &str, params: &Value) -> Option<Alvo> {
         "conciliacao.casar" => a("conciliacao_linhas", "id", "linha_id", Some("CASAR")),
         "conciliacao.lancar" => a("conciliacao_linhas", "id", "linha_id", Some("LANCAR")),
         "conciliacao.descasar" => a("conciliacao_linhas", "id", "linha_id", Some("DESCASAR")),
+        "aprovacoes.guardar" => a("regras_aprovacao", "regra", "regra", None),
         "empresa.guardar" => a("empresa", "id", "", None),
         _ => None,
     }
