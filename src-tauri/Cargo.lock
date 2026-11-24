@@ -2289,6 +2289,7 @@ dependencies = [
  "libsqlite3-sys",
  "minisign-verify",
  "native-tls",
+ "openssl-sys",
  "quick-xml",
  "rand 0.8.8",
  "ring",

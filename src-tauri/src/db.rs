@@ -19,8 +19,19 @@ pub fn em_claro(f: &Path) -> bool {
     std::fs::File::open(f).and_then(|mut x| x.read_exact(&mut b)).is_ok() && &b == CABECALHO
 }
 
+/// O OpenSSL (o SQLCipher usa-o no Windows e no Linux; no macOS usa o CommonCrypto da Apple) inicializa-se sem a
+/// limpeza à saída do programa (`OPENSSL_INIT_NO_ATEXIT`, que o `openssl_sys::init` pede): com ligações à base ainda a
+/// fechar noutras threads, essa limpeza libertava memória que ainda estava em uso («double free or corruption» no fim
+/// dos testes, de vez em quando). O sistema recupera essa memória de qualquer forma. Tem de vir antes do primeiro
+/// uso do OpenSSL, por isso está aqui, por onde passam todas as ligações cifradas.
+fn iniciar_cripto() {
+    #[cfg(not(target_os = "macos"))]
+    openssl_sys::init();
+}
+
 /// As opções de uma ligação à base cifrada com a chave (`PRAGMA key` vai sempre primeiro: o sqlx põe-no à cabeça).
 pub fn com_chave(o: SqliteConnectOptions, chave: &str) -> SqliteConnectOptions {
+    iniciar_cripto();
     o.pragma("key", format!("\"x'{chave}'\""))
 }
 
