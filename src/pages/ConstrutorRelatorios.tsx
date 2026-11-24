@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BarChart3, Calculator, FileSpreadsheet, FileText, Filter, Plus, Printer, Rows3, Save, Sigma, Table2, Trash2, X } from "lucide-react";
+import { BarChart3, Calculator, ChartBarBig, ChartLine, FileSpreadsheet, FileText, Filter, Plus, Printer, Rows3, Save, Sigma, Table2, Trash2, Undo2, X } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce } from "@/lib/hooks";
 import { data, hojeISO, kz, numero, parseKz } from "@/lib/format";
@@ -42,9 +42,12 @@ import {
   type FiltroEcra,
   type Modo,
   type Periodo,
+  type TipoGrafico,
 } from "@/lib/construtor";
 import { Grelha } from "@/components/dados/Grelha";
 import { BarChart } from "@/components/BarChart";
+import { LineChart } from "@/components/LineChart";
+import { PesoNoTotal } from "@/components/PesoNoTotal";
 import { InputData } from "@/components/InputData";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { Button, Card, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, cn } from "@/components/ui";
@@ -164,6 +167,9 @@ export default function ConstrutorRelatorios() {
   const [ordenar, setOrdenar] = useState<OrdemDados[]>([]);
   const [periodo, setPeriodo] = useState<Periodo>("mes");
   const [vista, setVista] = useState<"tabela" | "grafico">("tabela");
+  const [grafico, setGrafico] = useState<TipoGrafico>("barras");
+  // ao abrir o detalhe de um grupo (clique no gráfico): o resumo como estava, para voltar a ele
+  const [antesDoDetalhe, setAntesDoDetalhe] = useState<{ filtros: FiltroEcra[]; ordenar: OrdemDados[]; formulas: FormulaDados[]; rotulo: string } | null>(null);
   const [comparar, setComparar] = useState<Comparar>("");
   // o relatório pronto aberto (lib/construtor.ts PRONTOS), para o seletor de modelos o mostrar
   const [prontoId, setProntoId] = useState<string | null>(null);
@@ -197,6 +203,8 @@ export default function ConstrutorRelatorios() {
     setFiltros(d.filtros ?? []);
     setOrdenar(d.ordenar ?? []);
     setVista(d.vista ?? "tabela");
+    setGrafico(d.grafico ?? "barras");
+    setAntesDoDetalhe(null);
     setComparar(d.comparar ?? "");
     aplicarPeriodo(d.periodo ?? "mes", d.de, d.ate);
   }
@@ -211,7 +219,7 @@ export default function ConstrutorRelatorios() {
       setFonteId(m.fonte);
     }
   }
-  const definicao = (): Definicao => ({ modo, periodo, de, ate, campos, agrupar, agregados, formulas, filtros, ordenar, vista, comparar });
+  const definicao = (): Definicao => ({ modo, periodo, de, ate, campos, agrupar, agregados, formulas, filtros, ordenar, vista, grafico, comparar });
 
   // relatórios prontos das fontes que este utilizador pode consultar; o painel abre-os pelo endereço
   const prontos = PRONTOS.filter((p) => fontes.data?.some((f) => f.id === p.fonte));
@@ -248,6 +256,7 @@ export default function ConstrutorRelatorios() {
     setFormulas([]);
     setFiltros([]);
     setOrdenar([]);
+    setAntesDoDetalhe(null);
     // só quando muda de fonte (não quando a lista se recarrega)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fonte?.id]);
@@ -370,8 +379,40 @@ export default function ConstrutorRelatorios() {
         .join(" · ");
       return { chave, rotulo: chave.length > 10 ? `${chave.slice(0, 9)}…` : chave, valor: Number(l[iv] ?? 0) * escala };
     });
-    return { id: col.id, rotulo: col.rotulo, candidatas, pontos, formatar: (v: number) => (col.tipo === "dinheiro" ? kz(v) : numero(v / 100, 2)) };
-  }, [r, graficoPossivel, agrupar.length, serieId]);
+    // o peso no total só faz sentido numa coluna que se soma (não numa média nem numa fórmula como a margem)
+    const aditiva = col.id === "contar" || col.id.startsWith("soma:");
+    const total = Number(r.totais[col.id] ?? 0) * escala;
+    const temporal = campoDe.get(agrupar[0])?.tipo === "data" || agrupar[0] === "mes" || agrupar[0] === "ano";
+    return { id: col.id, rotulo: col.rotulo, candidatas, pontos, aditiva, temporal, total, formatar: (v: number) => (col.tipo === "dinheiro" ? kz(v) : numero(v / 100, 2)) };
+  }, [r, graficoPossivel, agrupar, campoDe, serieId]);
+  // o tipo escolhido, se servir para esta série (senão, barras)
+  const tipoGrafico: TipoGrafico = !serie ? "barras" : grafico === "linhas" && serie.temporal ? "linhas" : grafico === "peso" && serie.aditiva ? "peso" : "barras";
+
+  // clique num grupo do gráfico: o detalhe desse grupo (os filtros do resumo mais o valor de cada agrupamento)
+  function verDetalhe(i: number) {
+    const linha = r?.linhas[i];
+    if (!r || !linha || modo !== "resumo" || !agrupar.length) return;
+    const novos: FiltroEcra[] = agrupar.map((id, k) => {
+      const v = linha[k];
+      return v === null || v === "" ? { campo: id, op: "vazio", texto: "" } : { campo: id, op: "=", texto: String(v) };
+    });
+    const rotulo = agrupar.map((id, k) => `${campoDe.get(id)?.rotulo ?? id}: ${mostrar(linha[k], r.colunas[k].tipo)}`).join(" · ");
+    setAntesDoDetalhe({ filtros, ordenar, formulas, rotulo });
+    // sem colunas de detalhe escolhidas (um relatório pronto de resumo): as habituais da fonte
+    if (!campos.length && fonte) setCampos(PADRAO[fonte.id]?.campos ?? fonte.campos.slice(0, 6).map((c) => c.id));
+    setFiltros([...filtros, ...novos]);
+    setOrdenar([]);
+    setFormulas([]);
+    setModo("detalhe");
+  }
+  function voltarAoResumo() {
+    if (!antesDoDetalhe) return;
+    setFiltros(antesDoDetalhe.filtros);
+    setOrdenar(antesDoDetalhe.ordenar);
+    setFormulas(antesDoDetalhe.formulas);
+    setModo("resumo");
+    setAntesDoDetalhe(null);
+  }
 
   if (fontes.data && fontes.data.length === 0) {
     return (
@@ -519,6 +560,9 @@ export default function ConstrutorRelatorios() {
             <Segmentado
               valor={modo}
               onChange={(m) => {
+                // a voltar de um detalhe aberto pelo gráfico: o resumo como estava
+                if (m === "resumo" && antesDoDetalhe) return voltarAoResumo();
+                setAntesDoDetalhe(null);
                 setModo(m);
                 setOrdenar([]);
                 setFormulas([]);
@@ -694,6 +738,16 @@ export default function ConstrutorRelatorios() {
               )}
             </div>
           </div>
+          {antesDoDetalhe && modo === "detalhe" && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-brand-50/60 px-5 py-2 text-[13px]">
+              <span className="min-w-0 truncate text-ink-2">
+                Detalhe de <b className="text-ink">{antesDoDetalhe.rotulo}</b>
+              </span>
+              <Button size="sm" variant="secondary" onClick={voltarAoResumo}>
+                <Undo2 className="size-4" /> Voltar ao resumo
+              </Button>
+            </div>
+          )}
           {resultado.error ? (
             <Empty icon={<Rows3 className="size-6" />} title="Não foi possível consultar" text={(resultado.error as Error).message} />
           ) : !pronto ? (
@@ -705,17 +759,37 @@ export default function ConstrutorRelatorios() {
                   {serie.rotulo}
                   {r && r.linhas.length > serie.pontos.length && ` · os primeiros ${serie.pontos.length} grupos`}
                 </span>
-                {serie.candidatas.length > 1 && (
-                  <Select className="h-8 w-48 text-[12.5px]" value={serie.id} onChange={(e) => setSerieId(e.target.value)} aria-label="Valor no gráfico">
-                    {serie.candidatas.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.rotulo}
-                      </option>
-                    ))}
-                  </Select>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {serie.candidatas.length > 1 && (
+                    <Select className="h-8 w-48 text-[12.5px]" value={serie.id} onChange={(e) => setSerieId(e.target.value)} aria-label="Valor no gráfico">
+                      {serie.candidatas.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.rotulo}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                  <Segmentado
+                    className="shrink-0 whitespace-nowrap"
+                    valor={tipoGrafico}
+                    onChange={setGrafico}
+                    opcoes={[
+                      { id: "barras" as const, label: "Barras", icon: BarChart3 },
+                      // linhas só para a evolução no tempo: ligar artigos ou clientes com uma linha sugeria uma continuidade
+                      ...(serie.temporal ? [{ id: "linhas" as const, label: "Linhas", icon: ChartLine }] : []),
+                      ...(serie.aditiva ? [{ id: "peso" as const, label: "% do total", icon: ChartBarBig }] : []),
+                    ]}
+                  />
+                </div>
               </div>
-              <BarChart dados={serie.pontos} formatar={serie.formatar} altura={340} />
+              {tipoGrafico === "linhas" ? (
+                <LineChart dados={serie.pontos} formatar={serie.formatar} altura={340} aoClicar={verDetalhe} />
+              ) : tipoGrafico === "peso" ? (
+                <PesoNoTotal dados={serie.pontos} total={serie.total} formatar={serie.formatar} aoClicar={verDetalhe} />
+              ) : (
+                <BarChart dados={serie.pontos} formatar={serie.formatar} altura={340} aoClicar={verDetalhe} />
+              )}
+              <p className="mt-2 text-[12px] text-ink-3">Clique num grupo para ver as linhas que o compõem.</p>
             </div>
           ) : (
             <Grelha r={r} aCarregar={resultado.isLoading} ordenar={ordenar} onOrdenar={aoOrdenar} ordenavel={(id) => !colunaComparada(id)} className="max-h-[calc(100vh-260px)]" />
