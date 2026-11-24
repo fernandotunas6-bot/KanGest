@@ -668,8 +668,8 @@ pub async fn casar(st: &AppState, c: CasarIn) -> AppResult<Value> {
         let Some(d) = c.diferenca else {
             return Err(AppError::msg(format!(
                 "Os valores não batem: o extracto tem {} e os movimentos somam {}. Escolha outros, ou lance a diferença.",
-                crate::agt::total_fmt(valor),
-                crate::agt::total_fmt(soma)
+                crate::agt::valor_pt(valor),
+                crate::agt::valor_pt(soma)
             )));
         };
         if d.descricao.trim().is_empty() {

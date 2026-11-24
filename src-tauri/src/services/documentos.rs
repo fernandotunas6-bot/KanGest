@@ -1328,8 +1328,8 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
                 return Err(AppError::msg(format!(
                     "\"{}\": o valor a creditar ({}) excede o valor ainda por creditar ({}).",
                     o.descricao,
-                    agt::total_fmt(*t),
-                    agt::total_fmt(disp_v)
+                    agt::valor_pt(*t),
+                    agt::valor_pt(disp_v)
                 )));
             }
         }
@@ -1337,8 +1337,8 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         if total > disp + linhas.len() as i64 {
             return Err(AppError::msg(format!(
                 "O total da nota de crédito ({}) excede o valor ainda por creditar do documento de origem ({}).",
-                agt::total_fmt(total),
-                agt::total_fmt(disp)
+                agt::valor_pt(total),
+                agt::valor_pt(disp)
             )));
         }
     }
@@ -1398,7 +1398,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         .await?;
         let disponivel: i64 = disponiveis.iter().map(|x| x.1).sum();
         if compensacao > disponivel {
-            return Err(AppError::msg(format!("Crédito disponível insuficiente para compensar: {}.", agt::total_fmt(disponivel))));
+            return Err(AppError::msg(format!("Crédito disponível insuficiente para compensar: {}.", agt::valor_pt(disponivel))));
         }
         let mut resto = compensacao;
         for (id, disp) in disponiveis {
@@ -1414,7 +1414,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
     let mut troco = 0;
     if tipo.pago_no_acto {
         if entregue < a_pagar {
-            return Err(AppError::msg(format!("Valor pago insuficiente. Falta {}.", agt::total_fmt(a_pagar - entregue))));
+            return Err(AppError::msg(format!("Valor pago insuficiente. Falta {}.", agt::valor_pt(a_pagar - entregue))));
         }
         troco = entregue - a_pagar;
         if troco > 0 {
@@ -1451,9 +1451,9 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
                     let pin = i.autorizacao_pin.as_deref().unwrap_or("");
                     let msg = format!(
                         "Limite de crédito excedido: saldo {} + documento {} > limite {}.",
-                        agt::total_fmt(saldo),
-                        agt::total_fmt(a_pagar),
-                        agt::total_fmt(limite)
+                        agt::valor_pt(saldo),
+                        agt::valor_pt(a_pagar),
+                        agt::valor_pt(limite)
                     );
                     if pin.trim().is_empty() {
                         return Err(AppError::msg(format!("{msg} É necessária a autorização de um supervisor (PIN).")));

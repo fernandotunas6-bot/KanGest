@@ -230,6 +230,8 @@ pub struct AppState {
     pub pasta_exportacao: PathBuf,
     /// Pasta de dados da aplicação (base de dados, posto.json, cópias automáticas).
     pub pasta_dados: PathBuf,
+    /// PIN de autorização (supervisor, regras de aprovação) errados seguidos, por quem pede: quantos e o último.
+    pub falhas_autorizacao: Mutex<std::collections::HashMap<i64, (u32, chrono::DateTime<chrono::Local>)>>,
 }
 
 impl AppState {
@@ -242,6 +244,7 @@ impl AppState {
             posto: RwLock::new(PostoAtual::default()),
             pasta_exportacao: std::env::temp_dir(),
             pasta_dados: std::env::temp_dir(),
+            falhas_autorizacao: Mutex::new(Default::default()),
         }
     }
 

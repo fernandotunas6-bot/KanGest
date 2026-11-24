@@ -1130,10 +1130,24 @@ pub struct Supervisor {
     pub limite_desconto: f64,
 }
 
+/// PIN de autorização errados seguidos, por quem pede, até ter de esperar; e quantos minutos (como a entrada por PIN).
+const FALHAS_AUTORIZACAO: u32 = 5;
+const ESPERA_AUTORIZACAO_MIN: i64 = 5;
+
 pub async fn supervisor_por_pin(st: &AppState, pin: &str, perms: &[&str], desconto: f64) -> AppResult<Option<Supervisor>> {
     let pin = pin.trim();
     if pin.is_empty() {
         return Ok(None);
+    }
+    // quem pede: o utilizador da sessão (sem sessão, o posto). Cinco PIN errados seguidos obrigam a esperar: sem isto,
+    // um PIN de 4 dígitos adivinhava-se à força de tentativas no pedido de aprovação.
+    let sessao = st.sessao_opcional();
+    let quem = sessao.as_ref().map(|s| s.id).unwrap_or(-st.posto().id);
+    let espera = chrono::Duration::minutes(ESPERA_AUTORIZACAO_MIN);
+    if let Some((n, quando)) = st.falhas_autorizacao.lock().unwrap().get(&quem) {
+        if *n >= FALHAS_AUTORIZACAO && chrono::Local::now() - *quando < espera {
+            return Err(AppError::msg(format!("Demasiados PIN errados seguidos. Aguarde {ESPERA_AUTORIZACAO_MIN} minutos e tente de novo.")));
+        }
     }
     let rows = sqlx::query("SELECT id, nome, perfil, permissoes, limite_desconto, pin_hash FROM utilizadores WHERE ativo = 1 AND pin_hash IS NOT NULL")
         .fetch_all(&st.pool)
@@ -1150,10 +1164,22 @@ pub async fn supervisor_por_pin(st: &AppState, pin: &str, perms: &[&str], descon
         let tem_todas = perms.iter().all(|p| lista.iter().any(|x| x == p));
         let limite_ok = limite <= 0.0 || desconto <= limite + 1e-9;
         if tem_todas && limite_ok {
+            st.falhas_autorizacao.lock().unwrap().remove(&quem);
             return Ok(Some(Supervisor { id: r.get("id"), nome: r.get("nome"), limite_desconto: limite }));
         }
         return Err(AppError::msg("O utilizador deste PIN não tem permissão (ou limite de desconto) para esta operação."));
     }
+    // nenhum utilizador com este PIN: conta como tentativa falhada e fica no registo de acessos
+    let n = {
+        let mut m = st.falhas_autorizacao.lock().unwrap();
+        let agora = chrono::Local::now();
+        let e = m.entry(quem).or_insert((0, agora));
+        e.0 += 1;
+        e.1 = agora;
+        e.0
+    };
+    let login = sessao.as_ref().map(|s| s.login.clone()).unwrap_or_default();
+    registar(st, sessao.as_ref().map(|s| s.id), &login, "FALHA", Some(format!("PIN de autorização errado ({n}.ª tentativa seguida)"))).await;
     Ok(None)
 }
 
