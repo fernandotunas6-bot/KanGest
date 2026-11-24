@@ -4,10 +4,12 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { CalendarClock, CalendarX2, CheckCircle2, ChevronRight, CircleDollarSign, Eye, EyeOff, FileClock, FilePlus2, GraduationCap, HandCoins, Hourglass, MonitorPlay, PackageMinus, Receipt, Repeat, Send, ShieldAlert, ShoppingCart, Table2, TrendingUp, Truck, Unplug, type LucideIcon } from "lucide-react";
+import { BarChart3, CalendarClock, CalendarX2, CheckCircle2, ChevronRight, CircleDollarSign, Eye, EyeOff, FileClock, FilePlus2, GraduationCap, HandCoins, Hourglass, MonitorPlay, PackageMinus, Receipt, Repeat, Send, ShieldAlert, ShoppingCart, Table2, TrendingUp, Truck, Unplug, type LucideIcon } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, dataHora, hojeISO, qtd } from "@/lib/format";
 import { useKz, useOcultarValores } from "@/lib/privacidade";
+import { linkPronto } from "@/lib/construtor";
+import { useSession } from "@/store/session";
 import { Badge, Button, Card, Delta, PageHeader, Stat, Table, Td, Th, cn } from "@/components/ui";
 import { BarChart } from "@/components/BarChart";
 import DocumentoModal from "@/components/DocumentoModal";
@@ -60,6 +62,9 @@ interface Dash {
 
 export default function Dashboard() {
   const nav = useNavigate();
+  // com a permissão de relatórios, cada indicador abre o relatório pronto que o explica (construtor de relatórios)
+  const analisa = useSession((s) => s.tem)("relatorios.ver");
+  const analisar = (id: string, periodo?: Parameters<typeof linkPronto>[1]) => (analisa ? () => nav(linkPronto(id, periodo)) : undefined);
   const [doc, setDoc] = useState<number | null>(null);
   const [tabela, setTabela] = useState(false);
   const { data: d } = useQuery({ queryKey: ["dashboard"], queryFn: () => call<Dash>("dashboard"), refetchInterval: 60_000 });
@@ -149,6 +154,7 @@ export default function Dashboard() {
           delta={d && <Delta atual={d.vendas_hoje} anterior={d.vendas_ontem ?? 0} periodo="vs ontem" />}
           hint={d ? `${d.docs_hoje} ${d.docs_hoje === 1 ? "documento" : "documentos"}${d.vendas_ontem !== undefined ? ` · ontem ${kz(d.vendas_ontem)}` : ""}` : "…"}
           icon={<CircleDollarSign className="size-4" />}
+          onAnalisar={analisar("vendas_hoje")}
         />
         <Stat
           label="Vendas do mês"
@@ -156,6 +162,7 @@ export default function Dashboard() {
           delta={d && <Delta atual={d.vendas_mes} anterior={d.vendas_mes_anterior ?? 0} periodo="vs mês anterior" />}
           hint={`IVA liquidado ${v(d?.iva_mes)} · ticket médio ${v(d?.ticket_medio)}`}
           icon={<TrendingUp className="size-4" />}
+          onAnalisar={analisar("vendas_dia", "mes")}
         />
         <Stat
           label="A receber de clientes"
@@ -173,6 +180,7 @@ export default function Dashboard() {
           }
           icon={<HandCoins className="size-4" />}
           tone="accent"
+          onAnalisar={analisar("antiguidade")}
         />
         <Stat
           label="A pagar a fornecedores"
@@ -203,9 +211,16 @@ export default function Dashboard() {
               <div className="font-semibold">Vendas — últimos 30 dias</div>
               <div className="text-[13px] text-ink-3">Valores com IVA, líquidos de notas de crédito</div>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setTabela(!tabela)}>
-              <Table2 className="size-4" /> {tabela ? "Gráfico" : "Tabela"}
-            </Button>
+            <div className="flex items-center gap-1">
+              {analisa && (
+                <Button variant="ghost" size="sm" onClick={() => nav(linkPronto("vendas_dia", "30dias"))} title="Abrir no construtor de relatórios: agrupar, comparar, exportar">
+                  <BarChart3 className="size-4" /> Analisar
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => setTabela(!tabela)}>
+                <Table2 className="size-4" /> {tabela ? "Gráfico" : "Tabela"}
+              </Button>
+            </div>
           </div>
           {tabela ? (
             <Table className="max-h-[230px]">

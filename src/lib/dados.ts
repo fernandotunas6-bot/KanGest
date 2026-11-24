@@ -5,7 +5,8 @@
 import { csv, csvKz, dataXL, exportarExcel, exportarFicheiro, kzXL, type CelulaXL } from "@/lib/csv";
 import { data, kzNum, numero } from "@/lib/format";
 
-export type TipoCampo = "texto" | "numero" | "dinheiro" | "data" | "logico";
+/** «percentagem» não vem do motor: é a variação que o ecrã calcula ao comparar períodos */
+export type TipoCampo = "texto" | "numero" | "dinheiro" | "data" | "logico" | "percentagem";
 
 export interface CampoFonte {
   id: string;
@@ -71,12 +72,14 @@ export function mostrar(v: ValorDados | undefined, tipo: TipoCampo): string {
       return data(String(v));
     case "logico":
       return Number(v) ? "Sim" : "Não";
+    case "percentagem":
+      return `${Number(v) > 0 ? "+" : ""}${numero(Number(v), 1)}\u00a0%`;
     default:
       return String(v);
   }
 }
 
-export const alinhaDireita = (tipo: TipoCampo) => tipo === "dinheiro" || tipo === "numero";
+export const alinhaDireita = (tipo: TipoCampo) => tipo === "dinheiro" || tipo === "numero" || tipo === "percentagem";
 
 /** Excel com dinheiro e datas como valores (não texto) e a linha de totais no fim. */
 export async function exportarResultadoExcel(r: ResultadoDados, titulo: string) {
@@ -84,7 +87,7 @@ export async function exportarResultadoExcel(r: ResultadoDados, titulo: string) 
     if (v === null || v === undefined) return null;
     if (tipo === "dinheiro") return kzXL(Number(v));
     if (tipo === "data") return dataXL(String(v));
-    if (tipo === "numero") return Number(v);
+    if (tipo === "numero" || tipo === "percentagem") return Number(v);
     if (tipo === "logico") return Number(v) ? "Sim" : "Não";
     return String(v);
   };
@@ -97,7 +100,18 @@ export async function exportarResultadoExcel(r: ResultadoDados, titulo: string) 
 
 /** CSV (ponto e vírgula, para o Excel em português), com a linha de totais no fim. */
 export async function exportarResultadoCsv(r: ResultadoDados, titulo: string) {
-  const texto = (v: ValorDados, tipo: TipoCampo) => (v === null || v === undefined ? "" : tipo === "dinheiro" ? csvKz(Number(v)) : tipo === "logico" ? (Number(v) ? "Sim" : "Não") : String(v));
+  const texto = (v: ValorDados, tipo: TipoCampo) =>
+    v === null || v === undefined
+      ? ""
+      : tipo === "dinheiro"
+        ? csvKz(Number(v))
+        : tipo === "logico"
+          ? Number(v)
+            ? "Sim"
+            : "Não"
+          : tipo === "percentagem"
+            ? numero(Number(v), 1)
+            : String(v);
   const linhas = [r.colunas.map((c) => c.rotulo), ...r.linhas.map((l) => l.map((v, i) => texto(v, r.colunas[i].tipo)))];
   if (Object.keys(r.totais).length) {
     linhas.push(r.colunas.map((c, i) => (c.id in r.totais ? texto(r.totais[c.id], c.tipo) : i === 0 ? "Total" : "")));

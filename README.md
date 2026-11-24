@@ -59,7 +59,8 @@ A **API de integração** (loja online, contabilidade, BI e outras aplicações,
 e a especificação OpenAPI em [docs/openapi.json](docs/openapi.json). O estudo do que falta face aos grandes POS está em
 [docs/ANALISE-POS-MERCADO.md](docs/ANALISE-POS-MERCADO.md). A protecção com a Cloudflare (túnel e Access para a API, servidor de
 licenças e site) está em [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md). A cifra e a protecção do programa (ligação entre postos,
-selo da licença e do executável) estão em [docs/SEGURANCA.md](docs/SEGURANCA.md).
+selo da licença e do executável) estão em [docs/SEGURANCA.md](docs/SEGURANCA.md). O **motor central de dados** (construtor
+de relatórios, relatórios prontos, comparação de períodos e qualidade dos dados) está em [docs/MOTOR-DE-DADOS.md](docs/MOTOR-DE-DADOS.md).
 
 ## Testes
 
