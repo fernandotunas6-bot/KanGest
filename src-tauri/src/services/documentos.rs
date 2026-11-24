@@ -856,6 +856,8 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         if chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_err() || d.as_str() > db::hoje().as_str() {
             return Err(AppError::msg("Data do documento do fornecedor inválida."));
         }
+        // mês fechado: não se registam compras com a data do fornecedor nesse mês
+        super::periodos::exigir_aberto(&mut *tx, d, "Não se registam documentos de fornecedor com data desse mês.").await?;
     }
     // O mesmo documento do fornecedor registado duas vezes (como o aviso de facturas em duplicado do Odoo):
     // mesmo tipo, mesmo fornecedor, mesmo número e mesmo ano, e não anulado. Duplicaria o custo, o stock e o IVA dedutível.
@@ -2056,6 +2058,8 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
     if row.get::<i64, _>("importado") == 1 {
         return Err(AppError::msg("Os documentos importados do KIGEST não podem ser anulados no sistema novo. Emita uma nota de crédito."));
     }
+    // mês fechado: o documento já não se anula
+    super::periodos::exigir_aberto(&mut *tx, &row.get::<String, _>("data_emissao"), "Os documentos desse mês já não se anulam: corrija com uma nota de crédito.").await?;
     // Facturação electrónica: o documento comunicado (ou em fila) à AGT não se anula só no KanGest,
     // senão o KanGest e a AGT ficariam diferentes. Os rejeitados pela AGT podem ser anulados.
     let tipo_doc: String = row.get("tipo_codigo");

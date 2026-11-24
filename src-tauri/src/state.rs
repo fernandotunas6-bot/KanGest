@@ -68,6 +68,8 @@ pub const PERMISSOES: &[&str] = &[
     "rh.configuracao",
     // API de integração: chaves de acesso para outros sistemas
     "sistema.api",
+    // fechar e reabrir meses (fecho de períodos): por omissão, só o administrador
+    "sistema.periodos",
 ];
 
 /// Permissões que, por omissão, só o administrador tem (o gestor tem todas as outras).
@@ -82,6 +84,7 @@ pub const SO_ADMIN: &[&str] = &[
     "sistema.auditoria",
     "rh.configuracao",
     "sistema.api",
+    "sistema.periodos",
 ];
 
 /// Permissões por omissão de cada perfil (quando o utilizador não tem lista própria).

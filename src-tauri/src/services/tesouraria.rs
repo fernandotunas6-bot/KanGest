@@ -241,6 +241,7 @@ pub async fn movimento(st: &AppState, m: MovimentoIn) -> AppResult<Value> {
         return Err(AppError::msg("Indique o valor e a descrição."));
     }
     let data = m.data.filter(|d| d.len() == 10).unwrap_or_else(db::hoje);
+    super::periodos::exigir_aberto(&st.pool, &data, "Não se lançam movimentos de tesouraria com data desse mês.").await?;
     let id = sqlx::query(
         "INSERT INTO movimentos_tesouraria (data, data_hora, conta_id, tipo, valor, descricao, centro_custo_id, entidade_id, documento, utilizador_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -283,6 +284,7 @@ pub async fn transferencia(st: &AppState, t: TransferenciaIn) -> AppResult<Value
     let nome = |id: i64| nomes.iter().find(|n| n.0 == id).map(|n| n.1.clone()).unwrap_or_default();
     let desc = t.descricao.filter(|d| !d.trim().is_empty()).unwrap_or_else(|| format!("Transferência {} → {}", nome(t.de_conta), nome(t.para_conta)));
     let (hoje, agora) = (db::hoje(), db::agora());
+    super::periodos::exigir_aberto(&st.pool, &hoje, "Não se lançam movimentos de tesouraria com data desse mês.").await?;
     let mut tx = crate::db::transacao(&st.pool).await?;
     let saida = sqlx::query(
         "INSERT INTO movimentos_tesouraria (data, data_hora, conta_id, tipo, valor, descricao, utilizador_id) VALUES (?, ?, ?, 'SAIDA', ?, ?, ?)",
@@ -325,7 +327,7 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
     if a.motivo.trim().len() < 3 {
         return Err(AppError::msg("Indique o motivo da anulação."));
     }
-    let row = sqlx::query("SELECT transferencia, anulado, documento FROM movimentos_tesouraria WHERE id = ?")
+    let row = sqlx::query("SELECT transferencia, anulado, documento, data FROM movimentos_tesouraria WHERE id = ?")
         .bind(a.id)
         .fetch_optional(&st.pool)
         .await?
@@ -333,6 +335,7 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
     if row.get::<i64, _>("anulado") == 1 {
         return Err(AppError::msg("O movimento já está anulado."));
     }
+    super::periodos::exigir_aberto(&st.pool, &row.get::<String, _>("data"), "Os movimentos desse mês já não se anulam.").await?;
     let transf: Option<i64> = row.get("transferencia");
     let mut tx = crate::db::transacao(&st.pool).await?;
     sqlx::query("UPDATE movimentos_tesouraria SET anulado = 1, motivo_anulacao = ? WHERE id = ? OR (? IS NOT NULL AND transferencia = ?)")

@@ -38,6 +38,7 @@ mod promocoes;
 mod posto;
 mod rh;
 mod tesouraria;
+mod periodos;
 mod relatorios;
 pub mod resumo_email;
 pub(crate) mod saft;
@@ -446,6 +447,9 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "dados.consultar" => dados::consultar(st, p(params)?).await,
         "dados.modelos" => dados::modelos_listar(st).await,
         "dados.verificar" => dados::verificar(st).await,
+        "periodos.listar" => periodos::listar(st).await,
+        "periodos.fechar" => periodos::fechar(st, p(params)?).await,
+        "periodos.reabrir" => periodos::reabrir(st, p(params)?).await,
         "dados.modeloGuardar" => dados::modelo_guardar(st, p(params)?).await,
         "dados.modeloEliminar" => dados::modelo_eliminar(st, p(params)?).await,
         "relatorios.sintese" => relatorios::sintese(st, p(params)?).await,
