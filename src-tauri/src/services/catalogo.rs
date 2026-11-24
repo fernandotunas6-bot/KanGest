@@ -1198,3 +1198,34 @@ pub async fn codigo_usado(st: &AppState, c: CodigoUsadoIn) -> AppResult<Value> {
     .await?;
     Ok(r.map(|(id, referencia, descricao, ativo)| json!({ "id": id, "referencia": referencia, "descricao": descricao, "ativo": ativo == 1 })).unwrap_or(Value::Null))
 }
+
+#[cfg(test)]
+mod testes_isencoes {
+    /// Os motivos de isenção seguem a tabela de códigos do SAF-T (AO): M20, M80 e M91 citam o artigo certo do CIVA
+    /// (migração 0052) e estão todos os códigos da tabela (o texto vai para a factura e para o SAF-T).
+    #[tokio::test]
+    async fn motivos_de_isencao_da_agt() {
+        let pasta = std::env::temp_dir().join(format!("kangest-isencoes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).unwrap();
+        let pool = crate::db::abrir(&pasta.join("kigest.db")).await.unwrap();
+        let texto = |c: &'static str| {
+            let pool = pool.clone();
+            async move { sqlx::query_scalar::<_, String>("SELECT descricao FROM motivos_isencao WHERE codigo = ?").bind(c).fetch_one(&pool).await.unwrap() }
+        };
+        assert_eq!(texto("M20").await, "Isento nos termos da alínea k) do nº1 do artigo 12.º do CIVA");
+        assert_eq!(texto("M80").await, "Isento nos termos da alínea a) do nº1 do artigo 14.º do CIVA");
+        assert_eq!(texto("M91").await, "Isento nos termos da alínea b) do nº1 do artigo 16.º do CIVA");
+        let tabela = [
+            "M00", "M02", "M04", "M10", "M11", "M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", "M21", "M22", "M23", "M24", "M30", "M31", "M32", "M33", "M34",
+            "M35", "M36", "M37", "M38", "M80", "M81", "M82", "M83", "M84", "M85", "M86", "M90", "M91", "M92", "M93", "M94",
+        ];
+        let existem: Vec<String> = sqlx::query_scalar("SELECT codigo FROM motivos_isencao").fetch_all(&pool).await.unwrap();
+        let faltam: Vec<&str> = tabela.iter().copied().filter(|c| !existem.iter().any(|e| e == c)).collect();
+        assert!(faltam.is_empty(), "faltam {faltam:?}");
+        // o SAF-T aceita até 60 caracteres no TaxExemptionReason
+        let longos: Vec<String> = sqlx::query_scalar("SELECT codigo FROM motivos_isencao WHERE length(descricao) > 60").fetch_all(&pool).await.unwrap();
+        assert!(longos.is_empty(), "textos com mais de 60 caracteres: {longos:?}");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+}
