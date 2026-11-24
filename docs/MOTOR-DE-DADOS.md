@@ -116,6 +116,26 @@ fixos para o mesmo período:
 - **Modelos e relatórios prontos:** os modelos guardam as fórmulas na definição. Os relatórios prontos de lucro trazem
   a margem, e o das vendas por operador traz o valor médio.
 
+## Gráficos e detalhe de um grupo
+
+No resumo com agrupamento, a vista «Gráfico» desenha uma coluna de valores. Escolhe-se no ecrã, e o tipo fica no
+modelo (`Definicao.grafico`):
+
+- **Barras** (`components/BarChart.tsx`), como até aqui; é o tipo dos modelos antigos.
+- **Linhas** (`components/LineChart.tsx`), só quando o primeiro agrupamento é uma data, um mês ou um ano: as linhas
+  mostram a evolução no tempo. Com artigos ou clientes sugeririam uma continuidade que não existe. A escala aceita
+  valores negativos, com a linha do zero.
+- **% do total** (`components/PesoNoTotal.tsx`): a parte de cada grupo no total. São barras horizontais de uma só cor,
+  da maior para a menor, com o valor e a percentagem; os grupos para lá dos 11 primeiros juntam-se em «Outros». Só
+  aparece para colunas que se somam (`soma:*`, `contar`), porque o «peso» de uma média ou de uma margem não faz
+  sentido. Não há gráfico circular: barras num só eixo comparam as partes com mais exactidão do que fatias.
+
+**Clicar num grupo** (barra, ponto ou linha do «% do total») abre o **detalhe** desse grupo:
+- os filtros do resumo mais `campo = valor` de cada agrupamento, ou `vazio` quando o valor é vazio;
+- as colunas habituais da fonte, se não houver nenhuma escolhida.
+
+A faixa «Detalhe de …» tem «Voltar ao resumo», que repõe os filtros, a ordenação e as fórmulas como estavam.
+
 ## Relatórios prontos e painel
 
 `PRONTOS` (`src/lib/construtor.ts`) tem definições com nome, iguais às que um modelo guarda. Cada utilizador só vê os

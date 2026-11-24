@@ -382,8 +382,11 @@ export default function ConstrutorRelatorios() {
     // o peso no total só faz sentido numa coluna que se soma (não numa média nem numa fórmula como a margem)
     const aditiva = col.id === "contar" || col.id.startsWith("soma:");
     const total = Number(r.totais[col.id] ?? 0) * escala;
-    return { id: col.id, rotulo: col.rotulo, candidatas, pontos, aditiva, total, formatar: (v: number) => (col.tipo === "dinheiro" ? kz(v) : numero(v / 100, 2)) };
-  }, [r, graficoPossivel, agrupar.length, serieId]);
+    const temporal = campoDe.get(agrupar[0])?.tipo === "data" || agrupar[0] === "mes" || agrupar[0] === "ano";
+    return { id: col.id, rotulo: col.rotulo, candidatas, pontos, aditiva, temporal, total, formatar: (v: number) => (col.tipo === "dinheiro" ? kz(v) : numero(v / 100, 2)) };
+  }, [r, graficoPossivel, agrupar, campoDe, serieId]);
+  // o tipo escolhido, se servir para esta série (senão, barras)
+  const tipoGrafico: TipoGrafico = !serie ? "barras" : grafico === "linhas" && serie.temporal ? "linhas" : grafico === "peso" && serie.aditiva ? "peso" : "barras";
 
   // clique num grupo do gráfico: o detalhe desse grupo (os filtros do resumo mais o valor de cada agrupamento)
   function verDetalhe(i: number) {
@@ -395,6 +398,8 @@ export default function ConstrutorRelatorios() {
     });
     const rotulo = agrupar.map((id, k) => `${campoDe.get(id)?.rotulo ?? id}: ${mostrar(linha[k], r.colunas[k].tipo)}`).join(" · ");
     setAntesDoDetalhe({ filtros, ordenar, formulas, rotulo });
+    // sem colunas de detalhe escolhidas (um relatório pronto de resumo): as habituais da fonte
+    if (!campos.length && fonte) setCampos(PADRAO[fonte.id]?.campos ?? fonte.campos.slice(0, 6).map((c) => c.id));
     setFiltros([...filtros, ...novos]);
     setOrdenar([]);
     setFormulas([]);
@@ -765,19 +770,21 @@ export default function ConstrutorRelatorios() {
                     </Select>
                   )}
                   <Segmentado
-                    valor={grafico === "peso" && !serie.aditiva ? "barras" : grafico}
+                    className="shrink-0 whitespace-nowrap"
+                    valor={tipoGrafico}
                     onChange={setGrafico}
                     opcoes={[
                       { id: "barras" as const, label: "Barras", icon: BarChart3 },
-                      { id: "linhas" as const, label: "Linhas", icon: ChartLine },
-                      ...(serie.aditiva ? [{ id: "peso" as const, label: "Peso no total", icon: ChartBarBig }] : []),
+                      // linhas só para a evolução no tempo: ligar artigos ou clientes com uma linha sugeria uma continuidade
+                      ...(serie.temporal ? [{ id: "linhas" as const, label: "Linhas", icon: ChartLine }] : []),
+                      ...(serie.aditiva ? [{ id: "peso" as const, label: "% do total", icon: ChartBarBig }] : []),
                     ]}
                   />
                 </div>
               </div>
-              {grafico === "linhas" ? (
+              {tipoGrafico === "linhas" ? (
                 <LineChart dados={serie.pontos} formatar={serie.formatar} altura={340} aoClicar={verDetalhe} />
-              ) : grafico === "peso" && serie.aditiva ? (
+              ) : tipoGrafico === "peso" ? (
                 <PesoNoTotal dados={serie.pontos} total={serie.total} formatar={serie.formatar} aoClicar={verDetalhe} />
               ) : (
                 <BarChart dados={serie.pontos} formatar={serie.formatar} altura={340} aoClicar={verDetalhe} />
