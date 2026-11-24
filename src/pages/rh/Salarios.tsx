@@ -11,7 +11,7 @@ import { data, dataHora, hojeISO, kz, parseKz, qtd } from "@/lib/format";
 import { csv, csvKz, exportarExcel, exportarFicheiro, kzXL } from "@/lib/csv";
 import { imprimir } from "@/lib/print";
 import { MESES, type Alteracao, type Funcionario, type Processamento, type ReciboSalario, type ResumoSalario } from "@/lib/types";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, BlocoCarregando } from "@/components/ui";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { useTabelasRH } from "./Funcionarios";
@@ -221,7 +221,9 @@ function Alteracoes({ ano, mes }: { ano: number; mes: number }) {
         </div>
       </Card>
       <Card>
-        {!lista.data?.length ? (
+        {!lista.data ? (
+          <BlocoCarregando />
+        ) : !lista.data.length ? (
           <Empty icon={<Plus className="size-6" />} title={`Sem alterações em ${periodo(ano, mes)}`} text="O salário base e os subsídios fixos da ficha entram automaticamente; aqui lançam-se só as variações do mês." />
         ) : (
           <Table className="tabela-compacta max-h-[calc(100vh-424px)]">
@@ -575,7 +577,9 @@ function Processamentos({ imprimirComo }: { imprimirComo: (i: Impressao) => void
   return (
     <>
       <Card>
-        {!lista.data?.length ? (
+        {!lista.data ? (
+          <BlocoCarregando />
+        ) : !lista.data.length ? (
           <Empty icon={<Landmark className="size-6" />} title="Ainda sem processamentos" text="Processe o mês no separador Simulação e processamento." />
         ) : (
           <Table className="tabela-compacta">

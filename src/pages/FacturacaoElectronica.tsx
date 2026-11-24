@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { CloudUpload, FileKey2, ListChecks, Plus, RefreshCw, Send } from "lucide-react";
 import { call } from "@/lib/api";
 import { data, dataHora, kz } from "@/lib/format";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, BlocoCarregando } from "@/components/ui";
 
 interface Estado {
   ativo: boolean;
@@ -147,7 +147,9 @@ export default function FacturacaoElectronica() {
               <RefreshCw className="size-4" />
             </Button>
           </div>
-          {!envios.data?.length ? (
+          {!envios.data ? (
+          <BlocoCarregando />
+        ) : !envios.data.length ? (
             <Empty
               icon={<CloudUpload className="size-6" />}
               title="Sem documentos"

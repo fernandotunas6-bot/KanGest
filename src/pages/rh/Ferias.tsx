@@ -12,7 +12,7 @@ import { CabecalhoEmpresa, useEmpresa } from "@/components/PrintCabecalho";
 import { call } from "@/lib/api";
 import { data, hojeISO, qtd } from "@/lib/format";
 import { MESES, type Alteracao, type Funcionario } from "@/lib/types";
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table, Td, Th, cn, BlocoCarregando } from "@/components/ui";
 import { InputData } from "@/components/InputData";
 
 interface Ferias {
@@ -74,7 +74,9 @@ export default function FeriasFaltas() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <Card>
           <div className="border-b border-line px-5 py-3 font-medium">Férias de {ano}</div>
-          {!ferias.data?.length ? (
+          {!ferias.data ? (
+          <BlocoCarregando />
+        ) : !ferias.data.length ? (
             <Empty icon={<CalendarDays className="size-6" />} title="Sem férias marcadas" text="Marque os períodos de férias do pessoal. São 22 dias úteis por ano, regra geral (confirme a Lei Geral do Trabalho)." />
           ) : (
             <Table className="max-h-[calc(100vh-324px)]">
