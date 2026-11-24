@@ -2277,7 +2277,7 @@ dependencies = [
 
 [[package]]
 name = "kigest"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "argon2",
  "base64 0.22.1",
