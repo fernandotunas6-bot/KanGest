@@ -34,8 +34,20 @@ const compacto = (v: number) => {
  * Barras ≤ 24px, topo arredondado 4px e base recta, 2px de ar entre barras,
  * grelha hairline sólida, tooltip por barra (hover e foco de teclado).
  */
-/** `ocultarEixo`: com «Ocultar valores», o eixo não mostra os montantes (só as barras, sem escala). */
-export function BarChart({ dados, formatar, altura = 220, ocultarEixo = false }: { dados: Ponto[]; formatar: (v: number) => string; altura?: number; ocultarEixo?: boolean }) {
+/** `ocultarEixo`: com «Ocultar valores», o eixo não mostra os montantes (só as barras, sem escala). `aoClicar`: a barra abre o detalhe. */
+export function BarChart({
+  dados,
+  formatar,
+  altura = 220,
+  ocultarEixo = false,
+  aoClicar,
+}: {
+  dados: Ponto[];
+  formatar: (v: number) => string;
+  altura?: number;
+  ocultarEixo?: boolean;
+  aoClicar?: (i: number) => void;
+}) {
   const [hover, setHover] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const [largura, setLargura] = useState(720);
@@ -96,7 +108,9 @@ export function BarChart({ dados, formatar, altura = 220, ocultarEixo = false }:
                 onPointerLeave={() => setHover(null)}
                 onFocus={() => setHover(i)}
                 onBlur={() => setHover(null)}
-                className="outline-none"
+                onClick={aoClicar ? () => aoClicar(i) : undefined}
+                onKeyDown={aoClicar ? (e) => e.key === "Enter" && aoClicar(i) : undefined}
+                className={aoClicar ? "cursor-pointer outline-none" : "outline-none"}
               />
               {i % passoRotulo === 0 && (
                 <text x={m.l + i * banda + banda / 2} y={altura - 8} textAnchor="middle" className="num fill-ink-3 text-[11px]">
@@ -115,6 +129,7 @@ export function BarChart({ dados, formatar, altura = 220, ocultarEixo = false }:
         >
           <div className="num font-semibold text-ink">{formatar(dados[hover].valor)}</div>
           <div className="text-[12px] text-ink-3">{dados[hover].chave}</div>
+          {aoClicar && <div className="mt-0.5 text-[11.5px] text-ink-3">Clique para ver o detalhe</div>}
         </div>
       )}
     </div>

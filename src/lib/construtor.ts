@@ -7,6 +7,8 @@ import { hojeISO } from "@/lib/format";
 import type { AgregadoDados, CampoFonte, FormulaDados, OrdemDados, Operador, ResultadoDados, ValorDados } from "@/lib/dados";
 
 export type Modo = "resumo" | "detalhe";
+/** Barras; linhas (a evolução no tempo); peso de cada grupo no total (barras horizontais ordenadas). */
+export type TipoGrafico = "barras" | "linhas" | "peso";
 
 /** Um filtro como está no ecrã (o valor em texto, convertido só ao consultar). */
 export interface FiltroEcra {
@@ -78,6 +80,8 @@ export interface Definicao {
   comparar?: Comparar;
   /** indicadores calculados (os modelos antigos não têm) */
   formulas?: FormulaDados[];
+  /** o tipo de gráfico (os modelos antigos não têm: barras) */
+  grafico?: TipoGrafico;
 }
 
 const dataDe = (s: string) => new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)));
