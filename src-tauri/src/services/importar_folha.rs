@@ -32,8 +32,8 @@ const MAX_LINHAS: usize = 200_000;
 const MAX_BYTES_CSV: u64 = 100 * 1024 * 1024;
 
 pub(crate) struct Folha {
-    nome: String,
-    linhas: Vec<Vec<String>>,
+    pub(crate) nome: String,
+    pub(crate) linhas: Vec<Vec<String>>,
 }
 
 /// Lê todas as folhas do ficheiro, já como texto (os números do Excel com vírgula decimal, como se escrevem cá).
@@ -118,7 +118,20 @@ fn ler_csv(caminho: &Path) -> AppResult<Folha> {
     let bytes = std::fs::read(caminho).map_err(erro)?;
     let texto = descodificar(&bytes);
     let primeira = texto.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
-    let sep = [';', ',', '\t', '|'].into_iter().max_by_key(|s| contar_fora_de_aspas(primeira, *s)).unwrap_or(';');
+    let mut sep = [';', ',', '\t', '|'].into_iter().max_by_key(|s| contar_fora_de_aspas(primeira, *s)).unwrap_or(';');
+    // uma primeira linha sem separadores (o título de um extracto do banco): conta-se nas 20 primeiras linhas, e nos
+    // empates fica o primeiro da lista
+    if contar_fora_de_aspas(primeira, sep) == 0 {
+        let amostra: Vec<&str> = texto.lines().filter(|l| !l.trim().is_empty()).take(20).collect();
+        let mut melhor = 0;
+        sep = ';';
+        for s in [';', ',', '\t', '|'] {
+            let n: usize = amostra.iter().map(|l| contar_fora_de_aspas(l, s)).sum();
+            if n > melhor {
+                (sep, melhor) = (s, n);
+            }
+        }
+    }
     let nome = caminho.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "CSV".into());
     Ok(Folha { nome, linhas: separar_csv(&texto, sep) })
 }
@@ -237,7 +250,7 @@ fn centimos(s: &str) -> Option<i64> {
 }
 
 /// Minúsculas, sem acentos nem pontuação: «Preço de Venda (Kz)» → «preco de venda kz», «P.V.P.» → «pvp».
-fn normalizar(s: &str) -> String {
+pub(crate) fn normalizar(s: &str) -> String {
     let mut r = String::with_capacity(s.len());
     for c in s.to_lowercase().chars() {
         if matches!(c, '.' | '\'' | '’') {

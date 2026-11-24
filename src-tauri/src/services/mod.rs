@@ -39,6 +39,7 @@ mod posto;
 mod rh;
 mod tesouraria;
 mod periodos;
+mod conciliacao;
 mod relatorios;
 pub mod resumo_email;
 pub(crate) mod saft;
@@ -450,6 +451,15 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "periodos.listar" => periodos::listar(st).await,
         "periodos.fechar" => periodos::fechar(st, p(params)?).await,
         "periodos.reabrir" => periodos::reabrir(st, p(params)?).await,
+        "conciliacao.ler" => conciliacao::ler(st, p(params)?).await,
+        "conciliacao.criar" => conciliacao::criar(st, p(params)?).await,
+        "conciliacao.listar" => conciliacao::listar(st, p(params).unwrap_or_default()).await,
+        "conciliacao.obter" => conciliacao::obter(st, p(params)?).await,
+        "conciliacao.casar" => conciliacao::casar(st, p(params)?).await,
+        "conciliacao.lancar" => conciliacao::lancar(st, p(params)?).await,
+        "conciliacao.descasar" => conciliacao::descasar(st, p(params)?).await,
+        "conciliacao.fechar" => conciliacao::fechar(st, p(params)?).await,
+        "conciliacao.eliminar" => conciliacao::eliminar(st, p(params)?).await,
         "dados.modeloGuardar" => dados::modelo_guardar(st, p(params)?).await,
         "dados.modeloEliminar" => dados::modelo_eliminar(st, p(params)?).await,
         "relatorios.sintese" => relatorios::sintese(st, p(params)?).await,
