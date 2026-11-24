@@ -182,6 +182,10 @@ input, textarea, select, [data-selectable] { user-select: text; -webkit-user-sel
 ::-webkit-scrollbar-thumb { background: var(--color-line-strong); border-radius: 10px; border: 2px solid var(--color-bg); }
 ::-webkit-scrollbar-track { background: transparent; }
 
+/* grelha do motor de dados (components/dados/Grelha.tsx): bordas separadas, para o total preso ao fundo tapar bem as
+   linhas que passam por baixo (com as bordas fundidas o Chrome deixava ver bocados delas) */
+.grelha-dados table { border-collapse: separate; border-spacing: 0; }
+
 /* barra do ecrã de arranque (App.tsx): vai e vem */
 @keyframes kg-arranque {
   0% { transform: translateX(-100%); }

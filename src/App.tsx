@@ -27,6 +27,7 @@ import Recibo from "@/pages/Recibo";
 import Stock from "@/pages/Stock";
 import Caixa from "@/pages/Caixa";
 import Relatorios from "@/pages/Relatorios";
+import ConstrutorRelatorios from "@/pages/ConstrutorRelatorios";
 import Configuracoes from "@/pages/Configuracoes";
 import Tesouraria from "@/pages/Tesouraria";
 import TesourariaConfig from "@/pages/TesourariaConfig";
@@ -231,6 +232,7 @@ function Principal() {
         <Route path="/importar" element={<Importar />} />
         <Route path="/caixa" element={<Caixa />} />
         <Route path="/relatorios" element={<Relatorios />} />
+        <Route path="/relatorios/construtor" element={<ConstrutorRelatorios />} />
         <Route path="/relatorios/stock" element={<RelatoriosStock />} />
         <Route path="/relatorios/rastreio" element={<Rastreio />} />
         <Route path="/relatorios/fornecedores" element={<MapaFornecedor />} />
