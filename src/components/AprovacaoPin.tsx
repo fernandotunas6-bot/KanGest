@@ -4,11 +4,28 @@
 // servidor recusa uma operação por falta de aprovação, `call` (lib/api.ts) abre este diálogo e repete a operação com
 // o PIN. Um PIN errado, ou de quem não pode aprovar, fica no diálogo para se tentar outro; qualquer outro erro segue
 // para o ecrã que fez a operação, como se o diálogo não existisse.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { KeyRound } from "lucide-react";
 import { definirPedidoAprovacao } from "@/lib/api";
 import { Button, Field, Input, Modal } from "@/components/ui";
+
+// se o pedido está à vista: o POS cala os atalhos e o leitor de códigos enquanto se escreve o PIN
+let aberta = false;
+const ouvintes = new Set<() => void>();
+function definirAberta(v: boolean) {
+  aberta = v;
+  ouvintes.forEach((f) => f());
+}
+export function useAprovacaoAberta(): boolean {
+  return useSyncExternalStore(
+    (f) => {
+      ouvintes.add(f);
+      return () => ouvintes.delete(f);
+    },
+    () => aberta,
+  );
+}
 
 interface Pedido {
   operacao: string;
@@ -36,6 +53,7 @@ export function AprovacaoPin() {
             setPin("");
             setErro(null);
             setPedido({ operacao, tentar, resolver, rejeitar });
+            definirAberta(true);
           }),
       ),
     [],
@@ -44,6 +62,7 @@ export function AprovacaoPin() {
   function fechar() {
     aberto.current = false;
     setPedido(null);
+    definirAberta(false);
   }
 
   function desistir() {
