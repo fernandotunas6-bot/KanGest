@@ -225,6 +225,11 @@ pub async fn consultar(st: &AppState, q: ConsultaIn) -> AppResult<Value> {
 
     let mut params = Vec::new();
     let mut onde = String::new();
+    // o utilizador de uma loja só vê a dele, peça o que pedir (a loja vem da sessão, não do pedido)
+    if let (Some(loja), false) = (st.loja(), f.loja.is_empty()) {
+        onde.push_str(&format!(" AND {} = ?", f.loja));
+        params.push(Valor::Inteiro(loja));
+    }
     for fl in &q.filtros {
         onde.push_str(" AND ");
         onde.push_str(&condicao(f, fl, &mut params)?);
@@ -412,6 +417,41 @@ mod testes {
         assert!(erro(&st, "dados.consultar", json!({ "fonte": "vendas", "campos": ["total"], "ordenar": [{ "campo": "liquido" }] })).await.contains("Só se ordena"));
         assert!(erro(&st, "dados.consultar", json!({ "fonte": "vendas", "campos": ["data"], "filtros": [{ "campo": "data", "op": ">", "valor": "ontem" }] })).await.contains("Data inválida"));
 
+        // compras: a V/Factura menos a V/Nota de Crédito, igual ao mapa de fornecedor
+        let forn = rpc(&st, "entidades.guardar", json!({ "tipo": "F", "nome": "Grossista, SA", "nif": "5410000000" })).await["id"].as_i64().unwrap();
+        let fc = rpc(&st, "documentos.emitir", json!({ "tipo": "FC", "entidade_id": forn, "doc_externo": "FT A/1", "linhas": [{ "artigo_id": arroz, "quantidade": 10, "preco_unitario": 60000 }] })).await;
+        rpc(&st, "documentos.emitir", json!({ "tipo": "VNC", "entidade_id": forn, "doc_externo": "NC 1", "motivo": "Devolução de material danificado", "doc_origem_id": fc["documento"]["id"], "linhas": [{ "artigo_id": arroz, "quantidade": 2, "preco_unitario": 60000 }] })).await;
+        let motor = rpc(&st, "dados.consultar", json!({ "fonte": "compras", "agrupar": ["fornecedor"], "agregados": [{ "funcao": "soma", "campo": "total" }, { "funcao": "soma", "campo": "iva" }] })).await;
+        let fixo = rpc(&st, "relatorios.fornecedores", json!({ "de": &hoje, "ate": &hoje })).await;
+        assert_eq!((&motor["linhas"][0][1], &motor["linhas"][0][2]), (&fixo["resumo"][0]["compras"], &fixo["resumo"][0]["iva"]), "{motor} × {fixo}");
+        assert_eq!(motor["totais"]["soma:total"], 547_200, "8 × 600,00 + IVA 14 %: {motor}");
+
+        // stock: a existência da ficha do artigo e o valor ao custo médio
+        let ficha = rpc(&st, "artigos.obter", json!({ "id": arroz })).await;
+        let r = rpc(&st, "dados.consultar", json!({ "fonte": "stock", "agrupar": ["artigo"], "agregados": [{ "funcao": "soma", "campo": "existencia" }, { "funcao": "soma", "campo": "valor" }], "filtros": [{ "campo": "artigo", "op": "=", "valor": "Arroz 5kg" }] })).await;
+        let q = ficha["stock"].as_f64().unwrap();
+        assert_eq!(r["linhas"][0][1].as_f64(), Some(q), "{r} × {ficha}");
+        assert_eq!(r["linhas"][0][2].as_i64(), Some((q * ficha["custo_medio"].as_f64().unwrap()).round() as i64), "{r} × {ficha}");
+
+        // contas a receber: a factura a crédito vencida há muito fica no último escalão, com o valor em dívida
+        let cli = rpc(&st, "entidades.guardar", json!({ "nome": "Cliente a Crédito", "nif": "5417000123" })).await["id"].as_i64().unwrap();
+        let ft = rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": oleo, "quantidade": 1 }] })).await;
+        sqlx::query("UPDATE documentos SET data_vencimento = '2020-01-31' WHERE id = ?").bind(ft["documento"]["id"].as_i64()).execute(&st.pool).await.unwrap();
+        let r = rpc(&st, "dados.consultar", json!({ "fonte": "conta_corrente", "agrupar": ["escalao"], "agregados": [{ "funcao": "soma", "campo": "pendente" }, { "funcao": "max", "campo": "dias_atraso" }] })).await;
+        assert_eq!((r["linhas"][0][0].as_str(), r["linhas"][0][1].as_i64()), (Some("4. Mais de 90 dias"), Some(57_000)), "{r}");
+        assert!(r["linhas"][0][2].as_i64().unwrap() > 90, "{r}");
+
+        // cada fonte corre com todos os campos, e agrupada por cada campo de texto com todas as somas
+        for f in super::FONTES {
+            let campos: Vec<&str> = f.campos.iter().map(|c| c.id).collect();
+            rpc(&st, "dados.consultar", json!({ "fonte": f.id, "campos": campos })).await;
+            let mut agregados = vec![json!({ "funcao": "contar" })];
+            agregados.extend(f.campos.iter().filter(|c| c.somavel).map(|c| json!({ "funcao": "soma", "campo": c.id })));
+            for g in f.campos.iter().filter(|c| c.tipo == super::Tipo::Texto) {
+                rpc(&st, "dados.consultar", json!({ "fonte": f.id, "agrupar": [g.id], "agregados": agregados })).await;
+            }
+        }
+
         // a tesouraria vê-se com a permissão do fluxo; as fontes listadas são só as permitidas
         let r = rpc(&st, "dados.consultar", json!({ "fonte": "tesouraria", "agrupar": ["conta"], "agregados": [{ "funcao": "soma", "campo": "saldo" }] })).await;
         assert!(r["totais"]["soma:saldo"].as_i64().unwrap_or(0) > 0, "{r}");
@@ -420,6 +460,56 @@ mod testes {
         rpc(&st, "auth.login", json!({ "login": "caixa1", "senha": "caixa123" })).await;
         assert!(erro(&st, "dados.consultar", json!({ "fonte": "vendas" })).await.contains("permissão"));
         assert_eq!(rpc(&st, "dados.fontes", Value::Null).await.as_array().unwrap().len(), 0);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// Um utilizador limitado a uma loja só vê as linhas dela, no motor e nas verificações, filtre o que filtrar; o
+    /// administrador vê todas.
+    #[tokio::test]
+    async fn so_a_loja_do_utilizador() {
+        let pasta = std::env::temp_dir().join(format!("kangest-dados-loja-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).unwrap();
+        let mut st = AppState::new(db::abrir(&pasta.join("kigest.db")).await.unwrap());
+        st.pasta_dados = pasta.clone();
+        st.pasta_exportacao = pasta.clone();
+        st.carregar_posto(1).await.unwrap();
+        rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Livraria, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+        rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+        let lubango = rpc(&st, "tabela.guardar", json!({ "tabela": "armazens", "descricao": "Livraria do Lubango" })).await["id"].as_i64().unwrap();
+        let posto_lub = rpc(&st, "posto.guardar", json!({ "descricao": "Caixa do Lubango", "armazem_id": lubango, "serie_prefixo": "L" })).await["id"].as_i64().unwrap();
+        let livro = rpc(&st, "artigos.guardar", json!({ "descricao": "Livro", "taxa_iva_id": 1, "preco1": 100000, "custo": 50000 })).await["id"].as_i64().unwrap();
+        rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "linhas": [{ "artigo_id": livro, "quantidade": 10, "preco_unitario": 50000 }] })).await;
+        rpc(&st, "documentos.emitir", json!({ "tipo": "ES", "armazem_id": lubango, "linhas": [{ "artigo_id": livro, "quantidade": 4, "preco_unitario": 50000 }] })).await;
+        rpc(&st, "caixa.abrir", json!({ "valor_inicial": 0 })).await;
+        rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "linhas": [{ "artigo_id": livro, "quantidade": 1 }], "pagamentos": [{ "modo": "NU", "valor": 114000 }] })).await;
+        rpc(&st, "documentos.emitir", json!({ "tipo": "FR", "armazem_id": lubango, "linhas": [{ "artigo_id": livro, "quantidade": 2 }], "pagamentos": [{ "modo": "NU", "valor": 228000 }] })).await;
+        let soma = |r: &Value, k: &str| r["totais"][k].as_f64().unwrap_or(-1.0);
+        let vendas = json!({ "fonte": "vendas", "campos": ["documento", "loja", "total"] });
+        let stock = json!({ "fonte": "stock", "campos": ["loja", "existencia"], "filtros": [{ "campo": "artigo", "op": "=", "valor": "Livro" }] });
+
+        // o administrador vê as duas lojas
+        assert_eq!(soma(&rpc(&st, "dados.consultar", vendas.clone()).await, "total"), 342_000.0);
+        assert_eq!(soma(&rpc(&st, "dados.consultar", stock.clone()).await, "existencia"), 11.0, "9 na sede + 2 no Lubango");
+        sqlx::query("UPDATE stock SET quantidade = -1 WHERE artigo_id = ?").bind(livro).execute(&st.pool).await.unwrap();
+        let negativo = |r: &Value| r.as_array().unwrap().iter().find(|v| v["id"] == "stock_negativo").map(|v| v["casos"].as_i64().unwrap());
+        assert_eq!(negativo(&rpc(&st, "dados.verificar", Value::Null).await), Some(2));
+
+        // o gerente do Lubango só vê o Lubango, mesmo a pedir a outra loja
+        rpc(&st, "utilizadores.guardar", json!({ "nome": "Gerente do Lubango", "login": "gerlub", "perfil": "GESTOR", "senha": "segredo99", "mudar_senha": false, "armazem_id": lubango })).await;
+        rpc(&st, "auth.logout", json!({})).await;
+        st.carregar_posto(posto_lub).await.unwrap();
+        rpc(&st, "auth.login", json!({ "login": "gerlub", "senha": "segredo99" })).await;
+        let r = rpc(&st, "dados.consultar", vendas).await;
+        assert_eq!((r["total_linhas"].as_i64(), soma(&r, "total")), (Some(1), 228_000.0), "{r}");
+        assert_eq!(r["linhas"][0][1], "Livraria do Lubango", "{r}");
+        let outra = rpc(&st, "dados.consultar", json!({ "fonte": "vendas", "campos": ["documento"], "filtros": [{ "campo": "loja", "op": "<>", "valor": "Livraria do Lubango" }] })).await;
+        assert_eq!(outra["total_linhas"], 0, "{outra}");
+        let r = rpc(&st, "dados.consultar", json!({ "fonte": "linhas_venda", "campos": ["artigo", "quantidade"] })).await;
+        assert_eq!(soma(&r, "quantidade"), 2.0, "{r}");
+        let r = rpc(&st, "dados.consultar", stock).await;
+        assert_eq!((r["total_linhas"].as_i64(), soma(&r, "existencia")), (Some(1), -1.0), "{r}");
+        assert_eq!(negativo(&rpc(&st, "dados.verificar", Value::Null).await), Some(1));
         let _ = std::fs::remove_dir_all(&pasta);
     }
 }

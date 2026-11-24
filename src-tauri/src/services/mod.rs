@@ -445,6 +445,7 @@ async fn executar(st: &AppState, metodo: &str, params: Value) -> AppResult<Value
         "dados.fontes" => dados::fontes_listar(st).await,
         "dados.consultar" => dados::consultar(st, p(params)?).await,
         "dados.modelos" => dados::modelos_listar(st).await,
+        "dados.verificar" => dados::verificar(st).await,
         "dados.modeloGuardar" => dados::modelo_guardar(st, p(params)?).await,
         "dados.modeloEliminar" => dados::modelo_eliminar(st, p(params)?).await,
         "relatorios.sintese" => relatorios::sintese(st, p(params)?).await,
