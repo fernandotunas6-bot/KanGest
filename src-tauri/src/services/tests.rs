@@ -6203,3 +6203,63 @@ async fn vendedor_habitual_do_cliente() {
     st.pool.close().await;
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Actualização de uma base da v1.3.4 (migrações até à 0040), com dados, para esta versão: as migrações novas
+/// aplicam-se sem erro, os dados ficam e o programa trabalha com eles (é o que acontece nas lojas ao actualizar).
+#[tokio::test]
+async fn actualizacao_de_uma_base_da_1_3_4() {
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    let pasta = std::env::temp_dir().join(format!("kigest-base-134-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let caminho = pasta.join("kigest.db");
+    {
+        // a base como a deixou a 1.3.4: só as migrações até à 0040, com dados de uma loja
+        let opts = SqliteConnectOptions::new().filename(&caminho).create_if_missing(true).foreign_keys(true);
+        let pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
+        let todas = sqlx::migrate!("./migrations");
+        let ate_40 = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(todas.migrations.iter().filter(|m| m.version <= 40).cloned().collect()),
+            ..todas
+        };
+        ate_40.run(&pool).await.unwrap();
+        for q in [
+            "INSERT INTO empresa (id, nome, nif) VALUES (1, 'Loja Antiga, Lda', '5000000000')",
+            "INSERT INTO utilizadores (nome, login, senha_hash, perfil) VALUES ('Admin', 'admin', 'x', 'ADMIN')",
+            "INSERT INTO entidades (tipo, nome, nif) VALUES ('C', 'Cliente de Sempre', '5417002211')",
+            "INSERT INTO caixa_sessoes (posto_id, utilizador_id, aberta_em, valor_inicial) VALUES (1, 1, datetime('now','localtime'), 100000)",
+            "INSERT INTO caixa_movimentos (sessao_id, data_hora, tipo, valor, descricao) VALUES (1, datetime('now','localtime'), 'SAIDA', 5000, 'Água')",
+        ] {
+            sqlx::query(q).execute(&pool).await.unwrap_or_else(|e| panic!("{q}: {e}"));
+        }
+        pool.close().await;
+    }
+
+    // abre com esta versão: aplica as migrações novas
+    let pool = db::abrir(&caminho).await.expect("a base da 1.3.4 abre nesta versão");
+    let aplicadas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE success = 1").fetch_one(&pool).await.unwrap();
+    assert_eq!(aplicadas, db::ultima_migracao(), "todas as migrações aplicadas");
+    let cliente: (String, Option<i64>) = sqlx::query_as("SELECT nome, vendedor_id FROM entidades WHERE nif = '5417002211'").fetch_one(&pool).await.unwrap();
+    assert_eq!(cliente, ("Cliente de Sempre".into(), None));
+    let mov: (String, Option<String>) = sqlx::query_as("SELECT descricao, beneficiario FROM caixa_movimentos WHERE id = 1").fetch_one(&pool).await.unwrap();
+    assert_eq!(mov, ("Água".into(), None));
+    let m21: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM motivos_isencao WHERE codigo = 'M21'").fetch_one(&pool).await.unwrap();
+    assert_eq!(m21, 1);
+
+    // o programa trabalha com a base actualizada: entra, vê o caixa e o vale antigo, o painel e o modo (loja)
+    let mut st = AppState::new(pool);
+    st.pasta_dados = pasta.clone();
+    st.pasta_exportacao = pasta.clone();
+    st.carregar_posto(1).await.unwrap();
+    sqlx::query("UPDATE utilizadores SET senha_hash = ? WHERE login = 'admin'").bind(crate::services::auth::hash_senha("1234").unwrap()).execute(&st.pool).await.unwrap();
+    rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+    assert_eq!(rpc(&st, "tabelas", Value::Null).await["modo"], "loja", "as lojas que actualizam continuam lojas");
+    let c = rpc(&st, "caixa.estado", Value::Null).await;
+    assert_eq!(c["saidas"], 5000);
+    let v = rpc(&st, "caixa.movimentoObter", json!({ "id": 1 })).await;
+    assert_eq!((v["descricao"].as_str(), v["linhas"].as_array().map(Vec::len)), (Some("Água"), Some(0)));
+    rpc(&st, "dashboard", Value::Null).await;
+    assert_eq!(rpc(&st, "escola.propinas", json!({})).await["linhas"].as_array().unwrap().len(), 0);
+    st.pool.close().await;
+    let _ = std::fs::remove_dir_all(&pasta);
+}
