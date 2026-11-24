@@ -100,7 +100,7 @@ fn verificar_serie(chaves: &[RsaPublicKey], docs: &[Doc], estado_serie: Option<(
             erro(
                 &mut r,
                 &d.numero_doc,
-                format!("Os totais não correspondem às linhas (documento {}, linhas {}).", agt::total_fmt(d.total), agt::total_fmt(d.soma_linhas)),
+                format!("Os totais não correspondem às linhas (documento {}, linhas {}).", agt::valor_pt(d.total), agt::valor_pt(d.soma_linhas)),
             );
         }
         anterior = Some(d);

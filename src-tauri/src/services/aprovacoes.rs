@@ -64,16 +64,7 @@ impl Regra {
 
 /// Cêntimos como o ecrã os mostra («20 000,00 Kz»), para o pedido de PIN e o registo.
 pub fn kz(c: i64) -> String {
-    let v = c.unsigned_abs();
-    let inteiros = (v / 100).to_string();
-    let mut agrupado = String::new();
-    for (i, d) in inteiros.chars().enumerate() {
-        if i > 0 && (inteiros.len() - i) % 3 == 0 {
-            agrupado.push('\u{a0}');
-        }
-        agrupado.push(d);
-    }
-    format!("{}{agrupado},{:02}\u{a0}Kz", if c < 0 { "−" } else { "" }, v % 100)
+    crate::agt::valor_pt(c)
 }
 
 /// Uma aprovação dada com o PIN, por gravar na transacção da operação ([`registar`]).
@@ -383,6 +374,51 @@ mod testes {
         // desligada outra vez, a saída grande passa sem PIN
         rpc(&st, "aprovacoes.guardar", json!({ "regra": "saidas", "ativo": false, "valor_minimo": 100_000 })).await;
         rpc(&st, "tesouraria.movimento", mov("SAIDA", 900_000)).await;
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// Cinco PIN errados seguidos obrigam quem pede a esperar 5 minutos, mesmo com o PIN certo a seguir; as falhas ficam
+    /// no registo de acessos; passado o tempo, o PIN certo serve e o contador recomeça. O de outro utilizador não conta.
+    #[tokio::test]
+    async fn pin_errado_obriga_a_esperar() {
+        let pasta = std::env::temp_dir().join(format!("kangest-aprovacoes-pin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).unwrap();
+        let mut st = AppState::new(db::abrir(&pasta.join("kigest.db")).await.unwrap());
+        st.pasta_dados = pasta.clone();
+        st.pasta_exportacao = pasta.clone();
+        st.carregar_posto(1).await.unwrap();
+        rpc(&st, "setup.inicializar", json!({ "empresa": { "nome": "Loja, Lda", "nif": "5000000000" }, "admin": { "nome": "Admin", "login": "admin", "senha": "1234" } })).await;
+        rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+        rpc(&st, "utilizadores.guardar", json!({ "id": 1, "nome": "Admin", "login": "admin", "perfil": "ADMIN", "pin": "4321" })).await;
+        rpc(&st, "utilizadores.guardar", json!({ "nome": "Operador", "login": "op", "perfil": "CAIXA", "senha": "op12345", "mudar_senha": false, "permissoes": ["tesouraria.fluxo"] })).await;
+        rpc(&st, "aprovacoes.guardar", json!({ "regra": "saidas", "ativo": true })).await;
+        let banco: i64 = sqlx::query_scalar("SELECT id FROM contas ORDER BY id LIMIT 1").fetch_one(&st.pool).await.unwrap();
+        let saida = |pin: &str| json!({ "tipo": "SAIDA", "conta_id": banco, "valor": 10_000, "descricao": "Despesa", "autorizacao_pin": pin });
+
+        rpc(&st, "auth.login", json!({ "login": "op", "senha": "op12345" })).await;
+        let op: i64 = sqlx::query_scalar("SELECT id FROM utilizadores WHERE login = 'op'").fetch_one(&st.pool).await.unwrap();
+        for _ in 0..5 {
+            assert!(erro(&st, "tesouraria.movimento", saida("0000")).await.contains("PIN de autorização inválido"));
+        }
+        let e = erro(&st, "tesouraria.movimento", saida("4321")).await;
+        assert!(e.contains("Demasiados PIN errados"), "{e}");
+        let falhas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM acessos WHERE utilizador_id = ? AND evento = 'FALHA' AND detalhe LIKE 'PIN de autorização errado%'")
+            .bind(op)
+            .fetch_one(&st.pool)
+            .await
+            .unwrap();
+        assert_eq!(falhas, 5);
+
+        // outro utilizador no mesmo posto não fica preso
+        rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+        rpc(&st, "tesouraria.movimento", saida("4321")).await;
+
+        // passados os 5 minutos, o PIN certo serve e o contador recomeça
+        st.falhas_autorizacao.lock().unwrap().get_mut(&op).unwrap().1 -= chrono::Duration::minutes(6);
+        rpc(&st, "auth.login", json!({ "login": "op", "senha": "op12345" })).await;
+        rpc(&st, "tesouraria.movimento", saida("4321")).await;
+        assert!(!st.falhas_autorizacao.lock().unwrap().contains_key(&op));
         let _ = std::fs::remove_dir_all(&pasta);
     }
 }

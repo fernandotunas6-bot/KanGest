@@ -184,7 +184,7 @@ pub async fn devolver(st: &AppState, d: DevolverIn) -> AppResult<Value> {
     let s = st.exigir_perm(if grupo == "COMPRAS" { "tesouraria.pagamento" } else { "tesouraria.recibo" })?;
     let disponivel: i64 = doc.get("credito_disponivel");
     if doc.get::<String, _>("estado") != "N" || d.valor <= 0 || d.valor > disponivel {
-        return Err(AppError::msg(format!("Valor inválido: o crédito disponível é {}.", agt::total_fmt(disponivel))));
+        return Err(AppError::msg(format!("Valor inválido: o crédito disponível é {}.", agt::valor_pt(disponivel))));
     }
     let numero: String = doc.get("numero_doc");
     // devolver dinheiro a um cliente é uma saída: regra de aprovação «saidas» (o reembolso de um fornecedor é entrada)
@@ -275,9 +275,9 @@ pub async fn regularizar(st: &AppState, r: RegularizarIn) -> AppResult<Value> {
     let disponivel: i64 = docs.iter().map(|x| x.1).sum();
     if r.valor > disponivel {
         return Err(AppError::msg(if credito {
-            format!("O valor excede a dívida em aberto ({}).", agt::total_fmt(disponivel))
+            format!("O valor excede a dívida em aberto ({}).", agt::valor_pt(disponivel))
         } else {
-            format!("O valor excede o crédito por utilizar ({}).", agt::total_fmt(disponivel))
+            format!("O valor excede o crédito por utilizar ({}).", agt::valor_pt(disponivel))
         }));
     }
     let aprovacao = super::aprovacoes::exigir(

@@ -158,7 +158,7 @@ pub async fn cupao_valido(c: &mut SqliteConnection, codigo: &str, total: i64, ho
     }
     let minimo: i64 = r.get("valor_minimo");
     if total < minimo {
-        return Err(AppError::msg(format!("Este cupão só vale para compras a partir de {}.", crate::agt::total_fmt(minimo))));
+        return Err(AppError::msg(format!("Este cupão só vale para compras a partir de {}.", crate::agt::valor_pt(minimo))));
     }
     Ok((r.get("tipo"), r.get("valor"), r.get("descricao")))
 }

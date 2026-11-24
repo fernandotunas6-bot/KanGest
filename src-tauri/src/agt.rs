@@ -187,6 +187,21 @@ pub fn total_fmt(centimos: i64) -> String {
     format!("{sinal}{}.{:02}", c / 100, c % 100)
 }
 
+/// Valor para mostrar ao utilizador, como o ecrã («1\u{a0}140,00\u{a0}Kz»), a partir de cêntimos. O `total_fmt` fica
+/// para o SAF-T, a assinatura e os registos técnicos.
+pub fn valor_pt(centimos: i64) -> String {
+    let v = centimos.unsigned_abs();
+    let inteiros = (v / 100).to_string();
+    let mut agrupado = String::new();
+    for (i, d) in inteiros.chars().enumerate() {
+        if i > 0 && (inteiros.len() - i) % 3 == 0 {
+            agrupado.push('\u{a0}');
+        }
+        agrupado.push(d);
+    }
+    format!("{}{agrupado},{:02}\u{a0}Kz", if centimos < 0 { "−" } else { "" }, v % 100)
+}
+
 pub fn mensagem(data: &str, data_hora: &str, numero_doc: &str, total: i64, hash_anterior: &str) -> String {
     format!("{data};{data_hora};{numero_doc};{};{hash_anterior}", total_fmt(total))
 }
