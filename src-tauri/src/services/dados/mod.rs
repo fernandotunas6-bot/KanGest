@@ -6,6 +6,7 @@
 
 mod consulta;
 mod fontes;
+mod formula;
 mod modelos;
 mod verificacoes;
 

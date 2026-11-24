@@ -22,6 +22,8 @@ const LIMITE: i64 = 1000;
 const LIMITE_MAX: i64 = 5000;
 /// Valores de um filtro «em» (lista).
 const MAX_EM: usize = 200;
+/// Fórmulas (indicadores calculados) num relatório.
+const MAX_FORMULAS: usize = 10;
 
 #[derive(Deserialize, Default)]
 pub struct ConsultaIn {
@@ -36,6 +38,9 @@ pub struct ConsultaIn {
     pub agrupar: Vec<String>,
     #[serde(default)]
     pub agregados: Vec<Agregado>,
+    /// indicadores calculados com as colunas do relatório (`formula.rs`); entram como colunas «formula:0», «formula:1»…
+    #[serde(default)]
+    pub formulas: Vec<FormulaIn>,
     /// várias colunas, pela ordem: um campo, ou um agregado como «soma:total»
     #[serde(default)]
     pub ordenar: Vec<Ordem>,
@@ -59,6 +64,16 @@ pub struct Agregado {
     /// vazio só em «contar»
     #[serde(default)]
     pub campo: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct FormulaIn {
+    pub nome: String,
+    /// ex.: «{soma:lucro} / {soma:total} * 100»; as colunas pela chave (campo, ou agregado como «soma:total»)
+    pub expressao: String,
+    /// «numero» (por omissão) ou «dinheiro» (o resultado em cêntimos, arredondado)
+    #[serde(default)]
+    pub tipo: String,
 }
 
 #[derive(Deserialize, Clone)]
@@ -262,6 +277,38 @@ pub async fn consultar(st: &AppState, q: ConsultaIn) -> AppResult<Value> {
         return Err(AppError::msg("Escolha pelo menos uma coluna."));
     }
 
+    // fórmulas: colunas calculadas com as colunas numéricas já escolhidas (pela chave, ou pelo rótulo)
+    if q.formulas.len() > MAX_FORMULAS {
+        return Err(AppError::msg(format!("No máximo {MAX_FORMULAS} fórmulas por relatório.")));
+    }
+    let base_cols = colunas.clone();
+    for (i, fm) in q.formulas.iter().enumerate() {
+        let nome = fm.nome.trim();
+        if nome.is_empty() {
+            return Err(AppError::msg("Dê um nome a cada fórmula."));
+        }
+        let coluna = |chave: &str| -> AppResult<String> {
+            let c = base_cols
+                .iter()
+                .find(|c| c.2 == chave)
+                .or_else(|| base_cols.iter().find(|c| c.3.to_lowercase() == chave.to_lowercase()))
+                .ok_or_else(|| AppError::msg(format!("Fórmula «{nome}»: a coluna «{chave}» não está no relatório.")))?;
+            if !c.4.quantitativo() {
+                return Err(AppError::msg(format!("Fórmula «{nome}»: «{}» não é um número.", c.3)));
+            }
+            Ok(c.0.clone())
+        };
+        let s = super::formula::sql(&fm.expressao, &coluna).map_err(|e| AppError::msg(format!("Fórmula «{nome}»: {e}")))?;
+        let (s, tipo) = match fm.tipo.as_str() {
+            "dinheiro" => (format!("CAST(ROUND({s}) AS INTEGER)"), Tipo::Dinheiro),
+            "" | "numero" => (format!("ROUND({s}, 4)"), Tipo::Numero),
+            outro => return Err(AppError::msg(format!("Tipo de fórmula desconhecido: «{outro}»."))),
+        };
+        // total: nos resumos, a fórmula sobre os totais gerais (razão das somas); nas linhas soltas, só o dinheiro soma
+        let no_total = agrupado || tipo == Tipo::Dinheiro;
+        colunas.push((s, format!("c{}", colunas.len()), format!("formula:{i}"), nome.to_string(), tipo, no_total));
+    }
+
     // ordenação por várias colunas: só colunas pedidas (pelo id do campo ou do agregado)
     let mut ordem = Vec::new();
     for o in &q.ordenar {
@@ -386,6 +433,44 @@ mod testes {
         assert_eq!(motor["totais"]["soma:total"].as_i64(), Some(soma_fixo), "{motor} × {fixo}");
         // lucro: (2−1)×(1 000−600) + 3×(500−300) = 400 + 600 = 1 000,00 Kz
         assert_eq!(motor["totais"]["soma:lucro"].as_i64(), Some(100_000), "{motor}");
+
+        // fórmulas: margem % e lucro por linha, por artigo e no total (sobre as somas gerais, não a soma das margens)
+        let r = rpc(
+            &st,
+            "dados.consultar",
+            json!({ "fonte": "linhas_venda", "agrupar": ["artigo"],
+                    "agregados": [{ "funcao": "soma", "campo": "total" }, { "funcao": "soma", "campo": "lucro" }, { "funcao": "contar" }],
+                    "formulas": [{ "nome": "Margem %", "expressao": "{soma:lucro} / {soma:total} * 100" },
+                                 { "nome": "Lucro por linha", "expressao": "{Lucro} ÷ {contar}", "tipo": "dinheiro" }],
+                    "ordenar": [{ "campo": "formula:1", "desc": true }] }),
+        )
+        .await;
+        assert_eq!((r["colunas"][4]["id"].as_str(), r["colunas"][4]["tipo"].as_str(), r["colunas"][5]["tipo"].as_str()), (Some("formula:0"), Some("numero"), Some("dinheiro")), "{r}");
+        for l in r["linhas"].as_array().unwrap() {
+            let esperado = l[2].as_f64().unwrap() / l[1].as_f64().unwrap() * 100.0;
+            assert!((l[4].as_f64().unwrap() - esperado).abs() < 0.001, "margem de {l}");
+        }
+        // óleo: 1 linha, 600,00 de lucro; arroz: 2 linhas (venda e nota de crédito), 400,00 → 200,00 por linha
+        assert_eq!((r["linhas"][0][0].as_str(), r["linhas"][0][5].as_i64()), (Some("Óleo 1L"), Some(60_000)), "ordenado pela fórmula: {r}");
+        assert_eq!(r["linhas"][1][5].as_i64(), Some(20_000), "{r}");
+        let total_margem = r["totais"]["soma:lucro"].as_f64().unwrap() / r["totais"]["soma:total"].as_f64().unwrap() * 100.0;
+        assert!((r["totais"]["formula:0"].as_f64().unwrap() - total_margem).abs() < 0.001, "{r}");
+        assert_eq!(r["totais"]["formula:1"].as_i64(), Some(33_333), "1 000,00 ÷ 3 linhas: {r}");
+        // nas linhas soltas: o dinheiro soma, o número não; dividir por zero dá vazio
+        let r = rpc(
+            &st,
+            "dados.consultar",
+            json!({ "fonte": "linhas_venda", "campos": ["artigo", "quantidade", "total"],
+                    "formulas": [{ "nome": "Dobro", "expressao": "{total} * 2", "tipo": "dinheiro" }, { "nome": "Por zero", "expressao": "{quantidade} / 0" }] }),
+        )
+        .await;
+        assert_eq!(r["totais"]["formula:0"].as_i64(), Some(r["totais"]["total"].as_i64().unwrap() * 2), "{r}");
+        assert!(r["totais"].get("formula:1").is_none() && r["linhas"][0][4].is_null(), "{r}");
+        // só colunas numéricas do relatório, e nada de SQL
+        let f = |e: &str| json!({ "fonte": "linhas_venda", "agrupar": ["artigo"], "agregados": [{ "funcao": "soma", "campo": "total" }], "formulas": [{ "nome": "X", "expressao": e }] });
+        assert!(erro(&st, "dados.consultar", f("{artigo} * 2")).await.contains("não é um número"));
+        assert!(erro(&st, "dados.consultar", f("{soma:lucro}")).await.contains("não está no relatório"));
+        assert!(erro(&st, "dados.consultar", f("{soma:total}); DROP TABLE documentos; --")).await.contains("só entram"));
 
         // linhas soltas, várias ordenações, limite e total geral de todas
         let r = rpc(&st, "dados.consultar", json!({ "fonte": "linhas_venda", "campos": ["artigo", "quantidade", "total"], "ordenar": [{ "campo": "artigo" }, { "campo": "total", "desc": true }], "limite": 2 })).await;
