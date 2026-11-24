@@ -61,6 +61,7 @@ e a especificação OpenAPI em [docs/openapi.json](docs/openapi.json). O estudo 
 licenças e site) está em [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md). A cifra e a protecção do programa (ligação entre postos,
 selo da licença e do executável) estão em [docs/SEGURANCA.md](docs/SEGURANCA.md). O **motor central de dados** (construtor
 de relatórios, relatórios prontos, comparação de períodos e qualidade dos dados) está em [docs/MOTOR-DE-DADOS.md](docs/MOTOR-DE-DADOS.md).
+A **conciliação bancária** (extracto do banco × movimentos da conta) está em [docs/CONCILIACAO.md](docs/CONCILIACAO.md).
 
 ## Testes
 

@@ -119,6 +119,7 @@ export const MENU: GrupoMenu[] = [
     icon: Wallet,
     itens: [
       { label: "Fluxo de Caixa", to: "/tesouraria", perm: "tesouraria.fluxo" },
+      { label: "Conciliação Bancária", to: "/tesouraria/conciliacao", perm: "tesouraria.fluxo" },
       { label: "Contas a Receber", to: "/contas/receber" },
       { label: "Contas a Pagar", to: "/contas/pagar", perm: "tesouraria.pagamento" },
       { label: "Aviso de Vencimento", to: "/avisos" },
