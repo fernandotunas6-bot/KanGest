@@ -60,6 +60,7 @@ import { atributosDe, notaDaLinha, ramoPorId, resumoAtributos } from "@/lib/ramo
 import { useMiniaturas } from "@/lib/fotos";
 import { useMeuPerfil } from "@/lib/perfil";
 import { Avatar } from "@/components/MeuPerfil";
+import { useAprovacaoAberta } from "@/components/AprovacaoPin";
 import { abrirVisorEcra, ecraInteiro, linhasVisorColuna, ouvirVisorPronto, publicarVisor, type EstadoVisor } from "@/lib/equipamento";
 
 interface Linha {
@@ -291,7 +292,10 @@ export default function Pos() {
   const comStock = (a: Artigo) => a.controla_stock === 1 && a.tipo === "P" && a.composto !== 1;
   const fica = (a: Artigo) => stockDe(a) - (naVenda.get(a.id) ?? 0);
 
-  const algumModal = !!desconhecido || !!pedirSerie || renomear || pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido || pedirCupao;
+  // o pedido de PIN das regras de aprovação (global, por cima do POS) também cala os atalhos e o leitor: senão o
+  // Delete no campo do PIN apagava a linha da venda
+  const aprovacao = useAprovacaoAberta();
+  const algumModal = aprovacao || !!desconhecido || !!pedirSerie || renomear || pagar || !!escolherCliente || editarCliente || confirmarCliente || !!teclado || descricaoLinha || escolherLote || suspender || verSuspensos || verProformas || !!pedidoPin || !!docEmitido || pedirCupao;
 
   /** Executa a acção se o operador tiver permissão (e limite de desconto); caso contrário pede o PIN de um supervisor. */
   function comPermissao(permissao: string, descricao: string, acao: () => void, desconto?: number) {
