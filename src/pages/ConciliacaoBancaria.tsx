@@ -457,7 +457,7 @@ function Conciliacao({ id, onVoltar }: { id: number; onVoltar: () => void }) {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <Card className="min-w-0 overflow-hidden">
           <div className="border-b border-line px-5 py-3 font-semibold">Extracto do banco</div>
           <Table className="tabela-compacta max-h-[calc(100vh-330px)]">
@@ -473,7 +473,7 @@ function Conciliacao({ id, onVoltar }: { id: number; onVoltar: () => void }) {
               {d.linhas.map((l) => (
                 <tr key={l.id} className={cn(ativa?.id === l.id && "bg-brand-50", !l.casado && ativa?.id !== l.id && "bg-accent-50/40")}>
                   <Td className="whitespace-nowrap">{data(l.data)}</Td>
-                  <Td>
+                  <Td className="min-w-[11rem]">
                     <div>{l.descricao}</div>
                     {l.movimentos.length > 0 && (
                       <div className="text-[12px] text-ink-3">

@@ -4,8 +4,8 @@
 //! CSV, pela leitura das folhas da importação), e cada linha casa com movimentos do fluxo de caixa da conta (`vw_fluxo`):
 //!
 //! 1. um movimento com o mesmo valor e uma data próxima (o banco lança até uns dias depois);
-//! 2. senão, todos os movimentos por conciliar de um dia que somam o valor da linha (as vendas com cartão de um dia
-//!    entram no banco numa só linha).
+//! 2. senão, os movimentos por conciliar de um dia que somam o valor da linha: os de um modo de pagamento (o banco
+//!    liquida numa só linha as vendas com cartão do dia) ou todos os desse dia.
 //!
 //! O que sobra dos dois lados fica à vista. Casa-se à mão, escolhendo os movimentos (a soma tem de bater, ou lança-se
 //! a diferença, por exemplo a comissão do banco). Uma linha sem nada no KanGest (juros, comissões) lança-se como
@@ -405,15 +405,17 @@ fn dias(a: &str, b: &str) -> i64 {
 }
 
 /// Casa sozinho: primeiro um movimento com o mesmo valor e a data mais próxima (até `FOLGA_DIAS`); depois, para as
-/// linhas que sobram, todos os movimentos por conciliar de um dia que somam o valor da linha (vendas com cartão).
+/// linhas que sobram, os movimentos por conciliar de um dia que somam o valor da linha: os de um modo de pagamento (a
+/// liquidação das vendas com cartão do dia) ou todos os desse dia.
 async fn casar_auto(tx: &mut sqlx::SqliteConnection, conciliacao_id: i64, conta_id: i64) -> AppResult<usize> {
     let linhas: Vec<(i64, String, i64)> = sqlx::query_as("SELECT id, data, valor FROM conciliacao_linhas WHERE conciliacao_id = ? AND casado IS NULL ORDER BY data, id")
         .bind(conciliacao_id)
         .fetch_all(&mut *tx)
         .await?;
     let Some((de, ate)) = linhas.first().map(|l| l.1.clone()).zip(linhas.last().map(|l| l.1.clone())) else { return Ok(0) };
-    let movimentos: Vec<(String, String, i64)> = sqlx::query_as(&format!(
-        "SELECT f.chave, f.data, CASE WHEN f.tipo = 'ENTRADA' THEN f.valor ELSE -f.valor END
+    // (chave, data, valor com sinal, rubrica: o modo de pagamento de um documento, o centro de custo de um movimento)
+    let movimentos: Vec<(String, String, i64, String)> = sqlx::query_as(&format!(
+        "SELECT f.chave, f.data, CASE WHEN f.tipo = 'ENTRADA' THEN f.valor ELSE -f.valor END, COALESCE(f.rubrica, '')
          FROM vw_fluxo f
          WHERE f.conta_id = ? AND f.anulado = 0 AND f.data BETWEEN date(?, '-{FOLGA_DIAS} day') AND date(?, '+{FOLGA_DIAS} day')
            AND NOT EXISTS (SELECT 1 FROM conciliacao_pares p WHERE p.fluxo = f.chave)
@@ -443,19 +445,27 @@ async fn casar_auto(tx: &mut sqlx::SqliteConnection, conciliacao_id: i64, conta_
             None => sobram.push((*id, data.clone(), *valor)),
         }
     }
-    // 2. vários de um dia: os movimentos por conciliar desse dia, com o sinal da linha, somam o valor dela
+    // 2. vários de um dia, com o sinal da linha: os de um modo de pagamento (o banco liquida os cartões do dia numa só
+    //    linha, sem as transferências do mesmo dia) ou todos os do dia, a somar o valor dela
     for (id, data, valor) in &sobram {
         let mut melhor: Option<(i64, Vec<String>)> = None;
         let mut dias_vistos: Vec<&str> = movimentos.iter().filter(|m| !usados.contains(&m.0) && dias(&m.1, data) <= FOLGA_DIAS).map(|m| m.1.as_str()).collect();
         dias_vistos.dedup();
         for dia in dias_vistos {
-            let do_dia: Vec<&(String, String, i64)> = movimentos.iter().filter(|m| m.1 == dia && !usados.contains(&m.0) && m.2.signum() == valor.signum()).collect();
-            if do_dia.len() < 2 || do_dia.iter().map(|m| m.2).sum::<i64>() != *valor {
-                continue;
-            }
-            let d = dias(dia, data);
-            if melhor.as_ref().is_none_or(|m| d < m.0) {
-                melhor = Some((d, do_dia.iter().map(|m| m.0.clone()).collect()));
+            let do_dia: Vec<&(String, String, i64, String)> = movimentos.iter().filter(|m| m.1 == dia && !usados.contains(&m.0) && m.2.signum() == valor.signum()).collect();
+            let mut rubricas: Vec<Option<&str>> = do_dia.iter().map(|m| Some(m.3.as_str())).collect();
+            rubricas.sort();
+            rubricas.dedup();
+            rubricas.push(None);
+            for r in rubricas {
+                let grupo: Vec<&&(String, String, i64, String)> = do_dia.iter().filter(|m| r.is_none_or(|r| m.3 == r)).collect();
+                if grupo.len() < 2 || grupo.iter().map(|m| m.2).sum::<i64>() != *valor {
+                    continue;
+                }
+                let d = dias(dia, data);
+                if melhor.as_ref().is_none_or(|m| d < m.0) {
+                    melhor = Some((d, grupo.iter().map(|m| m.0.clone()).collect()));
+                }
             }
         }
         if let Some((_, chaves)) = melhor {
@@ -816,6 +826,11 @@ mod testes {
         rpc(&st, "tesouraria.movimento", mov("SAIDA", 2_000_000, "Renda do armazém", 8)).await;
         rpc(&st, "tesouraria.movimento", mov("ENTRADA", 300_000, "TPA venda 1", 6)).await;
         rpc(&st, "tesouraria.movimento", mov("ENTRADA", 200_000, "TPA venda 2", 6)).await;
+        // no mesmo dia, uma entrada de outra rubrica: o banco liquida só as vendas com cartão
+        let centro = rpc(&st, "tesouraria.centroGuardar", json!({ "descricao": "Rendas recebidas", "tipo": "RECEITA" })).await["id"].as_i64().unwrap();
+        let mut renda = mov("ENTRADA", 40_000, "Renda do anexo", 6);
+        renda["centro_custo_id"] = json!(centro);
+        rpc(&st, "tesouraria.movimento", renda).await;
         let tpa3 = rpc(&st, "tesouraria.movimento", mov("ENTRADA", 100_000, "TPA venda 3", 2)).await["id"].as_i64().unwrap();
         let tpa4 = rpc(&st, "tesouraria.movimento", mov("ENTRADA", 150_000, "TPA venda 4", 2)).await["id"].as_i64().unwrap();
         rpc(&st, "tesouraria.movimento", mov("ENTRADA", 700_000, "Depósito por confirmar", 4)).await;
@@ -849,7 +864,7 @@ mod testes {
         assert_eq!(tpa["movimentos"].as_array().unwrap().len(), 2, "{tpa}");
         assert_eq!(o["resumo"]["linhas_por_casar"], 2, "{o}");
         assert_eq!(o["resumo"]["extracto_por_casar"], 247_500 - 150_000);
-        assert_eq!(o["resumo"]["kangest_por_casar"], 700_000 + 100_000 + 150_000, "o depósito por confirmar e as duas vendas do TPA com comissão");
+        assert_eq!(o["resumo"]["kangest_por_casar"], 700_000 + 100_000 + 150_000 + 40_000, "o depósito por confirmar, as duas vendas do TPA com comissão e a renda");
         assert_eq!(o["resumo"]["saldo_banco"], 13_597_500);
 
         // a comissão: lança-se a partir da linha (saída na tesouraria, com a data do extracto)
@@ -878,9 +893,9 @@ mod testes {
         rpc(&st, "conciliacao.casar", json!({ "linha_id": dep, "chaves": [deposito] })).await;
         let o = rpc(&st, "conciliacao.obter", json!({ "id": id })).await;
         assert_eq!(o["resumo"]["linhas_por_casar"], 0, "{o}");
-        assert_eq!(o["resumo"]["kangest_por_casar"], 700_000, "só o depósito que o banco ainda não mostra");
-        // o saldo do KanGest no último dia do extracto difere do do banco pelo depósito por confirmar
-        assert_eq!(o["resumo"]["saldo_kangest"].as_i64().unwrap() - o["resumo"]["saldo_banco"].as_i64().unwrap(), 700_000, "{o}");
+        assert_eq!(o["resumo"]["kangest_por_casar"], 740_000, "o depósito e a renda que o banco ainda não mostra");
+        // o saldo do KanGest no último dia do extracto difere do do banco por esses dois
+        assert_eq!(o["resumo"]["saldo_kangest"].as_i64().unwrap() - o["resumo"]["saldo_banco"].as_i64().unwrap(), 740_000, "{o}");
 
         // fechada, já não muda nem se apaga; o operador de caixa não vê a tesouraria
         rpc(&st, "conciliacao.fechar", json!({ "id": id })).await;
