@@ -229,6 +229,9 @@ pub struct MovimentoIn {
     entidade_id: Option<i64>,
     documento: Option<String>,
     data: Option<String>,
+    /// PIN de quem aprova, quando a regra de aprovação «saidas» se aplica (services/aprovacoes.rs)
+    #[serde(default)]
+    autorizacao_pin: Option<String>,
 }
 
 /// "Inserir" (entrada) e "Pagamento" (saída com centro de custo).
@@ -242,6 +245,20 @@ pub async fn movimento(st: &AppState, m: MovimentoIn) -> AppResult<Value> {
     }
     let data = m.data.filter(|d| d.len() == 10).unwrap_or_else(db::hoje);
     super::periodos::exigir_aberto(&st.pool, &data, "Não se lançam movimentos de tesouraria com data desse mês.").await?;
+    let aprovacao = if m.tipo == "SAIDA" {
+        super::aprovacoes::exigir(
+            st,
+            super::aprovacoes::Regra::Saidas,
+            m.valor,
+            Some(&data),
+            format!("Saída de tesouraria de {} ({})", super::aprovacoes::kz(m.valor), m.descricao.trim()),
+            m.autorizacao_pin.as_deref(),
+        )
+        .await?
+    } else {
+        None
+    };
+    let mut tx = db::transacao(&st.pool).await?;
     let id = sqlx::query(
         "INSERT INTO movimentos_tesouraria (data, data_hora, conta_id, tipo, valor, descricao, centro_custo_id, entidade_id, documento, utilizador_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -256,9 +273,11 @@ pub async fn movimento(st: &AppState, m: MovimentoIn) -> AppResult<Value> {
     .bind(m.entidade_id)
     .bind(m.documento.as_deref().map(str::trim).filter(|d| !d.is_empty()))
     .bind(s.id)
-    .execute(&st.pool)
+    .execute(&mut *tx)
     .await?
     .last_insert_rowid();
+    super::aprovacoes::registar(&mut tx, aprovacao.as_ref(), &format!("Tesouraria n.º {id}")).await?;
+    tx.commit().await?;
     Ok(json!({ "id": id }))
 }
 

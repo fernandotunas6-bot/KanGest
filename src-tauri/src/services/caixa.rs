@@ -218,6 +218,9 @@ pub struct MovIn {
     /// vale com várias linhas (ex.: combustível, água, transporte)
     #[serde(default)]
     linhas: Vec<MovLinhaIn>,
+    /// PIN de quem aprova, quando a regra de aprovação «vales» se aplica (services/aprovacoes.rs)
+    #[serde(default)]
+    autorizacao_pin: Option<String>,
 }
 
 const MAX_LINHAS_VALE: usize = 30;
@@ -259,6 +262,19 @@ pub async fn movimento(st: &AppState, m: MovIn) -> AppResult<Value> {
     if valor <= 0 || descricao.is_empty() {
         return Err(AppError::msg("Indique o valor e a descrição."));
     }
+    let aprovacao = if m.tipo == "SAIDA" {
+        super::aprovacoes::exigir(
+            st,
+            super::aprovacoes::Regra::Vales,
+            valor,
+            None,
+            format!("Vale de caixa de {} ({descricao})", super::aprovacoes::kz(valor)),
+            m.autorizacao_pin.as_deref(),
+        )
+        .await?
+    } else {
+        None
+    };
     let mut tx = db::transacao(&st.pool).await?;
     let id = sqlx::query(
         "INSERT INTO caixa_movimentos (sessao_id, data_hora, tipo, valor, descricao, rubrica, modo_codigo, beneficiario, utilizador_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -284,6 +300,7 @@ pub async fn movimento(st: &AppState, m: MovIn) -> AppResult<Value> {
             .execute(&mut *tx)
             .await?;
     }
+    super::aprovacoes::registar(&mut tx, aprovacao.as_ref(), &format!("Vale n.º {id}")).await?;
     tx.commit().await?;
     let mut r = resumo(st, sid).await?;
     r["movimento_id"] = json!(id);

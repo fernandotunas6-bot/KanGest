@@ -62,6 +62,7 @@ licenças e site) está em [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md). A cifra e a
 selo da licença e do executável) estão em [docs/SEGURANCA.md](docs/SEGURANCA.md). O **motor central de dados** (construtor
 de relatórios, relatórios prontos, comparação de períodos e qualidade dos dados) está em [docs/MOTOR-DE-DADOS.md](docs/MOTOR-DE-DADOS.md).
 A **conciliação bancária** (extracto do banco × movimentos da conta) está em [docs/CONCILIACAO.md](docs/CONCILIACAO.md).
+As **regras de aprovação** (o PIN de quem pode aprovar anulações, saídas, vales e notas de crédito) estão em [docs/APROVACOES.md](docs/APROVACOES.md).
 
 ## Testes
 

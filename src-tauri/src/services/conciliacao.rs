@@ -619,6 +619,9 @@ pub struct CasarIn {
     /// quando a soma não bate: lança-se a diferença (comissão do banco, por exemplo) e casa-se com ela
     #[serde(default)]
     diferenca: Option<DiferencaIn>,
+    /// PIN de quem aprova a saída lançada, se a regra de aprovação «saidas» se aplicar (services/aprovacoes.rs)
+    #[serde(default)]
+    autorizacao_pin: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -677,7 +680,7 @@ pub async fn casar(st: &AppState, c: CasarIn) -> AppResult<Value> {
             st,
             "tesouraria.movimento",
             json!({ "tipo": if falta > 0 { "ENTRADA" } else { "SAIDA" }, "conta_id": conta_id, "valor": falta.abs(), "descricao": d.descricao.trim(),
-                    "centro_custo_id": d.centro_custo_id, "data": data }),
+                    "centro_custo_id": d.centro_custo_id, "data": data, "autorizacao_pin": c.autorizacao_pin }),
         ))
         .await?;
         chaves.push(format!("T{}", m["id"].as_i64().unwrap_or(0)));
@@ -708,6 +711,9 @@ pub struct LinhaIn {
     descricao: Option<String>,
     #[serde(default)]
     centro_custo_id: Option<i64>,
+    /// PIN de quem aprova a saída lançada, se a regra de aprovação «saidas» se aplicar (services/aprovacoes.rs)
+    #[serde(default)]
+    autorizacao_pin: Option<String>,
 }
 
 /// Uma linha do extracto sem nada no KanGest (juros, comissões, um depósito esquecido): lança-se como movimento de
@@ -726,7 +732,7 @@ pub async fn lancar(st: &AppState, l: LinhaIn) -> AppResult<Value> {
         st,
         "tesouraria.movimento",
         json!({ "tipo": if valor > 0 { "ENTRADA" } else { "SAIDA" }, "conta_id": conta_id, "valor": valor.abs(), "descricao": desc,
-                "centro_custo_id": l.centro_custo_id, "data": data, "documento": "Extracto bancário" }),
+                "centro_custo_id": l.centro_custo_id, "data": data, "documento": "Extracto bancário", "autorizacao_pin": l.autorizacao_pin }),
     ))
     .await?;
     let chave = format!("T{}", m["id"].as_i64().unwrap_or(0));

@@ -1467,6 +1467,20 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         }
     }
 
+    // ---------- regras de aprovação: notas de crédito e pagamentos a fornecedores (services/aprovacoes.rs) ----------
+    let regra = match tipo.codigo.as_str() {
+        "NC" => Some((super::aprovacoes::Regra::Creditos, "Nota de crédito")),
+        "VRC" => Some((super::aprovacoes::Regra::Saidas, "Pagamento a fornecedor")),
+        _ => None,
+    };
+    let aprovacao = match regra {
+        Some((r, nome)) => super::aprovacoes::exigir(st, r, total, Some(&data_doc), format!("{nome} de {}", super::aprovacoes::kz(total)), i.autorizacao_pin.as_deref()).await?,
+        None => None,
+    };
+    if let Some(a) = &aprovacao {
+        autorizado_por = autorizado_por.or(Some(a.aprovado_por));
+    }
+
     // ---------- numeração + assinatura ----------
     let serie = escolher_serie(&mut tx, &tipo.codigo, posto.id, &posto.serie_prefixo, &data_doc, i.serie.as_deref(), manual.is_some()).await?;
     let (ultimo, hash_ant, data_ultimo): (i64, String, Option<String>) =
@@ -1846,6 +1860,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         .bind(&numero_doc)
         .execute(&mut *tx)
         .await?;
+    super::aprovacoes::registar(&mut tx, aprovacao.as_ref(), &numero_doc).await?;
     tx.commit().await?;
     drop(_guard);
 
@@ -2037,6 +2052,9 @@ fn somar_dias(data: &str, dias: i64) -> String {
 pub struct AnularIn {
     id: i64,
     motivo: String,
+    /// PIN de quem aprova, quando a regra de aprovação «anular» se aplica (services/aprovacoes.rs)
+    #[serde(default)]
+    autorizacao_pin: Option<String>,
 }
 
 pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
@@ -2046,7 +2064,7 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
     }
     let _guard = st.emissao.lock().await;
     let mut tx = crate::db::transacao(&st.pool).await?;
-    let row = sqlx::query("SELECT numero_doc, estado, importado, tipo_codigo, data_emissao FROM documentos WHERE id = ?")
+    let row = sqlx::query("SELECT numero_doc, estado, importado, tipo_codigo, data_emissao, total FROM documentos WHERE id = ?")
         .bind(a.id)
         .fetch_optional(&mut *tx)
         .await?
@@ -2103,6 +2121,17 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
     if usado > 0 {
         return Err(AppError::msg("O crédito ou a dívida deste documento já foi movimentado (compensação, devolução ou regularização). Anule primeiro esse movimento."));
     }
+    // regra de aprovação «anular» (se ligada): o PIN de quem pode aprovar
+    let total_doc: i64 = row.get("total");
+    let aprovacao = super::aprovacoes::exigir(
+        st,
+        super::aprovacoes::Regra::Anular,
+        total_doc,
+        Some(&row.get::<String, _>("data_emissao")),
+        format!("Anular {numero} ({})", super::aprovacoes::kz(total_doc)),
+        a.autorizacao_pin.as_deref(),
+    )
+    .await?;
     // recibo pago com compensação: devolve o crédito utilizado
     let usados: Vec<(i64, i64)> = sqlx::query_as("SELECT credito_id, valor FROM credito_utilizacoes WHERE documento_id = ?").bind(a.id).fetch_all(&mut *tx).await?;
     for (cid, valor) in usados {
@@ -2147,6 +2176,7 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
         .bind(format!("{numero}: {}", a.motivo.trim()))
         .execute(&mut *tx)
         .await?;
+    super::aprovacoes::registar(&mut tx, aprovacao.as_ref(), &numero).await?;
     tx.commit().await?;
     Ok(Value::Null)
 }

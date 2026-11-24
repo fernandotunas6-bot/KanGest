@@ -164,6 +164,9 @@ pub struct DevolverIn {
     conta_id: i64,
     descricao: Option<String>,
     centro_custo_id: Option<i64>,
+    /// PIN de quem aprova, quando a regra de aprovação «saidas» se aplica (services/aprovacoes.rs)
+    #[serde(default)]
+    autorizacao_pin: Option<String>,
 }
 
 /// Devolução de dinheiro (Fr_DevolucaoDinheiro): paga ao cliente o crédito de uma nota de crédito
@@ -184,6 +187,20 @@ pub async fn devolver(st: &AppState, d: DevolverIn) -> AppResult<Value> {
         return Err(AppError::msg(format!("Valor inválido: o crédito disponível é {}.", agt::total_fmt(disponivel))));
     }
     let numero: String = doc.get("numero_doc");
+    // devolver dinheiro a um cliente é uma saída: regra de aprovação «saidas» (o reembolso de um fornecedor é entrada)
+    let aprovacao = if grupo == "COMPRAS" {
+        None
+    } else {
+        super::aprovacoes::exigir(
+            st,
+            super::aprovacoes::Regra::Saidas,
+            d.valor,
+            None,
+            format!("Devolução de {} ({numero}, {})", super::aprovacoes::kz(d.valor), doc.get::<String, _>("entidade_nome")),
+            d.autorizacao_pin.as_deref(),
+        )
+        .await?
+    };
     let mut tx = crate::db::transacao(&st.pool).await?;
     let mov = sqlx::query(
         "INSERT INTO movimentos_tesouraria (data, data_hora, conta_id, tipo, valor, descricao, centro_custo_id, entidade_id, documento, utilizador_id)
@@ -211,6 +228,7 @@ pub async fn devolver(st: &AppState, d: DevolverIn) -> AppResult<Value> {
         .await?;
     sqlx::query("UPDATE documentos SET credito_disponivel = credito_disponivel - ? WHERE id = ?").bind(d.valor).bind(d.credito_id).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO auditoria (utilizador_id, acao, detalhe) VALUES (?, 'DEVOLUCAO', ?)").bind(s.id).bind(format!("{numero}: {}", agt::total_fmt(d.valor))).execute(&mut *tx).await?;
+    super::aprovacoes::registar(&mut tx, aprovacao.as_ref(), &format!("Tesouraria n.º {mov}")).await?;
     tx.commit().await?;
     Ok(json!({ "movimento_id": mov }))
 }
@@ -223,6 +241,9 @@ pub struct RegularizarIn {
     tipo: String,
     valor: i64,
     justificacao: String,
+    /// PIN de quem aprova, quando a regra de aprovação «creditos» se aplica (services/aprovacoes.rs)
+    #[serde(default)]
+    autorizacao_pin: Option<String>,
 }
 
 /// Regularização de conta corrente (Fr_RegularizacaoContaCorrente). Não é documento fiscal:
@@ -259,6 +280,15 @@ pub async fn regularizar(st: &AppState, r: RegularizarIn) -> AppResult<Value> {
             format!("O valor excede o crédito por utilizar ({}).", agt::total_fmt(disponivel))
         }));
     }
+    let aprovacao = super::aprovacoes::exigir(
+        st,
+        super::aprovacoes::Regra::Creditos,
+        r.valor,
+        None,
+        format!("Regularização de conta corrente de {} ({})", super::aprovacoes::kz(r.valor), r.justificacao.trim()),
+        r.autorizacao_pin.as_deref(),
+    )
+    .await?;
     let id = sqlx::query("INSERT INTO cc_regularizacoes (data, data_hora, entidade_id, grupo, tipo, valor, justificacao, utilizador_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(db::hoje())
         .bind(db::agora())
@@ -294,6 +324,7 @@ pub async fn regularizar(st: &AppState, r: RegularizarIn) -> AppResult<Value> {
         .bind(format!("{} {} entidade {}: {}", r.tipo, agt::total_fmt(r.valor), r.entidade_id, r.justificacao.trim()))
         .execute(&mut *tx)
         .await?;
+    super::aprovacoes::registar(&mut tx, aprovacao.as_ref(), &format!("Regularização n.º {id}")).await?;
     tx.commit().await?;
     Ok(json!({ "id": id }))
 }

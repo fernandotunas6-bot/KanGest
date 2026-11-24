@@ -188,6 +188,7 @@ export const MENU: GrupoMenu[] = [
       { label: "Configurações", to: "/configuracoes" },
       { label: "Séries de Documentos", to: "/series", perm: "sistema.series" },
       { label: "Utilizadores e Permissões", to: "/utilizadores", perm: "sistema.utilizadores" },
+      { label: "Regras de Aprovação", to: "/aprovacoes", perm: "sistema.utilizadores" },
       { label: "Registo de Acessos e Auditoria", to: "/utilizadores?vista=acessos", perm: "sistema.auditoria" },
       { label: "Facturação Electrónica (AGT)", to: "/facturacao-electronica", perm: "sistema.fe" },
       { label: "API e Integrações", to: "/integracoes", perm: "sistema.api" },

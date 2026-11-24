@@ -31,6 +31,8 @@ import ConstrutorRelatorios from "@/pages/ConstrutorRelatorios";
 import QualidadeDados from "@/pages/QualidadeDados";
 import FechoPeriodos from "@/pages/FechoPeriodos";
 import ConciliacaoBancaria from "@/pages/ConciliacaoBancaria";
+import RegrasAprovacao from "@/pages/RegrasAprovacao";
+import { AprovacaoPin } from "@/components/AprovacaoPin";
 import Configuracoes from "@/pages/Configuracoes";
 import Tesouraria from "@/pages/Tesouraria";
 import TesourariaConfig from "@/pages/TesourariaConfig";
@@ -267,10 +269,12 @@ function Principal() {
         <Route path="/oficina/viaturas" element={<Viaturas />} />
         <Route path="/oficina/ordens" element={<Ordens />} />
         <Route path="/utilizadores" element={<Utilizadores />} />
+        <Route path="/aprovacoes" element={<RegrasAprovacao />} />
         <Route path="/licenca" element={<Licenca />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    <AprovacaoPin />
     {sessao.bloqueada && <EcraBloqueado />}
     </>
   );
