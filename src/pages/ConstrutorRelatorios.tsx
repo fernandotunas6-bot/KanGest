@@ -586,7 +586,7 @@ export default function ConstrutorRelatorios() {
             <div className="font-semibold">{titulo}</div>
             <div className="flex items-center gap-3">
               <div className={cn("text-[12.5px] text-ink-3", resultado.isFetching && "animate-pulse")}>
-                {r ? `${numero(r.total_linhas, 0)} ${modo === "resumo" && agrupar.length ? "grupos" : "linhas"}` : "…"}
+                {r ? `${numero(r.total_linhas, 0)} ${modo === "resumo" && agrupar.length ? (r.total_linhas === 1 ? "grupo" : "grupos") : r.total_linhas === 1 ? "linha" : "linhas"}` : "…"}
                 {ordenar.length > 1 && " · Shift + clique junta colunas à ordenação"}
               </div>
               {graficoPossivel && (
