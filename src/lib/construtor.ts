@@ -4,7 +4,7 @@
 // guarda), os períodos relativos, os relatórios prontos (que o painel abre ao clicar num indicador) e a comparação
 // com outro período. Tudo corre pelo motor central de dados (services/dados): aqui só se decide o que pedir.
 import { hojeISO } from "@/lib/format";
-import type { AgregadoDados, CampoFonte, OrdemDados, Operador, ResultadoDados, ValorDados } from "@/lib/dados";
+import type { AgregadoDados, CampoFonte, FormulaDados, OrdemDados, Operador, ResultadoDados, ValorDados } from "@/lib/dados";
 
 export type Modo = "resumo" | "detalhe";
 
@@ -76,6 +76,8 @@ export interface Definicao {
   vista: "tabela" | "grafico";
   /** os modelos antigos não têm: sem comparação */
   comparar?: Comparar;
+  /** indicadores calculados (os modelos antigos não têm) */
+  formulas?: FormulaDados[];
 }
 
 const dataDe = (s: string) => new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)));
@@ -192,6 +194,8 @@ const def = (d: Partial<Definicao>): Definicao => ({
 const soma = (campo: string): AgregadoDados => ({ funcao: "soma", campo });
 const contar: AgregadoDados = { funcao: "contar" };
 const desc = (campo: string): OrdemDados => ({ campo, desc: true });
+// a margem sobre o valor sem IVA (o lucro também é sem IVA)
+const margem: FormulaDados = { nome: "Margem %", expressao: "{Lucro} / {Valor sem IVA} * 100", tipo: "numero" };
 const asc = (campo: string): OrdemDados => ({ campo, desc: false });
 
 /** Só aparecem os das fontes que o utilizador pode consultar (dados.fontes já vem filtrado pela permissão). */
@@ -218,19 +222,24 @@ export const PRONTOS: Pronto[] = [
     id: "vendas_operador",
     nome: "Vendas por operador",
     fonte: "vendas",
-    definicao: def({ agrupar: ["operador"], agregados: [contar, soma("total")], ordenar: [desc("soma:total")] }),
+    definicao: def({
+      agrupar: ["operador"],
+      agregados: [contar, soma("total")],
+      formulas: [{ nome: "Valor médio", expressao: "{Total} / {N.º de registos}", tipo: "dinheiro" }],
+      ordenar: [desc("soma:total")],
+    }),
   },
   {
     id: "lucro_familia",
     nome: "Vendas e lucro por família",
     fonte: "linhas_venda",
-    definicao: def({ agrupar: ["familia"], agregados: [soma("quantidade"), soma("total"), soma("lucro")], ordenar: [desc("soma:total")] }),
+    definicao: def({ agrupar: ["familia"], agregados: [soma("quantidade"), soma("liquido"), soma("total"), soma("lucro")], formulas: [margem], ordenar: [desc("soma:total")] }),
   },
   {
     id: "artigos_mais_vendidos",
     nome: "Artigos mais vendidos",
     fonte: "linhas_venda",
-    definicao: def({ agrupar: ["artigo"], agregados: [soma("quantidade"), soma("total"), soma("lucro")], ordenar: [desc("soma:total")] }),
+    definicao: def({ agrupar: ["artigo"], agregados: [soma("quantidade"), soma("liquido"), soma("total"), soma("lucro")], formulas: [margem], ordenar: [desc("soma:total")] }),
   },
   {
     id: "receitas_despesas",

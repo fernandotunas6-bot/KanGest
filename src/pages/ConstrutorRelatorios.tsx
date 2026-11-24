@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BarChart3, FileSpreadsheet, FileText, Filter, Plus, Printer, Rows3, Save, Sigma, Table2, Trash2, X } from "lucide-react";
+import { BarChart3, Calculator, FileSpreadsheet, FileText, Filter, Plus, Printer, Rows3, Save, Sigma, Table2, Trash2, X } from "lucide-react";
 import { call } from "@/lib/api";
 import { useDebounce } from "@/lib/hooks";
 import { data, hojeISO, kz, numero, parseKz } from "@/lib/format";
@@ -22,6 +22,7 @@ import {
   type ConsultaDados,
   type FiltroDados,
   type FonteDados,
+  type FormulaDados,
   type FuncaoAgregado,
   type Operador,
   type OrdemDados,
@@ -158,6 +159,7 @@ export default function ConstrutorRelatorios() {
   const [campos, setCampos] = useState<string[]>([]);
   const [agrupar, setAgrupar] = useState<string[]>([]);
   const [agregados, setAgregados] = useState<AgregadoDados[]>([]);
+  const [formulas, setFormulas] = useState<FormulaDados[]>([]);
   const [filtros, setFiltros] = useState<FiltroEcra[]>([]);
   const [ordenar, setOrdenar] = useState<OrdemDados[]>([]);
   const [periodo, setPeriodo] = useState<Periodo>("mes");
@@ -191,6 +193,7 @@ export default function ConstrutorRelatorios() {
     setCampos(d.campos ?? []);
     setAgrupar(d.agrupar ?? []);
     setAgregados(d.agregados ?? []);
+    setFormulas(d.formulas ?? []);
     setFiltros(d.filtros ?? []);
     setOrdenar(d.ordenar ?? []);
     setVista(d.vista ?? "tabela");
@@ -208,7 +211,7 @@ export default function ConstrutorRelatorios() {
       setFonteId(m.fonte);
     }
   }
-  const definicao = (): Definicao => ({ modo, periodo, de, ate, campos, agrupar, agregados, filtros, ordenar, vista, comparar });
+  const definicao = (): Definicao => ({ modo, periodo, de, ate, campos, agrupar, agregados, formulas, filtros, ordenar, vista, comparar });
 
   // relatórios prontos das fontes que este utilizador pode consultar; o painel abre-os pelo endereço
   const prontos = PRONTOS.filter((p) => fontes.data?.some((f) => f.id === p.fonte));
@@ -242,6 +245,7 @@ export default function ConstrutorRelatorios() {
     setCampos(p.campos);
     setAgrupar(p.agrupar);
     setAgregados(p.agregados);
+    setFormulas([]);
     setFiltros([]);
     setOrdenar([]);
     // só quando muda de fonte (não quando a lista se recarrega)
@@ -260,6 +264,18 @@ export default function ConstrutorRelatorios() {
   }, [params, fontes.data]);
 
   const campoDe = useMemo(() => new Map((fonte?.campos ?? []).map((c) => [c.id, c])), [fonte]);
+  // as fórmulas completas vão no pedido; as colunas que podem usar são as numéricas do relatório
+  const prontas = useMemo(() => formulas.filter((f) => f.nome.trim() && f.expressao.trim()), [formulas]);
+  const referencias = useMemo(
+    () =>
+      modo === "detalhe"
+        ? campos.flatMap((id) => {
+            const c = campoDe.get(id);
+            return c && (c.tipo === "dinheiro" || c.tipo === "numero") ? [{ chave: c.id, rotulo: c.rotulo }] : [];
+          })
+        : agregados.map((a) => ({ chave: a.funcao === "contar" ? "contar" : `${a.funcao}:${a.campo}`, rotulo: rotuloAgregado(a, campoDe) })),
+    [modo, campos, agregados, campoDe],
+  );
   const pedido: ConsultaDados | null = useMemo(() => {
     if (!fonte) return null;
     const extra = filtros.map((f) => (campoDe.get(f.campo) ? valorFiltro(f, campoDe.get(f.campo)!) : undefined)).filter((f): f is FiltroDados => !!f);
@@ -268,9 +284,10 @@ export default function ConstrutorRelatorios() {
       // uma fonte sem data (o stock, as contas a receber) é um retrato de agora: sem período
       filtros: fonte.data ? [{ campo: fonte.data, op: "entre", valor: [de || "0000-01-01", ate || "9999-12-31"] }, ...extra] : extra,
       ...(modo === "detalhe" ? { campos } : { agrupar, agregados }),
+      ...(prontas.length ? { formulas: prontas } : {}),
       ordenar,
     };
-  }, [fonte, filtros, campoDe, de, ate, modo, campos, agrupar, agregados, ordenar]);
+  }, [fonte, filtros, campoDe, de, ate, modo, campos, agrupar, agregados, prontas, ordenar]);
   const pronto = !!pedido && (modo === "detalhe" ? campos.length > 0 : agregados.length > 0);
   const chave = useDebounce(JSON.stringify(pedido), 300);
   const resultado = useQuery({
@@ -504,6 +521,7 @@ export default function ConstrutorRelatorios() {
               onChange={(m) => {
                 setModo(m);
                 setOrdenar([]);
+                setFormulas([]);
               }}
               opcoes={[
                 { id: "resumo", label: "Resumo", icon: Sigma },
@@ -577,6 +595,8 @@ export default function ConstrutorRelatorios() {
               </div>
             </Card>
           )}
+
+          <Formulas formulas={formulas} referencias={referencias} onChange={setFormulas} />
 
           <Card className="space-y-2 p-4">
             <div className="flex items-center justify-between">
@@ -734,6 +754,165 @@ export default function ConstrutorRelatorios() {
         </PrintPortal>
       )}
     </>
+  );
+}
+
+const MARGEM = "{Lucro} / {Valor sem IVA} * 100";
+
+/** O nome de um valor do resumo, como o servidor o põe na coluna (dados/consulta.rs rotulo_agregado). */
+function rotuloAgregado(a: AgregadoDados, campoDe: Map<string, CampoFonte>): string {
+  const nome = (a.campo && campoDe.get(a.campo)?.rotulo) || "";
+  switch (a.funcao) {
+    case "contar":
+      return "N.º de registos";
+    case "media":
+      return `Média de ${nome.toLowerCase()}`;
+    case "min":
+      return `Mínimo de ${nome.toLowerCase()}`;
+    case "max":
+      return `Máximo de ${nome.toLowerCase()}`;
+    default:
+      return nome;
+  }
+}
+
+/**
+ * Fórmulas: indicadores calculados com as colunas numéricas do relatório («{Lucro} / {Valor sem IVA} * 100»). O que se escreve
+ * fica num rascunho e só entra na consulta ao sair do campo ou com Enter (para não consultar a cada letra).
+ */
+function Formulas({ formulas, referencias, onChange }: { formulas: FormulaDados[]; referencias: { chave: string; rotulo: string }[]; onChange: (f: FormulaDados[]) => void }) {
+  const [rascunho, setRascunho] = useState(formulas);
+  const [foco, setFoco] = useState(0);
+  useEffect(() => setRascunho(formulas), [formulas]);
+  const tem = (rotulo: string) => referencias.some((r) => r.rotulo.toLowerCase() === rotulo.toLowerCase());
+  // pontos de partida que só aparecem quando as colunas de que precisam estão no relatório
+  const sugestoes: FormulaDados[] = [
+    // a margem é sobre o valor sem IVA (o lucro também é sem IVA)
+    ...(tem("Lucro") && tem("Valor sem IVA") ? [{ nome: "Margem %", expressao: MARGEM, tipo: "numero" as const }] : []),
+    ...(tem("Total") && tem("N.º de registos") ? [{ nome: "Valor médio", expressao: "{Total} / {N.º de registos}", tipo: "dinheiro" as const }] : []),
+  ].filter((s) => !formulas.some((f) => f.nome === s.nome));
+  const muda = (i: number, n: Partial<FormulaDados>) => setRascunho((x) => x.map((f, k) => (k === i ? { ...f, ...n } : f)));
+  const aplicar = (lista = rascunho) => {
+    if (JSON.stringify(lista) !== JSON.stringify(formulas)) onChange(lista);
+  };
+  function inserir(rotulo: string) {
+    if (!rascunho.length) return;
+    const i = Math.min(foco, rascunho.length - 1);
+    const lista = rascunho.map((f, k) => (k === i ? { ...f, expressao: `${f.expressao.trimEnd()}${f.expressao.trim() ? " " : ""}{${rotulo}}` } : f));
+    setRascunho(lista);
+    aplicar(lista);
+  }
+  if (!referencias.length && !formulas.length) return null;
+  return (
+    <Card className="space-y-2 p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-[13px] font-semibold">
+          <Calculator className="size-4 text-ink-3" /> Fórmulas
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={!referencias.length || rascunho.length >= 10}
+          onClick={() => {
+            const lista = [...rascunho, { nome: `Fórmula ${rascunho.length + 1}`, expressao: "", tipo: "numero" as const }];
+            setRascunho(lista);
+            setFoco(lista.length - 1);
+          }}
+        >
+          <Plus className="size-4" /> Fórmula
+        </Button>
+      </div>
+      {!rascunho.length && (
+        <p className="text-[12px] text-ink-3">
+          Indicadores com as colunas do relatório, por exemplo a margem: <span className="font-mono">{MARGEM}</span>.
+        </p>
+      )}
+      {rascunho.map((f, i) => (
+        <div key={i} className="space-y-1.5 rounded-lg border border-line p-2">
+          <div className="flex gap-1.5">
+            <Input
+              className="h-8 min-w-0 flex-1 text-[12.5px]"
+              value={f.nome}
+              aria-label="Nome da fórmula"
+              onChange={(e) => muda(i, { nome: e.target.value })}
+              onBlur={() => aplicar()}
+              onFocus={() => setFoco(i)}
+            />
+            <Select
+              className="h-8 w-24 text-[12.5px]"
+              value={f.tipo ?? "numero"}
+              aria-label="Tipo do resultado"
+              onChange={(e) => {
+                const lista = rascunho.map((x, k) => (k === i ? { ...x, tipo: e.target.value as FormulaDados["tipo"] } : x));
+                setRascunho(lista);
+                aplicar(lista);
+              }}
+            >
+              <option value="numero">Número</option>
+              <option value="dinheiro">Kz</option>
+            </Select>
+            <button
+              type="button"
+              className="grid size-8 place-items-center rounded-md text-ink-3 hover:bg-sunken hover:text-ink"
+              title="Tirar a fórmula"
+              onClick={() => {
+                const lista = rascunho.filter((_, k) => k !== i);
+                setRascunho(lista);
+                aplicar(lista);
+              }}
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+          <Input
+            className="h-8 font-mono text-[12.5px]"
+            value={f.expressao}
+            placeholder={MARGEM}
+            aria-label="Fórmula"
+            onChange={(e) => muda(i, { expressao: e.target.value })}
+            onBlur={() => aplicar()}
+            onFocus={() => setFoco(i)}
+            onKeyDown={(e) => e.key === "Enter" && aplicar()}
+          />
+        </div>
+      ))}
+      {rascunho.length > 0 && referencias.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="mr-0.5 text-[12px] text-ink-3">Inserir:</span>
+          {referencias.map((r) => (
+            <button
+              key={r.chave}
+              type="button"
+              // sem tirar o foco do campo da fórmula
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => inserir(r.rotulo)}
+              className="rounded-md border border-line px-1.5 py-0.5 text-[12px] text-ink-2 hover:border-brand/50 hover:text-ink"
+            >
+              {r.rotulo}
+            </button>
+          ))}
+        </div>
+      )}
+      {sugestoes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="mr-0.5 text-[12px] text-ink-3">Sugestões:</span>
+          {sugestoes.map((s) => (
+            <button
+              key={s.nome}
+              type="button"
+              onClick={() => {
+                const lista = [...rascunho.filter((f) => f.expressao.trim()), s];
+                setRascunho(lista);
+                aplicar(lista);
+              }}
+              className="rounded-md bg-sunken px-1.5 py-0.5 text-[12px] text-ink-2 hover:text-ink"
+            >
+              + {s.nome}
+            </button>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
