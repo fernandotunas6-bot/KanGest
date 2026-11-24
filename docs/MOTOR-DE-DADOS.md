@@ -10,7 +10,8 @@ auditoria deles.
 | Peça | Ficheiro | O que faz |
 |---|---|---|
 | Fontes | `dados/fontes.rs` | Registo `FONTES`: o que se pode consultar, com que permissão, e os campos de cada fonte com a expressão SQL fixa |
-| Consultas | `dados/consulta.rs` | `dados.fontes` e `dados.consultar`: campos, filtros, agrupamentos, agregados, ordenação por várias colunas, total geral |
+| Consultas | `dados/consulta.rs` | `dados.fontes` e `dados.consultar`: campos, filtros, agrupamentos, agregados, fórmulas, ordenação por várias colunas, total geral |
+| Fórmulas | `dados/formula.rs` | Indicadores calculados com as colunas do relatório (`{Lucro} / {Valor sem IVA} * 100`), lidos por um analisador pequeno e passados a SQL só com as expressões das colunas |
 | Modelos | `dados/modelos.rs` + migração `0048` | `dados.modelos`, `dados.modeloGuardar`, `dados.modeloEliminar`: relatórios guardados (do utilizador ou partilhados), auditados como as outras fichas |
 | Verificações | `dados/verificacoes.rs` | `dados.verificar`: registo `VERIFICACOES` da qualidade dos dados, com exemplos e o ecrã onde se corrige |
 | Ecrã | `src/lib/dados.ts`, `src/lib/construtor.ts`, `src/components/dados/Grelha.tsx` | Tipos, formatação, Excel/CSV, períodos, relatórios prontos, comparação de períodos, grelha |
@@ -30,8 +31,15 @@ auditoria deles.
   limitado a uma loja), junta-se `AND <loja> = ?` antes dos filtros. A loja vem da sessão, nunca do pedido, por isso um
   filtro pedido no ecrã não a contorna. A tesouraria não é por loja, como o fluxo de caixa. Nas verificações, `{LOJA}`
   marca o sítio da mesma condição.
-- **Limites.** 1 000 linhas por omissão e 5 000 no máximo (o Excel e o CSV), 200 valores num filtro `em`. O total geral
-  conta todas as linhas que passam nos filtros, não só as mostradas.
+- **Fórmulas sem SQL livre.** A fórmula nunca entra no SQL como texto. O analisador (`formula.rs`) só aceita:
+  - colunas entre chavetas, que têm de estar no relatório e ser números;
+  - números;
+  - `+ − × ÷` e parênteses, até 30 níveis.
+
+  Tudo o resto é recusado com uma mensagem: `;`, aspas, funções. A divisão usa `NULLIF`, por isso dividir por zero dá
+  vazio.
+- **Limites.** 1 000 linhas por omissão e 5 000 no máximo (o Excel e o CSV), 200 valores num filtro `em`, 10 fórmulas
+  de 300 caracteres. O total geral conta todas as linhas que passam nos filtros, não só as mostradas.
 
 ## Totais que batem certo
 
@@ -89,6 +97,24 @@ fixos para o mesmo período:
 2. No `detalhe`, `{kz:cêntimos}`, `{qtd:número}` e `{data:AAAA-MM-DD}` saem no formato do programa
    (1 234,56 Kz, 31/01/2020).
 3. Acrescente o caso ao teste `encontra_os_problemas`.
+
+## Fórmulas
+
+`dados.consultar` recebe `formulas: [{nome, expressao, tipo}]`.
+- **Colunas:** cada fórmula entra como a coluna `formula:<n>`, a seguir às outras, e ordena-se como elas.
+- **Referências:** as colunas escrevem-se pela chave (`{soma:lucro}`, `{contar}`, `{lucro}`) ou pelo rótulo
+  (`{Lucro}`, `{N.º de registos}`). O ecrã insere os rótulos, que se lêem melhor.
+- **Tipo:**
+  - `numero` arredonda a 2 casas;
+  - `dinheiro` dá cêntimos inteiros.
+- **Total:**
+  - no resumo, é a fórmula aplicada aos totais gerais, a razão das somas: a margem do total é o lucro total ÷ as
+    vendas totais, não a soma das margens;
+  - no detalhe, só as fórmulas em dinheiro somam.
+- **Sugestões no ecrã:** Margem % (lucro ÷ valor sem IVA, porque o lucro é sem IVA) e Valor médio (total ÷ n.º de
+  registos), quando o relatório tem essas colunas.
+- **Modelos e relatórios prontos:** os modelos guardam as fórmulas na definição. Os relatórios prontos de lucro trazem
+  a margem, e o das vendas por operador traz o valor médio.
 
 ## Relatórios prontos e painel
 

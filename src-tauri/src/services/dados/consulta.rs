@@ -301,7 +301,8 @@ pub async fn consultar(st: &AppState, q: ConsultaIn) -> AppResult<Value> {
         let s = super::formula::sql(&fm.expressao, &coluna).map_err(|e| AppError::msg(format!("Fórmula «{nome}»: {e}")))?;
         let (s, tipo) = match fm.tipo.as_str() {
             "dinheiro" => (format!("CAST(ROUND({s}) AS INTEGER)"), Tipo::Dinheiro),
-            "" | "numero" => (format!("ROUND({s}, 4)"), Tipo::Numero),
+            // duas casas, como os indicadores se lêem (margem 94,91 %)
+            "" | "numero" => (format!("ROUND({s}, 2)"), Tipo::Numero),
             outro => return Err(AppError::msg(format!("Tipo de fórmula desconhecido: «{outro}»."))),
         };
         // total: nos resumos, a fórmula sobre os totais gerais (razão das somas); nas linhas soltas, só o dinheiro soma
@@ -448,13 +449,13 @@ mod testes {
         assert_eq!((r["colunas"][4]["id"].as_str(), r["colunas"][4]["tipo"].as_str(), r["colunas"][5]["tipo"].as_str()), (Some("formula:0"), Some("numero"), Some("dinheiro")), "{r}");
         for l in r["linhas"].as_array().unwrap() {
             let esperado = l[2].as_f64().unwrap() / l[1].as_f64().unwrap() * 100.0;
-            assert!((l[4].as_f64().unwrap() - esperado).abs() < 0.001, "margem de {l}");
+            assert!((l[4].as_f64().unwrap() - esperado).abs() < 0.006, "margem de {l}");
         }
         // óleo: 1 linha, 600,00 de lucro; arroz: 2 linhas (venda e nota de crédito), 400,00 → 200,00 por linha
         assert_eq!((r["linhas"][0][0].as_str(), r["linhas"][0][5].as_i64()), (Some("Óleo 1L"), Some(60_000)), "ordenado pela fórmula: {r}");
         assert_eq!(r["linhas"][1][5].as_i64(), Some(20_000), "{r}");
         let total_margem = r["totais"]["soma:lucro"].as_f64().unwrap() / r["totais"]["soma:total"].as_f64().unwrap() * 100.0;
-        assert!((r["totais"]["formula:0"].as_f64().unwrap() - total_margem).abs() < 0.001, "{r}");
+        assert!((r["totais"]["formula:0"].as_f64().unwrap() - total_margem).abs() < 0.006, "{r}");
         assert_eq!(r["totais"]["formula:1"].as_i64(), Some(33_333), "1 000,00 ÷ 3 linhas: {r}");
         // nas linhas soltas: o dinheiro soma, o número não; dividir por zero dá vazio
         let r = rpc(
