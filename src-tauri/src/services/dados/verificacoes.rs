@@ -21,7 +21,8 @@ pub struct Verificacao {
     pub permissao: &'static str,
     /// uma linha com o número de casos
     pub contar: &'static str,
-    /// até 20 casos, com as colunas «rotulo» e «detalhe»
+    /// até 20 casos, com as colunas «rotulo» e «detalhe»; no detalhe, `{kz:cêntimos}`, `{qtd:número}` e
+    /// `{data:AAAA-MM-DD}` são valores que o ecrã mostra no formato do resto do programa (1 234,56 Kz, 31/01/2020)
     pub exemplos: &'static str,
     /// o ecrã onde se corrige
     pub corrigir: &'static str,
@@ -88,7 +89,7 @@ pub const VERIFICACOES: &[Verificacao] = &[
         gravidade: "aviso",
         permissao: "artigos.editar",
         contar: "SELECT COUNT(*) FROM artigos WHERE ativo = 1 AND preco1 > 0 AND custo_medio > preco1",
-        exemplos: "SELECT referencia || ' — ' || descricao AS rotulo, printf('preço %.2f · custo %.2f', preco1 / 100.0, custo_medio / 100.0) AS detalhe
+        exemplos: "SELECT referencia || ' — ' || descricao AS rotulo, 'preço {kz:' || preco1 || '} · custo médio {kz:' || custo_medio || '}' AS detalhe
                    FROM artigos WHERE ativo = 1 AND preco1 > 0 AND custo_medio > preco1 ORDER BY custo_medio - preco1 DESC LIMIT 20",
         corrigir: "/artigos",
         loja: "",
@@ -100,7 +101,7 @@ pub const VERIFICACOES: &[Verificacao] = &[
         gravidade: "aviso",
         permissao: "stock.inventario",
         contar: "SELECT COUNT(*) FROM stock s JOIN artigos a ON a.id = s.artigo_id WHERE a.ativo = 1 AND a.controla_stock = 1 AND s.quantidade < 0{LOJA}",
-        exemplos: "SELECT a.referencia || ' — ' || a.descricao AS rotulo, ar.nome || ': ' || s.quantidade AS detalhe
+        exemplos: "SELECT a.referencia || ' — ' || a.descricao AS rotulo, ar.nome || ': {qtd:' || s.quantidade || '}' AS detalhe
                    FROM stock s JOIN artigos a ON a.id = s.artigo_id JOIN armazens ar ON ar.id = s.armazem_id
                    WHERE a.ativo = 1 AND a.controla_stock = 1 AND s.quantidade < 0{LOJA} ORDER BY s.quantidade LIMIT 20",
         corrigir: "/inventario",
@@ -113,7 +114,7 @@ pub const VERIFICACOES: &[Verificacao] = &[
         gravidade: "aviso",
         permissao: "stock.inventario",
         contar: "SELECT COUNT(*) FROM stock s JOIN artigos a ON a.id = s.artigo_id WHERE a.ativo = 1 AND a.controla_stock = 1 AND s.quantidade > 0 AND a.custo_medio = 0{LOJA}",
-        exemplos: "SELECT a.referencia || ' — ' || a.descricao AS rotulo, ar.nome || ': ' || s.quantidade AS detalhe
+        exemplos: "SELECT a.referencia || ' — ' || a.descricao AS rotulo, ar.nome || ': {qtd:' || s.quantidade || '}' AS detalhe
                    FROM stock s JOIN artigos a ON a.id = s.artigo_id JOIN armazens ar ON ar.id = s.armazem_id
                    WHERE a.ativo = 1 AND a.controla_stock = 1 AND s.quantidade > 0 AND a.custo_medio = 0{LOJA} ORDER BY a.descricao LIMIT 20",
         corrigir: "/artigos",
@@ -128,7 +129,7 @@ pub const VERIFICACOES: &[Verificacao] = &[
         contar: "SELECT COUNT(*) FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo
                  WHERE t.grupo = 'VENDAS' AND d.estado = 'N' AND d.valor_pendente > 0 AND d.data_vencimento < date('now', 'localtime'){LOJA}",
         exemplos: "SELECT d.numero_doc || ' — ' || d.entidade_nome AS rotulo,
-                          printf('%.2f Kz · venceu %s', d.valor_pendente / 100.0, strftime('%d/%m/%Y', d.data_vencimento)) AS detalhe
+                          '{kz:' || d.valor_pendente || '} · venceu a {data:' || substr(d.data_vencimento, 1, 10) || '}' AS detalhe
                    FROM documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo
                    WHERE t.grupo = 'VENDAS' AND d.estado = 'N' AND d.valor_pendente > 0 AND d.data_vencimento < date('now', 'localtime'){LOJA}
                    ORDER BY d.data_vencimento LIMIT 20",
@@ -237,6 +238,10 @@ mod testes {
         let nif = r.as_array().unwrap().iter().find(|v| v["id"] == "nif_repetido").unwrap();
         assert_eq!(nif["exemplos"][0]["rotulo"], "5417000111");
         assert!(nif["exemplos"][0]["detalhe"].as_str().unwrap().contains("Mercearia A, Lda"), "{nif}");
+        let detalhe = |id: &str| r.as_array().unwrap().iter().find(|v| v["id"] == id).unwrap()["exemplos"][0]["detalhe"].as_str().unwrap().to_string();
+        assert_eq!(detalhe("preco_abaixo_custo"), "preço {kz:100000} · custo médio {kz:150000}");
+        assert!(detalhe("stock_negativo").ends_with(": {qtd:-4.0}"), "{}", detalhe("stock_negativo"));
+        assert!(detalhe("vencidos_por_receber").ends_with(" · venceu a {data:2020-01-31}"), "{}", detalhe("vencidos_por_receber"));
 
         // o operador de caixa só vê as verificações das suas permissões (clientes)
         rpc(&st, "utilizadores.guardar", json!({ "nome": "Operador", "login": "caixa1", "perfil": "CAIXA", "senha": "caixa123", "mudar_senha": false })).await;

@@ -17,7 +17,7 @@ export interface FonteDados {
   id: string;
   rotulo: string;
   descricao: string;
-  /** o campo de data principal (o período) */
+  /** o campo de data principal (o período); vazio numa fonte que é um retrato de agora (stock, contas a receber) */
   data: string;
   campos: CampoFonte[];
 }
