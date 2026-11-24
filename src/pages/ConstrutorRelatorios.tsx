@@ -51,6 +51,21 @@ const PADRAO: Record<string, { campos: string[]; agrupar: string[]; agregados: A
     agrupar: ["conta"],
     agregados: [{ funcao: "soma", campo: "entrada" }, { funcao: "soma", campo: "saida" }, { funcao: "soma", campo: "saldo" }],
   },
+  stock: {
+    campos: ["referencia", "artigo", "loja", "existencia", "valor"],
+    agrupar: ["familia"],
+    agregados: [{ funcao: "soma", campo: "existencia" }, { funcao: "soma", campo: "valor" }],
+  },
+  compras: {
+    campos: ["data", "documento", "fornecedor", "total", "pendente"],
+    agrupar: ["fornecedor"],
+    agregados: [{ funcao: "contar" }, { funcao: "soma", campo: "liquido" }, { funcao: "soma", campo: "iva" }, { funcao: "soma", campo: "total" }],
+  },
+  conta_corrente: {
+    campos: ["vencimento", "documento", "cliente", "dias_atraso", "pendente"],
+    agrupar: ["escalao"],
+    agregados: [{ funcao: "contar" }, { funcao: "soma", campo: "pendente" }],
+  },
 };
 
 const OPERADORES: Record<CampoFonte["tipo"], [Operador, string][]> = {
@@ -254,7 +269,8 @@ export default function ConstrutorRelatorios() {
     const extra = filtros.map((f) => (campoDe.get(f.campo) ? valorFiltro(f, campoDe.get(f.campo)!) : undefined)).filter((f): f is FiltroDados => !!f);
     return {
       fonte: fonte.id,
-      filtros: [{ campo: fonte.data, op: "entre", valor: [de || "0000-01-01", ate || "9999-12-31"] }, ...extra],
+      // uma fonte sem data (o stock, as contas a receber) é um retrato de agora: sem período
+      filtros: fonte.data ? [{ campo: fonte.data, op: "entre", valor: [de || "0000-01-01", ate || "9999-12-31"] }, ...extra] : extra,
       ...(modo === "detalhe" ? { campos } : { agrupar, agregados }),
       ordenar,
     };
@@ -278,7 +294,7 @@ export default function ConstrutorRelatorios() {
     });
   }
 
-  const titulo = fonte ? `${fonte.rotulo} · ${data(de)} a ${data(ate)}` : "Relatório";
+  const titulo = !fonte ? "Relatório" : fonte.data ? `${fonte.rotulo} · ${data(de)} a ${data(ate)}` : `${fonte.rotulo} · situação a ${data(iso(new Date()))}`;
   async function exportar(tipo: "excel" | "csv") {
     if (!pedido) return;
     try {
@@ -375,35 +391,41 @@ export default function ConstrutorRelatorios() {
               </Select>
             </Field>
             {fonte && <p className="text-[12px] text-ink-3">{fonte.descricao}</p>}
-            <Field label="Período">
-              <Select value={periodo} onChange={(e) => aplicarPeriodo(e.target.value as Periodo, de, ate)}>
-                {PERIODOS.map(([p, nome]) => (
-                  <option key={p} value={p}>
-                    {nome}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="De">
-                <InputData
-                  value={de}
-                  onChange={(e) => {
-                    setDe(e.target.value);
-                    setPeriodo("personalizado");
-                  }}
-                />
-              </Field>
-              <Field label="Até">
-                <InputData
-                  value={ate}
-                  onChange={(e) => {
-                    setAte(e.target.value);
-                    setPeriodo("personalizado");
-                  }}
-                />
-              </Field>
-            </div>
+            {fonte && !fonte.data ? (
+              <p className="rounded-lg bg-sunken px-3 py-2 text-[12px] text-ink-2">Sem período: mostra a situação de agora. Para escolher, use os filtros.</p>
+            ) : (
+              <>
+                <Field label="Período">
+                  <Select value={periodo} onChange={(e) => aplicarPeriodo(e.target.value as Periodo, de, ate)}>
+                    {PERIODOS.map(([p, nome]) => (
+                      <option key={p} value={p}>
+                        {nome}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="De">
+                    <InputData
+                      value={de}
+                      onChange={(e) => {
+                        setDe(e.target.value);
+                        setPeriodo("personalizado");
+                      }}
+                    />
+                  </Field>
+                  <Field label="Até">
+                    <InputData
+                      value={ate}
+                      onChange={(e) => {
+                        setAte(e.target.value);
+                        setPeriodo("personalizado");
+                      }}
+                    />
+                  </Field>
+                </div>
+              </>
+            )}
             <Segmentado
               valor={modo}
               onChange={(m) => {
@@ -564,7 +586,7 @@ export default function ConstrutorRelatorios() {
             <div className="font-semibold">{titulo}</div>
             <div className="flex items-center gap-3">
               <div className={cn("text-[12.5px] text-ink-3", resultado.isFetching && "animate-pulse")}>
-                {r ? `${numero(r.total_linhas, 0)} ${modo === "resumo" && agrupar.length ? "grupos" : "linhas"}` : "…"}
+                {r ? `${numero(r.total_linhas, 0)} ${modo === "resumo" && agrupar.length ? (r.total_linhas === 1 ? "grupo" : "grupos") : r.total_linhas === 1 ? "linha" : "linhas"}` : "…"}
                 {ordenar.length > 1 && " · Shift + clique junta colunas à ordenação"}
               </div>
               {graficoPossivel && (

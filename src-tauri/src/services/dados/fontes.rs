@@ -54,8 +54,11 @@ pub struct Fonte {
     pub permissao: &'static str,
     /// `tabelas … WHERE condição base`: tem sempre um WHERE (os filtros juntam-se com AND)
     pub de: &'static str,
-    /// o campo de data principal (o período do relatório)
+    /// o campo de data principal (o período do relatório); vazio numa fonte que é um retrato de agora (o stock)
     pub data: &'static str,
+    /// a expressão do armazém (loja) de cada linha: um utilizador limitado a uma loja só vê as linhas dela, como nos
+    /// relatórios fixos (`st.loja()`); vazio numa fonte que não é por loja (a tesouraria, como o fluxo de caixa)
+    pub loja: &'static str,
     pub campos: &'static [Campo],
 }
 
@@ -85,6 +88,7 @@ pub const FONTES: &[Fonte] = &[
         de: "documentos d LEFT JOIN utilizadores u ON u.id = d.utilizador_id LEFT JOIN utilizadores v ON v.id = d.vendedor_id
              LEFT JOIN postos p ON p.id = d.posto_id LEFT JOIN armazens ar ON ar.id = d.armazem_id WHERE {VENDAS}",
         data: "data",
+        loja: "d.armazem_id",
         campos: &[
             c("data", "Data", Data, "d.data_emissao"),
             c("mes", "Mês", Texto, "substr(d.data_emissao, 1, 7)"),
@@ -115,6 +119,7 @@ pub const FONTES: &[Fonte] = &[
              LEFT JOIN familias f ON f.id = a.familia_id LEFT JOIN utilizadores u ON u.id = d.utilizador_id
              LEFT JOIN armazens ar ON ar.id = d.armazem_id WHERE {VENDAS}",
         data: "data",
+        loja: "d.armazem_id",
         campos: &[
             c("data", "Data", Data, "d.data_emissao"),
             c("mes", "Mês", Texto, "substr(d.data_emissao, 1, 7)"),
@@ -143,6 +148,7 @@ pub const FONTES: &[Fonte] = &[
         permissao: "tesouraria.fluxo",
         de: "vw_fluxo f LEFT JOIN contas c ON c.id = f.conta_id WHERE f.anulado = 0",
         data: "data",
+        loja: "",
         campos: &[
             c("data", "Data", Data, "f.data"),
             c("mes", "Mês", Texto, "substr(f.data, 1, 7)"),
@@ -156,6 +162,91 @@ pub const FONTES: &[Fonte] = &[
             c("entrada", "Entradas", Dinheiro, "CASE WHEN f.tipo = 'ENTRADA' THEN f.valor ELSE 0 END"),
             c("saida", "Saídas", Dinheiro, "CASE WHEN f.tipo = 'ENTRADA' THEN 0 ELSE f.valor END"),
             c("saldo", "Saldo (entradas − saídas)", Dinheiro, "CASE WHEN f.tipo = 'ENTRADA' THEN f.valor ELSE -f.valor END"),
+        ],
+    },
+    Fonte {
+        id: "stock",
+        rotulo: "Stock (existências por armazém)",
+        descricao: "A existência de cada artigo em cada armazém agora (zero onde nunca entrou), com o mínimo, o custo médio e o valor",
+        permissao: "relatorios.ver",
+        de: "artigos a CROSS JOIN armazens ar LEFT JOIN stock s ON s.artigo_id = a.id AND s.armazem_id = ar.id
+             LEFT JOIN familias f ON f.id = a.familia_id WHERE a.ativo = 1 AND a.controla_stock = 1 AND ar.ativo = 1",
+        data: "",
+        loja: "ar.id",
+        campos: &[
+            c("referencia", "Referência", Texto, "a.referencia"),
+            c("artigo", "Artigo", Texto, "a.descricao"),
+            c("familia", "Família", Texto, "COALESCE(f.descricao, '(sem família)')"),
+            c("loja", "Armazém", Texto, "ar.nome"),
+            c("existencia", "Existência", Numero, "COALESCE(s.quantidade, 0)"),
+            nao_somavel("minimo", "Stock mínimo", Numero, "a.qtd_minima"),
+            c("abaixo_minimo", "No mínimo ou abaixo", Logico, "CASE WHEN COALESCE(s.quantidade, 0) <= a.qtd_minima THEN 1 ELSE 0 END"),
+            nao_somavel("custo_medio", "Custo médio", Dinheiro, "a.custo_medio"),
+            c("valor", "Valor ao custo", Dinheiro, "CAST(ROUND(COALESCE(s.quantidade, 0) * a.custo_medio) AS INTEGER)"),
+            nao_somavel("pvp", "PVP", Dinheiro, "COALESCE(a.pvp1, a.preco1)"),
+            c("ultima_entrada", "Última entrada", Data, "substr(s.ultima_entrada, 1, 10)"),
+            c("ultima_saida", "Última saída", Data, "substr(s.ultima_saida, 1, 10)"),
+        ],
+    },
+    Fonte {
+        id: "compras",
+        rotulo: "Compras (documentos de fornecedores)",
+        descricao: "Facturas, facturas-recibo e notas de débito de fornecedores, e as notas de crédito deles a subtrair, sem as anuladas",
+        permissao: "compras.fatura",
+        de: "documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo LEFT JOIN armazens ar ON ar.id = d.armazem_id
+             WHERE t.grupo = 'COMPRAS' AND t.classe = 'COMPRA' AND d.estado <> 'A'",
+        data: "data",
+        loja: "d.armazem_id",
+        campos: &[
+            c("data", "Data", Data, "d.data_emissao"),
+            c("mes", "Mês", Texto, "substr(d.data_emissao, 1, 7)"),
+            c("ano", "Ano", Texto, "substr(d.data_emissao, 1, 4)"),
+            c("documento", "Documento", Texto, "d.numero_doc"),
+            c("doc_fornecedor", "N.º do fornecedor", Texto, "d.doc_externo"),
+            c("tipo", "Tipo de documento", Texto, "d.tipo_codigo"),
+            c("fornecedor", "Fornecedor", Texto, "d.entidade_nome"),
+            c("nif", "NIF do fornecedor", Texto, "d.entidade_nif"),
+            c("loja", "Armazém", Texto, "ar.nome"),
+            c("liquido", "Valor sem IVA", Dinheiro, "CASE WHEN t.credito = 1 THEN -1 ELSE 1 END * d.total_liquido"),
+            c("iva", "IVA", Dinheiro, "CASE WHEN t.credito = 1 THEN -1 ELSE 1 END * d.total_iva"),
+            c("total", "Total", Dinheiro, "CASE WHEN t.credito = 1 THEN -1 ELSE 1 END * d.total"),
+            c("pendente", "Por pagar", Dinheiro, "d.valor_pendente"),
+        ],
+    },
+    Fonte {
+        id: "conta_corrente",
+        rotulo: "Contas a receber (documentos em dívida)",
+        descricao: "Documentos de venda com valor por receber, com os dias de atraso e o escalão da antiguidade",
+        permissao: "relatorios.ver",
+        de: "documentos d JOIN tipos_documento t ON t.codigo = d.tipo_codigo LEFT JOIN armazens ar ON ar.id = d.armazem_id
+             WHERE t.grupo = 'VENDAS' AND d.estado = 'N' AND d.valor_pendente > 0",
+        data: "",
+        loja: "d.armazem_id",
+        campos: &[
+            c("data", "Data", Data, "d.data_emissao"),
+            c("vencimento", "Vencimento", Data, "COALESCE(d.data_vencimento, d.data_emissao)"),
+            c("documento", "Documento", Texto, "d.numero_doc"),
+            c("cliente", "Cliente", Texto, "d.entidade_nome"),
+            c("nif", "NIF do cliente", Texto, "d.entidade_nif"),
+            c("loja", "Loja (armazém)", Texto, "ar.nome"),
+            nao_somavel(
+                "dias_atraso",
+                "Dias de atraso",
+                Numero,
+                "CAST(MAX(0, julianday(date('now', 'localtime')) - julianday(COALESCE(d.data_vencimento, d.data_emissao))) AS INTEGER)",
+            ),
+            c(
+                "escalao",
+                "Antiguidade",
+                Texto,
+                "CASE WHEN COALESCE(d.data_vencimento, d.data_emissao) >= date('now', 'localtime') THEN '0. Por vencer'
+                      WHEN julianday(date('now', 'localtime')) - julianday(COALESCE(d.data_vencimento, d.data_emissao)) <= 30 THEN '1. Até 30 dias'
+                      WHEN julianday(date('now', 'localtime')) - julianday(COALESCE(d.data_vencimento, d.data_emissao)) <= 60 THEN '2. 31 a 60 dias'
+                      WHEN julianday(date('now', 'localtime')) - julianday(COALESCE(d.data_vencimento, d.data_emissao)) <= 90 THEN '3. 61 a 90 dias'
+                      ELSE '4. Mais de 90 dias' END",
+            ),
+            c("total", "Total do documento", Dinheiro, "d.total"),
+            c("pendente", "Por receber", Dinheiro, "d.valor_pendente"),
         ],
     },
 ];
@@ -175,7 +266,9 @@ mod testes {
             assert!(ids.insert(f.id), "fonte repetida: {}", f.id);
             assert!(f.de.contains(" WHERE "), "{}: o FROM tem de acabar num WHERE (os filtros juntam-se com AND)", f.id);
             assert!(crate::state::PERMISSOES.contains(&f.permissao), "{}: permissão desconhecida {}", f.id, f.permissao);
-            assert!(f.campo(f.data).is_some_and(|c| c.tipo == Data), "{}: o campo de data tem de existir", f.id);
+            assert!(f.data.is_empty() || f.campo(f.data).is_some_and(|c| c.tipo == Data), "{}: o campo de data tem de existir", f.id);
+            // uma fonte com armazém (mostra a loja) tem de limitar o utilizador de uma loja à dele
+            assert!(!f.de.contains("armazens") || !f.loja.is_empty(), "{}: falta a expressão da loja", f.id);
             let mut campos = std::collections::HashSet::new();
             for c in f.campos {
                 assert!(campos.insert(c.id), "{}: campo repetido {}", f.id, c.id);
