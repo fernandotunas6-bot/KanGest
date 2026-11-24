@@ -180,7 +180,27 @@ ligado a **uma loja**: Sistema → Utilizadores → a ficha → **Loja**. Com um
 
 - só entra nos **postos dessa loja** (num posto de outra loja, o login diz de que loja é o utilizador);
 - vê só os **documentos** dessa loja (a lista e a abertura de um documento);
-- os **relatórios** (vendas, síntese, stock) e o **painel** inicial são os dessa loja, peça o filtro que pedir.
+- os **relatórios** (vendas, síntese, stock, construtor de relatórios, qualidade dos dados) e o **painel** inicial são os
+  dessa loja, peça o filtro que pedir.
 
 «Todas as lojas» (o normal) é como antes. Os administradores vêem sempre todas. As chaves da API agem pelo posto
 delas, não pela loja do utilizador.
+
+## Fecho de períodos
+
+Em **Gestão de Finanças › Fecho de Períodos**, o administrador (permissão `sistema.periodos`, que por omissão só ele
+tem) fecha os meses já conferidos. Só se fecha um mês que já terminou. Com um mês fechado:
+
+- os documentos desse mês já não se anulam: corrigem-se com nota de crédito, emitida hoje;
+- não se lançam nem se anulam movimentos de tesouraria com data desse mês;
+- não se registam compras com a data do documento do fornecedor nesse mês;
+- as regularizações de conta corrente desse mês não se anulam.
+
+As vendas, os recibos, os vales de caixa e as transferências têm sempre a data de hoje, e o mês de hoje nunca está
+fechado. Reabrir pede um motivo. Fechar e reabrir ficam no registo de auditoria, com quem o fez e quando.
+
+A regra está em `services/periodos.rs` (`exigir_aberto`, chamada por cada serviço que lança ou anula com data). Os
+gatilhos da migração `0049` repetem-na na base de dados, para qualquer caminho que escape aos serviços.
+
+A importação de dados (KIGEST, SAF-T, Excel) não verifica os meses fechados, porque se faz ao começar, antes de haver
+meses fechados.

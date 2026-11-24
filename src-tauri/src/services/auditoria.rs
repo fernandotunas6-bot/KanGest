@@ -48,6 +48,7 @@ pub const FICHAS: &[(&str, &str)] = &[
     ("of_viaturas", "Viatura"),
     ("of_ordens", "Ordem de reparação"),
     ("relatorio_modelos", "Modelo de relatório"),
+    ("periodos_fechados", "Período fechado"),
     ("documentos", "Documento"),
     ("empresa", "Empresa"),
     ("config", "Configurações"),
@@ -141,6 +142,8 @@ pub(super) fn alvo(metodo: &str, params: &Value) -> Option<Alvo> {
         "documentos.anular" => a("documentos", "id", "id", Some("ANULAR")),
         "dados.modeloGuardar" => id("relatorio_modelos"),
         "dados.modeloEliminar" => a("relatorio_modelos", "id", "id", Some("ELIMINAR")),
+        "periodos.fechar" => a("periodos_fechados", "mes", "mes", Some("FECHAR")),
+        "periodos.reabrir" => a("periodos_fechados", "mes", "mes", Some("REABRIR")),
         "empresa.guardar" => a("empresa", "id", "", None),
         _ => None,
     }

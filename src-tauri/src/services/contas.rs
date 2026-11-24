@@ -309,10 +309,11 @@ pub async fn regularizacao_anular(st: &AppState, a: AnularRegIn) -> AppResult<Va
     if a.motivo.trim().len() < 3 {
         return Err(AppError::msg("Indique o motivo."));
     }
-    let row = sqlx::query("SELECT tipo, anulado FROM cc_regularizacoes WHERE id = ?").bind(a.id).fetch_optional(&st.pool).await?.ok_or(AppError::NaoEncontrado)?;
+    let row = sqlx::query("SELECT tipo, anulado, data FROM cc_regularizacoes WHERE id = ?").bind(a.id).fetch_optional(&st.pool).await?.ok_or(AppError::NaoEncontrado)?;
     if row.get::<i64, _>("anulado") == 1 {
         return Err(AppError::msg("A regularização já está anulada."));
     }
+    super::periodos::exigir_aberto(&st.pool, &row.get::<String, _>("data"), "As regularizações desse mês já não se anulam.").await?;
     let credito = row.get::<String, _>("tipo") == "CREDITO";
     let mut tx = crate::db::transacao(&st.pool).await?;
     for (did, v) in sqlx::query_as::<_, (i64, i64)>("SELECT documento_id, valor FROM cc_regularizacao_docs WHERE regularizacao_id = ?").bind(a.id).fetch_all(&mut *tx).await? {
