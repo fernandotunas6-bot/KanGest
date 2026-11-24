@@ -294,8 +294,38 @@ function noBrowser(metodo: string, params: unknown): unknown {
 
 // ------------------------------------------------------------------ chamada única
 
+// Regras de aprovação: quando uma se aplica (services/aprovacoes.rs), o servidor recusa com esta frase. O diálogo de
+// PIN (components/AprovacaoPin.tsx) pede o PIN de quem pode aprovar e a operação repete-se com ele, sem que cada
+// ecrã tenha de o fazer.
+const PEDE_APROVACAO = "precisa da aprovação de um supervisor (PIN)";
+
+/** Mostra o pedido e chama `tentar(pin)` até resultar, ou rejeita se o utilizador desistir. */
+export type PedidoAprovacao = (mensagem: string, tentar: (pin: string) => Promise<unknown>) => Promise<unknown>;
+let pedirAprovacao: PedidoAprovacao | null = null;
+
+/** O diálogo de PIN regista-se aqui ao montar (e sai ao desmontar). */
+export function definirPedidoAprovacao(f: PedidoAprovacao): () => void {
+  pedirAprovacao = f;
+  return () => {
+    if (pedirAprovacao === f) pedirAprovacao = null;
+  };
+}
+
 /** Chamada única ao backend (`rpc`). Erros chegam como string em português. */
 export async function call<T = unknown>(method: string, params?: unknown): Promise<T> {
+  try {
+    return await chamar<T>(method, params);
+  } catch (e) {
+    const msg = (e as Error)?.message ?? "";
+    const pedir = pedirAprovacao;
+    const objecto = params === undefined || params === null || (typeof params === "object" && !Array.isArray(params));
+    const jaTemPin = objecto && !!(params as { autorizacao_pin?: unknown } | null)?.autorizacao_pin;
+    if (!pedir || !msg.includes(PEDE_APROVACAO) || !objecto || jaTemPin) throw e;
+    return (await pedir(msg, (pin) => chamar<T>(method, { ...((params as object | null) ?? {}), autorizacao_pin: pin }))) as T;
+  }
+}
+
+async function chamar<T>(method: string, params?: unknown): Promise<T> {
   if (!NA_APP) {
     const local = noBrowser(method, params);
     if (local !== NAO) return local as T;

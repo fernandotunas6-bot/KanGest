@@ -90,6 +90,16 @@ export const GRUPOS_PERMISSOES: { grupo: string; itens: { id: string; label: str
       { id: "sistema.periodos", label: "Fechar e reabrir meses (fecho de períodos)" },
     ],
   },
+  {
+    // quem aprova com o PIN quando o administrador liga uma regra (Sistema › Regras de Aprovação)
+    grupo: "Aprovar com o PIN (regras de aprovação)",
+    itens: [
+      { id: "aprovar.anulacao", label: "Aprovar anulações de documentos" },
+      { id: "aprovar.saidas", label: "Aprovar saídas de tesouraria, pagamentos e devoluções" },
+      { id: "aprovar.vales", label: "Aprovar vales de caixa" },
+      { id: "aprovar.creditos", label: "Aprovar notas de crédito e regularizações" },
+    ],
+  },
 ];
 
 export const TODAS_PERMISSOES = GRUPOS_PERMISSOES.flatMap((g) => g.itens.map((i) => i.id));
