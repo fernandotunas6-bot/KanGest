@@ -4,12 +4,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Tag, Ticket } from "lucide-react";
+import { Plus, Tag, Tags, Ticket, TicketPercent } from "lucide-react";
 import { call } from "@/lib/api";
 import { useTabelas } from "@/lib/hooks";
 import { data, kz, numero, parseKz, toInputKz } from "@/lib/format";
 import { useSession } from "@/store/session";
-import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th } from "@/components/ui";
+import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Table, Td, Th, BlocoCarregando, Empty } from "@/components/ui";
 import { ArtigoPicker } from "@/components/Pickers";
 import type { Artigo } from "@/lib/types";
 
@@ -109,7 +109,13 @@ export default function Promocoes() {
               ))}
             </tbody>
           </Table>
-          {!d?.regras.length && <p className="py-6 text-center text-ink-3">Ainda não há regras.</p>}
+          {!d ? (
+            <BlocoCarregando linhas={3} />
+          ) : (
+            !d.regras.length && (
+              <Empty icon={<Tags className="size-6" />} title="Ainda não há regras de promoção" text="Por exemplo, «leve 3, pague 2» ou um desconto a partir de certa quantidade: aplicam-se sozinhas no POS e nas facturas." />
+            )
+          )}
         </Card>
 
         <Card>
@@ -154,7 +160,9 @@ export default function Promocoes() {
               ))}
             </tbody>
           </Table>
-          {!d?.cupoes.length && <p className="py-6 text-center text-ink-3">Ainda não há cupões.</p>}
+          {d && !d.cupoes.length && (
+            <Empty icon={<TicketPercent className="size-6" />} title="Ainda não há cupões" text="Um código que o cliente apresenta no POS e dá um desconto na venda toda." />
+          )}
         </Card>
       </div>
       {regra && <RegraModal inicial={regra} onClose={() => setRegra(null)} onDone={() => { setRegra(null); refetch(); }} />}
