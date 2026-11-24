@@ -75,6 +75,8 @@ export function Grelha({
                   key={i}
                   className={cn(
                     alinhaDireita(colunas[i].tipo) && "num text-right",
+                    // com muitas colunas (comparação de períodos), o texto não fica espremido numa coluna estreita
+                    colunas[i].tipo === "texto" && "min-w-[10rem]",
                     typeof v === "number" && v < 0 && (colunas[i].tipo === "dinheiro" || colunas[i].tipo === "percentagem") && "text-danger",
                     typeof v === "number" && v > 0 && colunas[i].tipo === "percentagem" && "text-ok",
                   )}

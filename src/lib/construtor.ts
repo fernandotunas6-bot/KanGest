@@ -123,14 +123,14 @@ export const colunaComparada = (id: string) => id.includes("#");
 /**
  * Junta o resumo actual com o do período comparado, grupo a grupo (pelos valores dos campos agrupados): a seguir a
  * cada valor vêm o valor do outro período e a variação. Os grupos que só existiam no outro período (um cliente que
- * este mês não comprou) entram no fim, com o actual vazio. O total geral compara-se da mesma maneira.
+ * este mês não comprou) entram no fim, com o actual vazio e a variação de −100 %. O total compara-se da mesma maneira.
  */
 export function juntarComparacao(atual: ResultadoDados, anterior: ResultadoDados, nGrupos: number): ResultadoDados {
   const grupos = atual.colunas.slice(0, nGrupos);
   const valores = atual.colunas.slice(nGrupos);
   const colunas: CampoFonte[] = [...grupos];
   for (const c of valores) {
-    colunas.push(c, { id: `${c.id}#anterior`, rotulo: `${c.rotulo} (comparado)`, tipo: c.tipo }, { id: `${c.id}#var`, rotulo: "Variação", tipo: "percentagem" });
+    colunas.push(c, { id: `${c.id}#anterior`, rotulo: `${c.rotulo} (anterior)`, tipo: c.tipo }, { id: `${c.id}#var`, rotulo: "Variação", tipo: "percentagem" });
   }
   const chave = (l: ValorDados[]) => JSON.stringify(l.slice(0, nGrupos));
   const antes = new Map(anterior.linhas.map((l) => [chave(l), l] as const));

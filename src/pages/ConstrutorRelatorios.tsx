@@ -309,7 +309,7 @@ export default function ConstrutorRelatorios() {
   const titulo = !fonte
     ? "Relatório"
     : fonte.data
-      ? `${fonte.rotulo} · ${data(de)} a ${data(ate)}${outro ? ` · comparado com ${data(outro[0])} a ${data(outro[1])}` : ""}`
+      ? `${fonte.rotulo} · ${intervalo(de, ate)}${outro ? ` · comparado com ${intervalo(outro[0], outro[1])}` : ""}`
       : `${fonte.rotulo} · situação a ${data(iso(new Date()))}`;
   async function exportar(tipo: "excel" | "csv") {
     if (!pedido) return;
@@ -484,7 +484,7 @@ export default function ConstrutorRelatorios() {
                         : agrupar.some(temporal)
                           ? "Para comparar, agrupe por um campo que não seja data, mês ou ano (por exemplo, família ou cliente)."
                           : outro
-                            ? `${data(outro[0])} a ${data(outro[1])}`
+                            ? intervalo(outro[0], outro[1])
                             : undefined
                     }
                   >
@@ -828,3 +828,6 @@ function gruposDe(r: ResultadoDados) {
 
 /** As duas consultas são do mesmo relatório (enquanto uma se actualiza, a outra pode ainda ser a anterior). */
 const mesmasColunas = (a: ResultadoDados, b: ResultadoDados) => a.colunas.map((c) => c.id).join("|") === b.colunas.map((c) => c.id).join("|");
+
+/** «01/11/2026 a 24/11/2026», ou só o dia quando começa e acaba no mesmo. */
+const intervalo = (de: string, ate: string) => (de === ate ? data(de) : `${data(de)} a ${data(ate)}`);
