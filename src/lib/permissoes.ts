@@ -87,6 +87,7 @@ export const GRUPOS_PERMISSOES: { grupo: string; itens: { id: string; label: str
       { id: "sistema.atualizacoes", label: "Actualizações" },
       { id: "sistema.importar", label: "Importar dados (KIGEST, SAF-T, Excel)" },
       { id: "sistema.api", label: "API e integrações (chaves de acesso)" },
+      { id: "sistema.periodos", label: "Fechar e reabrir meses (fecho de períodos)" },
     ],
   },
 ];

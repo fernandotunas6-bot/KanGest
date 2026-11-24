@@ -133,6 +133,7 @@ export const MENU: GrupoMenu[] = [
       { label: "Contas e Centros de Custo", to: "/tesouraria/configuracao", perm: "tesouraria.fluxo" },
       { label: "Relatórios e Mapas de Imposto", to: "/relatorios", perm: "relatorios.ver" },
       { label: "Construtor de Relatórios", to: "/relatorios/construtor", perm: "relatorios.ver" },
+      { label: "Fecho de Períodos", to: "/periodos", perm: "sistema.periodos" },
       { label: "Relatório Síntese (mês a mês)", to: "/relatorios?agrupar=sintese", perm: "relatorios.ver" },
       { label: "Exportar SAF-T (AO)", to: "/relatorios?saft=1", perm: "sistema.saft" },
       { label: "SAF-T de Aquisição (compras)", to: "/relatorios?saft=compras", perm: "sistema.saft" },
