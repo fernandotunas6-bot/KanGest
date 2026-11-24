@@ -5,6 +5,7 @@
 // para Excel, CSV ou impressão. Tudo pelo motor central de dados (dados.fontes / dados.consultar), que só lê e só
 // mostra as fontes que a permissão do utilizador deixa ver.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { BarChart3, FileSpreadsheet, FileText, Filter, Plus, Printer, Rows3, Save, Sigma, Table2, Trash2, X } from "lucide-react";
@@ -26,13 +27,26 @@ import {
   type OrdemDados,
   type ResultadoDados,
 } from "@/lib/dados";
+import {
+  COMPARACOES,
+  PERIODOS,
+  PRONTOS,
+  colunaComparada,
+  datasDe,
+  iso,
+  juntarComparacao,
+  periodoComparado,
+  type Comparar,
+  type Definicao,
+  type FiltroEcra,
+  type Modo,
+  type Periodo,
+} from "@/lib/construtor";
 import { Grelha } from "@/components/dados/Grelha";
 import { BarChart } from "@/components/BarChart";
 import { InputData } from "@/components/InputData";
 import { PrintPortal } from "@/components/DocumentoPrint";
 import { Button, Card, Empty, Field, Input, Modal, PageHeader, Segmentado, Select, cn } from "@/components/ui";
-
-type Modo = "resumo" | "detalhe";
 
 /** Ponto de partida de cada fonte (o utilizador muda à vontade). */
 const PADRAO: Record<string, { campos: string[]; agrupar: string[]; agregados: AgregadoDados[] }> = {
@@ -97,6 +111,8 @@ const OPERADORES: Record<CampoFonte["tipo"], [Operador, string][]> = {
     ["=", "no dia"],
   ],
   logico: [["=", "é"]],
+  // a variação da comparação não é um campo das fontes: não se filtra
+  percentagem: [],
 };
 
 const FUNCOES: [FuncaoAgregado, string][] = [
@@ -106,59 +122,8 @@ const FUNCOES: [FuncaoAgregado, string][] = [
   ["max", "Máximo"],
 ];
 
-/** Um filtro como está no ecrã (o valor em texto, convertido só ao consultar). */
-interface FiltroEcra {
-  campo: string;
-  op: Operador;
-  texto: string;
-}
-
 const inicioMes = () => `${hojeISO().slice(0, 8)}01`;
 
-/** Período relativo: um modelo guardado com «este mês» abre sempre no mês em curso. */
-type Periodo = "mes" | "mes_anterior" | "ano" | "30dias" | "personalizado";
-const PERIODOS: [Periodo, string][] = [
-  ["mes", "Este mês"],
-  ["mes_anterior", "Mês passado"],
-  ["ano", "Este ano"],
-  ["30dias", "Últimos 30 dias"],
-  ["personalizado", "Personalizado"],
-];
-const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-function datasDe(p: Periodo): [string, string] | null {
-  const hoje = hojeISO();
-  const a = Number(hoje.slice(0, 4));
-  const m = Number(hoje.slice(5, 7));
-  switch (p) {
-    case "mes":
-      return [`${hoje.slice(0, 8)}01`, hoje];
-    case "mes_anterior":
-      return [iso(new Date(a, m - 2, 1)), iso(new Date(a, m - 1, 0))];
-    case "ano":
-      return [`${a}-01-01`, hoje];
-    case "30dias": {
-      const d = new Date();
-      d.setDate(d.getDate() - 29);
-      return [iso(d), hoje];
-    }
-    default:
-      return null;
-  }
-}
-
-/** O que um modelo guarda (dados.modeloGuardar): tudo o que define o relatório. */
-interface Definicao {
-  modo: Modo;
-  periodo: Periodo;
-  de: string;
-  ate: string;
-  campos: string[];
-  agrupar: string[];
-  agregados: AgregadoDados[];
-  filtros: FiltroEcra[];
-  ordenar: OrdemDados[];
-  vista: "tabela" | "grafico";
-}
 interface Modelo {
   id: number;
   nome: string;
@@ -197,6 +162,9 @@ export default function ConstrutorRelatorios() {
   const [ordenar, setOrdenar] = useState<OrdemDados[]>([]);
   const [periodo, setPeriodo] = useState<Periodo>("mes");
   const [vista, setVista] = useState<"tabela" | "grafico">("tabela");
+  const [comparar, setComparar] = useState<Comparar>("");
+  // o relatório pronto aberto (lib/construtor.ts PRONTOS), para o seletor de modelos o mostrar
+  const [prontoId, setProntoId] = useState<string | null>(null);
   // a coluna de valores que o gráfico desenha (por omissão, o total ou a primeira em Kz)
   const [serieId, setSerieId] = useState<string | null>(null);
   const qc = useQueryClient();
@@ -226,9 +194,11 @@ export default function ConstrutorRelatorios() {
     setFiltros(d.filtros ?? []);
     setOrdenar(d.ordenar ?? []);
     setVista(d.vista ?? "tabela");
+    setComparar(d.comparar ?? "");
     aplicarPeriodo(d.periodo ?? "mes", d.de, d.ate);
   }
   function abrirModelo(id: number | null) {
+    setProntoId(null);
     setModeloId(id);
     const m = modelos.data?.find((x) => x.id === id);
     if (!m) return;
@@ -238,7 +208,22 @@ export default function ConstrutorRelatorios() {
       setFonteId(m.fonte);
     }
   }
-  const definicao = (): Definicao => ({ modo, periodo, de, ate, campos, agrupar, agregados, filtros, ordenar, vista });
+  const definicao = (): Definicao => ({ modo, periodo, de, ate, campos, agrupar, agregados, filtros, ordenar, vista, comparar });
+
+  // relatórios prontos das fontes que este utilizador pode consultar; o painel abre-os pelo endereço
+  const prontos = PRONTOS.filter((p) => fontes.data?.some((f) => f.id === p.fonte));
+  function abrirPronto(id: string, periodoPedido?: Periodo) {
+    const p = prontos.find((x) => x.id === id);
+    if (!p) return;
+    setModeloId(null);
+    setProntoId(id);
+    const d = periodoPedido ? { ...p.definicao, periodo: periodoPedido } : p.definicao;
+    if (p.fonte === fonte?.id) aplicar(d);
+    else {
+      pendente.current = d;
+      setFonteId(p.fonte);
+    }
+  }
 
   // ao escolher outra fonte, o ponto de partida dela (ou a definição do modelo que se está a abrir)
   useEffect(() => {
@@ -263,6 +248,17 @@ export default function ConstrutorRelatorios() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fonte?.id]);
 
+  // o painel abre aqui um relatório pronto: /relatorios/construtor?pronto=vendas_dia&periodo=mes
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const id = params.get("pronto");
+    if (!id || !fontes.data) return;
+    const p = params.get("periodo");
+    abrirPronto(id, PERIODOS.some(([x]) => x === p) ? (p as Periodo) : undefined);
+    setParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, fontes.data]);
+
   const campoDe = useMemo(() => new Map((fonte?.campos ?? []).map((c) => [c.id, c])), [fonte]);
   const pedido: ConsultaDados | null = useMemo(() => {
     if (!fonte) return null;
@@ -284,8 +280,24 @@ export default function ConstrutorRelatorios() {
     placeholderData: keepPreviousData,
   });
 
+  // comparação com outro período: só no resumo de uma fonte com período, e sem agrupar por datas (o dia, o mês ou o
+  // ano de um período não existem no outro, por isso não haveria grupos a comparar)
+  const temporal = (id: string) => campoDe.get(id)?.tipo === "data" || id === "mes" || id === "ano";
+  const comparando = !!fonte?.data && modo === "resumo" && comparar !== "" && !agrupar.some(temporal);
+  const outro = comparando ? periodoComparado(de, ate, comparar as Exclude<Comparar, "">, periodo) : null;
+  const pedidoOutro: ConsultaDados | null =
+    pedido && outro && fonte ? { ...pedido, filtros: [{ campo: fonte.data, op: "entre", valor: outro }, ...(pedido.filtros ?? []).slice(1)] } : null;
+  const chaveOutro = useDebounce(JSON.stringify(pedidoOutro), 300);
+  const comparado = useQuery({
+    queryKey: ["dados-consulta", chaveOutro],
+    queryFn: () => call<ResultadoDados>("dados.consultar", JSON.parse(chaveOutro)),
+    enabled: comparando && pronto && chaveOutro !== "null",
+    placeholderData: keepPreviousData,
+  });
+
   // ordenação: o clique ordena por essa coluna (de novo: inverte); com Shift junta-a às que já estão
   function aoOrdenar(campo: string, juntar: boolean) {
+    if (colunaComparada(campo)) return;
     setOrdenar((o) => {
       const i = o.findIndex((x) => x.campo === campo);
       if (juntar) return i >= 0 ? o.map((x, k) => (k === i ? { ...x, desc: !x.desc } : x)) : [...o, { campo, desc: false }];
@@ -294,12 +306,20 @@ export default function ConstrutorRelatorios() {
     });
   }
 
-  const titulo = !fonte ? "Relatório" : fonte.data ? `${fonte.rotulo} · ${data(de)} a ${data(ate)}` : `${fonte.rotulo} · situação a ${data(iso(new Date()))}`;
+  const titulo = !fonte
+    ? "Relatório"
+    : fonte.data
+      ? `${fonte.rotulo} · ${data(de)} a ${data(ate)}${outro ? ` · comparado com ${data(outro[0])} a ${data(outro[1])}` : ""}`
+      : `${fonte.rotulo} · situação a ${data(iso(new Date()))}`;
   async function exportar(tipo: "excel" | "csv") {
     if (!pedido) return;
     try {
       // o ficheiro leva todas as linhas (até 5 000), não só as que se vêem
-      const completo = await call<ResultadoDados>("dados.consultar", { ...pedido, limite: 5000 });
+      let completo = await call<ResultadoDados>("dados.consultar", { ...pedido, limite: 5000 });
+      if (comparando && pedidoOutro) {
+        const antes = await call<ResultadoDados>("dados.consultar", { ...pedidoOutro, limite: 5000 });
+        completo = juntarComparacao(completo, antes, gruposDe(completo));
+      }
       if (tipo === "excel") await exportarResultadoExcel(completo, titulo);
       else await exportarResultadoCsv(completo, titulo);
     } catch (e) {
@@ -310,7 +330,12 @@ export default function ConstrutorRelatorios() {
   const quantitativos = (fonte?.campos ?? []).filter((c) => c.tipo === "dinheiro" || c.tipo === "numero");
   const agrupaveis = (fonte?.campos ?? []).filter((c) => c.tipo !== "dinheiro" && c.tipo !== "numero");
   const alternar = (lista: string[], id: string) => (lista.includes(id) ? lista.filter((x) => x !== id) : [...lista, id]);
-  const r = resultado.data;
+  // o resultado com a comparação ao lado (só quando as duas consultas são do mesmo relatório)
+  const base = resultado.data;
+  const r = useMemo(
+    () => (comparando && base && comparado.data && mesmasColunas(base, comparado.data) ? juntarComparacao(base, comparado.data, gruposDe(base)) : base),
+    [comparando, base, comparado.data],
+  );
   // gráfico: num resumo com grupos, a primeira coluna de valores por grupo (até 60 grupos)
   const graficoPossivel = modo === "resumo" && agrupar.length > 0 && !!r && r.colunas.slice(agrupar.length).some((c) => c.tipo === "dinheiro" || c.tipo === "numero");
   const serie = useMemo(() => {
@@ -367,22 +392,48 @@ export default function ConstrutorRelatorios() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div className="space-y-4">
           <Card className="space-y-3 p-4">
-            {!!modelos.data?.length && (
+            {(!!modelos.data?.length || prontos.length > 0) && (
               <Field label="Modelo">
-                <Select value={modeloId ?? ""} onChange={(e) => abrirModelo(e.target.value ? Number(e.target.value) : null)}>
+                <Select
+                  value={modeloId ? String(modeloId) : prontoId ? `pronto:${prontoId}` : ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v.startsWith("pronto:")) abrirPronto(v.slice(7));
+                    else abrirModelo(v ? Number(v) : null);
+                  }}
+                >
                   <option value="">— Relatório novo —</option>
-                  {modelos.data.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.nome}
-                      {m.partilhado ? " (partilhado)" : ""}
-                      {!m.meu && m.dono ? ` · ${m.dono}` : ""}
-                    </option>
-                  ))}
+                  {!!modelos.data?.length && (
+                    <optgroup label="Guardados">
+                      {modelos.data.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.nome}
+                          {m.partilhado ? " (partilhado)" : ""}
+                          {!m.meu && m.dono ? ` · ${m.dono}` : ""}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {prontos.length > 0 && (
+                    <optgroup label="Prontos">
+                      {prontos.map((p) => (
+                        <option key={p.id} value={`pronto:${p.id}`}>
+                          {p.nome}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </Select>
               </Field>
             )}
             <Field label="Fonte de dados">
-              <Select value={fonte?.id ?? ""} onChange={(e) => setFonteId(e.target.value)}>
+              <Select
+                value={fonte?.id ?? ""}
+                onChange={(e) => {
+                  setProntoId(null);
+                  setFonteId(e.target.value);
+                }}
+              >
                 {fontes.data?.map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.rotulo}
@@ -424,6 +475,28 @@ export default function ConstrutorRelatorios() {
                     />
                   </Field>
                 </div>
+                {modo === "resumo" && (
+                  <Field
+                    label="Comparar com"
+                    hint={
+                      !comparar
+                        ? undefined
+                        : agrupar.some(temporal)
+                          ? "Para comparar, agrupe por um campo que não seja data, mês ou ano (por exemplo, família ou cliente)."
+                          : outro
+                            ? `${data(outro[0])} a ${data(outro[1])}`
+                            : undefined
+                    }
+                  >
+                    <Select value={comparar} onChange={(e) => setComparar(e.target.value as Comparar)}>
+                      {COMPARACOES.map(([c, nome]) => (
+                        <option key={c} value={c}>
+                          {nome}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                )}
               </>
             )}
             <Segmentado
@@ -625,7 +698,7 @@ export default function ConstrutorRelatorios() {
               <BarChart dados={serie.pontos} formatar={serie.formatar} altura={340} />
             </div>
           ) : (
-            <Grelha r={r} aCarregar={resultado.isLoading} ordenar={ordenar} onOrdenar={aoOrdenar} className="max-h-[calc(100vh-260px)]" />
+            <Grelha r={r} aCarregar={resultado.isLoading} ordenar={ordenar} onOrdenar={aoOrdenar} ordenavel={(id) => !colunaComparada(id)} className="max-h-[calc(100vh-260px)]" />
           )}
         </Card>
       </div>
@@ -746,3 +819,12 @@ function GuardarModelo({
     </Modal>
   );
 }
+
+/** Quantas colunas de um resumo são grupos: as que vêm antes do primeiro agregado («contar» ou «função:campo»). */
+function gruposDe(r: ResultadoDados) {
+  const i = r.colunas.findIndex((c) => c.id === "contar" || c.id.includes(":"));
+  return i < 0 ? r.colunas.length : i;
+}
+
+/** As duas consultas são do mesmo relatório (enquanto uma se actualiza, a outra pode ainda ser a anterior). */
+const mesmasColunas = (a: ResultadoDados, b: ResultadoDados) => a.colunas.map((c) => c.id).join("|") === b.colunas.map((c) => c.id).join("|");

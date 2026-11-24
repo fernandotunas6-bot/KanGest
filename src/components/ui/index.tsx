@@ -3,7 +3,7 @@
 
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, ChevronsUpDown, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, ChevronRight, ChevronsUpDown, X, type LucideIcon } from "lucide-react";
 import { createContext, forwardRef, useCallback, useContext, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TdHTMLAttributes } from "react";
 import { numero } from "@/lib/format";
 
@@ -408,6 +408,7 @@ export function Stat({
   icon,
   tone = "brand",
   delta,
+  onAnalisar,
 }: {
   label: string;
   value: ReactNode;
@@ -416,12 +417,26 @@ export function Stat({
   tone?: "brand" | "accent" | "danger" | "ok";
   /** variação face ao período anterior (ver Delta) */
   delta?: ReactNode;
+  /** abre o relatório que explica o número: o rótulo passa a ser uma ligação */
+  onAnalisar?: () => void;
 }) {
   const t = { brand: "bg-brand-50 text-brand", accent: "bg-accent-50 text-accent-ink", danger: "bg-danger-50 text-danger", ok: "bg-ok-50 text-ok" }[tone];
   return (
     <Card className="min-w-0 p-3.5 sm:p-5">
       <div className="flex items-start justify-between gap-2">
-        <span className="text-[13px] text-ink-2">{label}</span>
+        {onAnalisar ? (
+          <button
+            type="button"
+            onClick={onAnalisar}
+            title="Ver o detalhe no construtor de relatórios"
+            className="group/kpi inline-flex items-center gap-0.5 rounded text-left text-[13px] text-ink-2 transition hover:text-ink"
+          >
+            {label}
+            <ChevronRight className="size-3.5 shrink-0 opacity-40 transition group-hover/kpi:translate-x-0.5 group-hover/kpi:opacity-100" />
+          </button>
+        ) : (
+          <span className="text-[13px] text-ink-2">{label}</span>
+        )}
         {icon && <span className={cn("rounded-lg p-1.5", t)}>{icon}</span>}
       </div>
       <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">

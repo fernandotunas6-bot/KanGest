@@ -14,6 +14,7 @@ export function Grelha({
   aCarregar,
   ordenar,
   onOrdenar,
+  ordenavel,
   className,
 }: {
   r?: ResultadoDados;
@@ -21,6 +22,8 @@ export function Grelha({
   ordenar: OrdemDados[];
   /** campo e se junta à ordenação actual (Shift) em vez de a substituir */
   onOrdenar?: (campo: string, juntar: boolean) => void;
+  /** as colunas que se podem ordenar (por omissão, todas); as da comparação de períodos não vêm do motor */
+  ordenavel?: (id: string) => boolean;
   className?: string;
 }) {
   if (!r && !aCarregar) return null;
@@ -44,7 +47,7 @@ export function Grelha({
                     alinhaDireita(c.tipo) && "text-right",
                   )}
                 >
-                  {onOrdenar ? (
+                  {onOrdenar && (!ordenavel || ordenavel(c.id)) ? (
                     <button
                       type="button"
                       onClick={(e: MouseEvent) => onOrdenar(c.id, e.shiftKey)}
@@ -68,7 +71,14 @@ export function Grelha({
           {r?.linhas.map((l, n) => (
             <tr key={n} className="hover:bg-sunken/60">
               {l.map((v, i) => (
-                <Td key={i} className={cn(alinhaDireita(colunas[i].tipo) && "num text-right", typeof v === "number" && v < 0 && colunas[i].tipo === "dinheiro" && "text-danger")}>
+                <Td
+                  key={i}
+                  className={cn(
+                    alinhaDireita(colunas[i].tipo) && "num text-right",
+                    typeof v === "number" && v < 0 && (colunas[i].tipo === "dinheiro" || colunas[i].tipo === "percentagem") && "text-danger",
+                    typeof v === "number" && v > 0 && colunas[i].tipo === "percentagem" && "text-ok",
+                  )}
+                >
                   {mostrar(v, colunas[i].tipo)}
                 </Td>
               ))}
