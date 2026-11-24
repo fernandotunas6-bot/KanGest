@@ -1474,7 +1474,7 @@ pub async fn emitir(st: &AppState, i: EmitirIn) -> AppResult<Value> {
         _ => None,
     };
     let aprovacao = match regra {
-        Some((r, nome)) => super::aprovacoes::exigir(st, r, total, Some(&data_doc), format!("{nome} de {}", agt::total_fmt(total)), i.autorizacao_pin.as_deref()).await?,
+        Some((r, nome)) => super::aprovacoes::exigir(st, r, total, Some(&data_doc), format!("{nome} de {}", super::aprovacoes::kz(total)), i.autorizacao_pin.as_deref()).await?,
         None => None,
     };
     if let Some(a) = &aprovacao {
@@ -2128,7 +2128,7 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
         super::aprovacoes::Regra::Anular,
         total_doc,
         Some(&row.get::<String, _>("data_emissao")),
-        format!("Anular {numero} ({})", agt::total_fmt(total_doc)),
+        format!("Anular {numero} ({})", super::aprovacoes::kz(total_doc)),
         a.autorizacao_pin.as_deref(),
     )
     .await?;

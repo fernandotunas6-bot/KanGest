@@ -268,7 +268,7 @@ pub async fn movimento(st: &AppState, m: MovIn) -> AppResult<Value> {
             super::aprovacoes::Regra::Vales,
             valor,
             None,
-            format!("Vale de caixa de {} ({descricao})", crate::agt::total_fmt(valor)),
+            format!("Vale de caixa de {} ({descricao})", super::aprovacoes::kz(valor)),
             m.autorizacao_pin.as_deref(),
         )
         .await?

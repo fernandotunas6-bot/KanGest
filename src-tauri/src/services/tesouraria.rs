@@ -251,7 +251,7 @@ pub async fn movimento(st: &AppState, m: MovimentoIn) -> AppResult<Value> {
             super::aprovacoes::Regra::Saidas,
             m.valor,
             Some(&data),
-            format!("Saída de tesouraria de {} ({})", crate::agt::total_fmt(m.valor), m.descricao.trim()),
+            format!("Saída de tesouraria de {} ({})", super::aprovacoes::kz(m.valor), m.descricao.trim()),
             m.autorizacao_pin.as_deref(),
         )
         .await?

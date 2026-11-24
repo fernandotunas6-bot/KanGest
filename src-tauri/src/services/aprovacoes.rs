@@ -62,6 +62,20 @@ impl Regra {
     }
 }
 
+/// Cêntimos como o ecrã os mostra («20 000,00 Kz»), para o pedido de PIN e o registo.
+pub fn kz(c: i64) -> String {
+    let v = c.unsigned_abs();
+    let inteiros = (v / 100).to_string();
+    let mut agrupado = String::new();
+    for (i, d) in inteiros.chars().enumerate() {
+        if i > 0 && (inteiros.len() - i) % 3 == 0 {
+            agrupado.push('\u{a0}');
+        }
+        agrupado.push(d);
+    }
+    format!("{}{agrupado},{:02}\u{a0}Kz", if c < 0 { "−" } else { "" }, v % 100)
+}
+
 /// Uma aprovação dada com o PIN, por gravar na transacção da operação ([`registar`]).
 #[derive(Debug)]
 pub struct Aprovacao {
@@ -243,6 +257,13 @@ mod testes {
     /// errado e o de quem não a tem são recusados); quem a tem aprova com o próprio PIN; abaixo do valor mínimo e nas
     /// entradas não se pede nada; a anulação «só de dias anteriores» deixa passar as de hoje; cada aprovação fica
     /// registada com quem pediu e quem aprovou; não se liga uma regra que ninguém possa aprovar.
+    #[test]
+    fn valores_como_no_ecra() {
+        assert_eq!(kz(2_000_000), "20\u{a0}000,00\u{a0}Kz");
+        assert_eq!(kz(5), "0,05\u{a0}Kz");
+        assert_eq!(kz(123_456_789), "1\u{a0}234\u{a0}567,89\u{a0}Kz");
+    }
+
     #[tokio::test]
     async fn regras_de_aprovacao() {
         let pasta = std::env::temp_dir().join(format!("kangest-aprovacoes-{}", std::process::id()));

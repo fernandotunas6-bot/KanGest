@@ -196,7 +196,7 @@ pub async fn devolver(st: &AppState, d: DevolverIn) -> AppResult<Value> {
             super::aprovacoes::Regra::Saidas,
             d.valor,
             None,
-            format!("Devolução de {} ({numero}, {})", agt::total_fmt(d.valor), doc.get::<String, _>("entidade_nome")),
+            format!("Devolução de {} ({numero}, {})", super::aprovacoes::kz(d.valor), doc.get::<String, _>("entidade_nome")),
             d.autorizacao_pin.as_deref(),
         )
         .await?
@@ -285,7 +285,7 @@ pub async fn regularizar(st: &AppState, r: RegularizarIn) -> AppResult<Value> {
         super::aprovacoes::Regra::Creditos,
         r.valor,
         None,
-        format!("Regularização de conta corrente de {} ({})", agt::total_fmt(r.valor), r.justificacao.trim()),
+        format!("Regularização de conta corrente de {} ({})", super::aprovacoes::kz(r.valor), r.justificacao.trim()),
         r.autorizacao_pin.as_deref(),
     )
     .await?;
