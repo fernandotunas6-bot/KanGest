@@ -30,6 +30,7 @@ import Relatorios from "@/pages/Relatorios";
 import ConstrutorRelatorios from "@/pages/ConstrutorRelatorios";
 import QualidadeDados from "@/pages/QualidadeDados";
 import FechoPeriodos from "@/pages/FechoPeriodos";
+import ConciliacaoBancaria from "@/pages/ConciliacaoBancaria";
 import Configuracoes from "@/pages/Configuracoes";
 import Tesouraria from "@/pages/Tesouraria";
 import TesourariaConfig from "@/pages/TesourariaConfig";
@@ -229,6 +230,7 @@ function Principal() {
         <Route path="/inventario" element={<Inventario />} />
         <Route path="/tesouraria" element={<Tesouraria />} />
         <Route path="/tesouraria/configuracao" element={<TesourariaConfig />} />
+        <Route path="/tesouraria/conciliacao" element={<ConciliacaoBancaria />} />
         <Route path="/contas/:tipo" element={<Contas />} />
         <Route path="/avisos" element={<AvisoVencimento />} />
         <Route path="/importar" element={<Importar />} />
