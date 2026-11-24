@@ -6,5 +6,7 @@
 
 mod consulta;
 mod fontes;
+mod modelos;
 
 pub use consulta::{consultar, fontes_listar};
+pub use modelos::{eliminar as modelo_eliminar, guardar as modelo_guardar, listar as modelos_listar};
