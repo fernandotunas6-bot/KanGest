@@ -612,6 +612,17 @@ pub fn qr_escpos(dados: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod testes_impressoras {
+    /// No Windows (CI): o spooler liga-se (winspool) e uma impressora que não existe dá uma mensagem clara; a fila
+    /// recusa sem tentar partilhas inventadas.
+    #[cfg(windows)]
+    #[test]
+    fn spooler_do_windows() {
+        let e = super::spooler::raw("KanGest impressora que não existe", b"teste").unwrap_err();
+        assert!(e.contains("não existe uma impressora"), "{e}");
+        let e = super::fila("KanGest impressora que não existe", b"teste").unwrap_err().to_string();
+        assert!(e.contains("Confirme o nome da impressora"), "{e}");
+    }
+
     #[test]
     fn nomes_com_espacos_no_windows() {
         let win = "EPSON TM-T20II Receipt\r\nMicrosoft Print to PDF\r\n\r\n";
