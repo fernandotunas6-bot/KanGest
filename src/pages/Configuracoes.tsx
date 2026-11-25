@@ -525,7 +525,7 @@ function Postos() {
                             ? "Porta local: ex. \\\\.\\COM3 ou LPT1"
                             : "Dispositivo: ex. /dev/usb/lp0"
                           : termica.data?.sistema === "windows"
-                            ? "Nome da partilha da impressora no Windows (partilhe a impressora com um nome sem espaços)"
+                            ? "Nome da impressora como aparece no Windows (não é preciso partilhá-la); ou \\\\computador\\partilha"
                             : "Nome da fila de impressão (CUPS)"
                     }
                   >

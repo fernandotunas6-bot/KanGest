@@ -672,9 +672,93 @@ fn rede(destino: &str, bytes: &[u8]) -> AppResult<()> {
     Ok(())
 }
 
+/// Spooler do Windows (winspool): o talão vai em RAW para a impressora pelo nome, como o KIGEST, sem precisar de a
+/// partilhar. Só as funções de que precisamos, declaradas aqui (sem bibliotecas novas).
+#[cfg(windows)]
+mod spooler {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    struct DocInfo1 {
+        nome: *const u16,
+        ficheiro: *const u16,
+        tipo: *const u16,
+    }
+
+    #[link(name = "winspool")]
+    extern "system" {
+        fn OpenPrinterW(nome: *const u16, impressora: *mut *mut c_void, predefinicoes: *const c_void) -> i32;
+        fn ClosePrinter(impressora: *mut c_void) -> i32;
+        fn StartDocPrinterW(impressora: *mut c_void, nivel: u32, doc: *const DocInfo1) -> u32;
+        fn EndDocPrinter(impressora: *mut c_void) -> i32;
+        fn StartPagePrinter(impressora: *mut c_void) -> i32;
+        fn EndPagePrinter(impressora: *mut c_void) -> i32;
+        fn WritePrinter(impressora: *mut c_void, dados: *const c_void, tamanho: u32, escritos: *mut u32) -> i32;
+    }
+
+    fn largo(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn ultimo_erro() -> String {
+        std::io::Error::last_os_error().to_string()
+    }
+
+    /// Envia os bytes tal como estão (ESC/POS) para a impressora com este nome no Windows.
+    pub fn raw(nome: &str, bytes: &[u8]) -> Result<(), String> {
+        let nome_w = largo(nome);
+        let doc = largo("KanGest - talão");
+        let tipo = largo("RAW");
+        // SAFETY: as strings são UTF-16 terminadas em zero e vivem até ao fim da função; a impressora fecha-se sempre.
+        unsafe {
+            let mut h: *mut c_void = std::ptr::null_mut();
+            if OpenPrinterW(nome_w.as_ptr(), &mut h, std::ptr::null()) == 0 || h.is_null() {
+                return Err(format!("não existe uma impressora «{nome}» neste computador ({})", ultimo_erro()));
+            }
+            let info = DocInfo1 { nome: doc.as_ptr(), ficheiro: std::ptr::null(), tipo: tipo.as_ptr() };
+            let r = (|| {
+                if StartDocPrinterW(h, 1, &info) == 0 {
+                    return Err(format!("a impressora recusou o documento ({})", ultimo_erro()));
+                }
+                let mut ok = StartPagePrinter(h) != 0;
+                let mut escritos = 0u32;
+                if ok {
+                    ok = WritePrinter(h, bytes.as_ptr().cast(), bytes.len() as u32, &mut escritos) != 0 && escritos as usize == bytes.len();
+                    EndPagePrinter(h);
+                }
+                let erro = if ok { None } else { Some(ultimo_erro()) };
+                EndDocPrinter(h);
+                match erro {
+                    None => Ok(()),
+                    Some(e) => Err(format!("falha a enviar o talão ({e})")),
+                }
+            })();
+            ClosePrinter(h);
+            r
+        }
+    }
+}
+
 #[cfg(windows)]
 fn fila(destino: &str, bytes: &[u8]) -> AppResult<()> {
-    // No Windows o caminho sem drivers para enviar bytes crus é copiar para a partilha da impressora.
+    // Pelo nome da impressora (spooler, RAW), sem precisar de a partilhar. Um caminho \\computador\partilha, ou o
+    // spooler a recusar, segue pela partilha como antes.
+    let mut motivo = None;
+    if !destino.starts_with("\\\\") {
+        match spooler::raw(destino, bytes) {
+            Ok(()) => return Ok(()),
+            Err(e) => motivo = Some(e),
+        }
+    }
+    partilha(destino, bytes).map_err(|e| match motivo {
+        Some(m) => AppError::msg(format!("A impressora «{destino}» não aceitou o talão: {m}. Confirme o nome da impressora em Configurar posto.")),
+        None => e,
+    })
+}
+
+/// Copia o talão para a partilha da impressora (`\\localhost\nome` ou `\\computador\nome`).
+#[cfg(windows)]
+fn partilha(destino: &str, bytes: &[u8]) -> AppResult<()> {
     let tmp = std::env::temp_dir().join(format!("kigest-talao-{}.prn", std::process::id()));
     std::fs::write(&tmp, bytes).map_err(|e| AppError::msg(format!("Não foi possível gravar o talão: {e}")))?;
     let alvo = if destino.starts_with("\\\\") { destino.to_string() } else { format!("\\\\localhost\\{destino}") };
