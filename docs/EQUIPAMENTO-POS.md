@@ -90,7 +90,7 @@ Em **Impressora térmica (ESC/POS) e gaveta**, active «Imprimir directamente»:
 
 | Ligação | Destino |
 |---|---|
-| Fila de impressão local | Windows: nome da partilha da impressora (partilhe-a com um nome sem espaços, ex. `POS80`). macOS: nome da fila. |
+| Fila de impressão local | Windows: o nome da impressora como aparece em Impressoras e scanners (ex. `POS80`). O talão vai em RAW pelo spooler, sem precisar de partilhar a impressora; um caminho `\\computador\partilha` usa a partilha. macOS: nome da fila. |
 | Impressora de rede | Endereço IP (porta 9100), ex. `192.168.1.50` |
 | Porta / dispositivo | `\\.\COM3`, `LPT1` ou `/dev/usb/lp0` |
 

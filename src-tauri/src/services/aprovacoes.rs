@@ -289,10 +289,14 @@ mod testes {
         rpc(&st, "documentos.emitir", json!({ "tipo": "FT", "entidade_id": cli, "linhas": [{ "artigo_id": art, "quantidade": 1 }] })).await;
         let banco: i64 = sqlx::query_scalar("SELECT id FROM contas ORDER BY id LIMIT 1").fetch_one(&st.pool).await.unwrap();
 
-        // desligadas: o operador anula sem PIN
+        // só o administrador anula facturas, mesmo com a permissão de anular; desligadas as regras, anula sem PIN
         rpc(&st, "auth.login", json!({ "login": "op", "senha": "op12345" })).await;
-        rpc(&st, "documentos.anular", json!({ "id": fr1, "motivo": "venda em duplicado" })).await;
+        assert!(erro(&st, "documentos.anular", json!({ "id": fr1, "motivo": "venda em duplicado" })).await.contains("Só o administrador"));
         assert!(erro(&st, "aprovacoes.guardar", json!({ "regra": "anular", "ativo": true })).await.contains("permissão"), "o operador não mexe nas regras");
+        rpc(&st, "auth.login", json!({ "login": "gestora", "senha": "ge12345" })).await;
+        assert!(erro(&st, "documentos.anular", json!({ "id": fr1, "motivo": "venda em duplicado" })).await.contains("Só o administrador"), "nem o gestor");
+        rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
+        rpc(&st, "documentos.anular", json!({ "id": fr1, "motivo": "venda em duplicado" })).await;
 
         // o administrador liga as quatro (saídas e vales a partir de 1 000,00 Kz; créditos de qualquer valor)
         rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
@@ -305,14 +309,14 @@ mod testes {
         let nomes: Vec<&str> = anular["aprovadores"].as_array().unwrap().iter().map(|a| a["nome"].as_str().unwrap()).collect();
         assert_eq!(nomes, ["Admin", "Gestora"], "o operador não aprova: {anular}");
 
-        // anular: sem PIN pede-o; PIN errado e PIN de quem não aprova são recusados; o do administrador aprova
-        rpc(&st, "auth.login", json!({ "login": "op", "senha": "op12345" })).await;
+        // anular (só o administrador): sem PIN pede-o; PIN errado e PIN de quem não aprova são recusados; o próprio aprova
         let anular2 = json!({ "id": fr2, "motivo": "cliente desistiu" });
         let e = erro(&st, "documentos.anular", anular2.clone()).await;
         assert!(e.contains(PEDE_PIN) && e.contains("FR "), "{e}");
         assert!(erro(&st, "documentos.anular", com_pin(anular2.clone(), "9999")).await.contains("PIN de autorização inválido"));
         assert!(erro(&st, "documentos.anular", com_pin(anular2.clone(), "1111")).await.contains("não tem permissão"));
         rpc(&st, "documentos.anular", com_pin(anular2, "4321")).await;
+        rpc(&st, "auth.login", json!({ "login": "op", "senha": "op12345" })).await;
 
         // saídas: abaixo do mínimo e entradas passam; acima pede o PIN
         let mov = |tipo: &str, valor: i64| json!({ "tipo": tipo, "conta_id": banco, "valor": valor, "descricao": "Despesa" });
@@ -344,7 +348,6 @@ mod testes {
         // anular só os de dias anteriores: a de hoje passa sem PIN
         rpc(&st, "auth.login", json!({ "login": "admin", "senha": "1234" })).await;
         rpc(&st, "aprovacoes.guardar", json!({ "regra": "anular", "ativo": true, "so_dias_anteriores": true })).await;
-        rpc(&st, "auth.login", json!({ "login": "op", "senha": "op12345" })).await;
         rpc(&st, "documentos.anular", json!({ "id": fr4, "motivo": "venda registada por engano" })).await;
 
         // o registo: quem pediu, quem aprovou, o quê
@@ -358,7 +361,7 @@ mod testes {
             .map(|a| (a["regra"].as_str().unwrap().into(), a["pedido_por"].as_str().unwrap().into(), a["aprovado_por"].as_str().unwrap().into(), a["valor"].as_i64().unwrap()))
             .collect();
         let esperado: Vec<(String, String, String, i64)> = [
-            ("anular", "Operador", "Admin", 114_000),
+            ("anular", "Admin", "Admin", 114_000),
             ("saidas", "Operador", "Gestora", 150_000),
             ("vales", "Operador", "Gestora", 120_000),
             ("creditos", "Operador", "Admin", 114_000),

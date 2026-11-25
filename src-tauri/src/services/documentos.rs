@@ -2073,6 +2073,17 @@ pub async fn anular(st: &AppState, a: AnularIn) -> AppResult<Value> {
     if row.get::<String, _>("estado") == "A" {
         return Err(AppError::msg("O documento já está anulado."));
     }
+    // facturas, notas de crédito e de débito e recibos: só o administrador anula (decisão do dono, 2026-11-25). Os
+    // pedidos da API de integração ficam de fora: as chaves são do administrador e não há quem escreva.
+    let classe: Option<(String, String)> = sqlx::query_as("SELECT classe, grupo FROM tipos_documento WHERE codigo = ?")
+        .bind(row.get::<String, _>("tipo_codigo"))
+        .fetch_optional(&mut *tx)
+        .await?;
+    let fiscal = classe.is_some_and(|(c, g)| g == "VENDAS" && matches!(c.as_str(), "VENDA" | "RECIBO"));
+    let escalao = if s.nivel > 0 { s.nivel } else { crate::state::nivel_perfil(&s.perfil) };
+    if fiscal && escalao < 3 && crate::state::contexto().and_then(|c| c.api_chave).is_none() {
+        return Err(AppError::msg("Só o administrador pode anular facturas, notas de crédito ou de débito e recibos."));
+    }
     if row.get::<i64, _>("importado") == 1 {
         return Err(AppError::msg("Os documentos importados do KIGEST não podem ser anulados no sistema novo. Emita uma nota de crédito."));
     }
