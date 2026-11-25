@@ -1,6 +1,6 @@
 {
   "site": "https://kangest.pages.dev",
-  "versao": "1.4.3",
+  "versao": "1.4.5",
   "downloads": {
     "windows": "/actualizacoes/KanGest_{versao}_x64-setup.exe",
     "macArm": "/actualizacoes/KanGest_{versao}_aarch64.dmg",
